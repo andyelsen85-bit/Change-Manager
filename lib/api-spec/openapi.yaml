@@ -53,6 +53,46 @@ paths:
         "401":
           description: Invalid credentials
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /auth/setup-status:
+    get:
+      operationId: getSetupStatus
+      tags: [auth]
+      description: |
+        First-time setup probe. Returns `{ needsSetup: true }` only when the
+        seeded `admin` row exists with no password — i.e. the operator has
+        not yet completed first-time setup. Unauthenticated.
+      responses:
+        "200":
+          description: Setup status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SetupStatus" }
+  /auth/setup:
+    post:
+      operationId: completeSetup
+      tags: [auth]
+      description: |
+        Claim the seeded `admin` account by setting its password. Only valid
+        while `getSetupStatus` reports `needsSetup: true`. On success the
+        response also sets the session and CSRF cookies so the operator is
+        signed in immediately. Returns 409 once setup has already been done.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetupBody" }
+      responses:
+        "200":
+          description: Setup complete; session established
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionUser" }
+        "400":
+          description: Bad request
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "409":
+          description: Setup already completed
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /auth/logout:
     post:
       operationId: logout
@@ -758,6 +798,18 @@ components:
         currentPassword: { type: string }
         newPassword: { type: string }
       required: [currentPassword, newPassword]
+
+    SetupStatus:
+      type: object
+      properties:
+        needsSetup: { type: boolean }
+      required: [needsSetup]
+
+    SetupBody:
+      type: object
+      properties:
+        password: { type: string, minLength: 8 }
+      required: [password]
 
     SessionUser:
       type: object

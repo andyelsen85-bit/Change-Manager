@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -12,23 +12,28 @@ import {
 import { hashPassword } from "./lib/auth";
 import { logger } from "./lib/logger";
 
-// Bootstrap the initial admin password.
+// Bootstrap the initial admin user.
 //
-// Resolution order:
-//   1. INITIAL_ADMIN_PASSWORD env var (>= 8 chars) -> use it.
-//   2. Otherwise -> default to "admin".
+// We deliberately do NOT seed any default password. On first startup the
+// admin row is created with `password_hash = NULL`, which triggers the
+// first-run setup wizard in the web UI: the operator visits the app, lands
+// on /setup, and chooses the admin password themselves. This avoids the
+// security smell of shipping a known default credential.
 //
-// In every case we set must_change_password=true so the user is forced to
-// rotate the credential at first login (enforced by the auth middleware and
-// frontend routing). This matches the documented "admin / admin (change
-// immediately)" experience while still preventing the system from operating
-// with the default credential after the very first login.
-function provisionInitialAdminPassword(): { password: string; mustChange: boolean; source: string } {
+// An operator who wants a fully unattended bootstrap can pre-set the
+// password by exporting `INITIAL_ADMIN_PASSWORD` (>= 8 chars). When that
+// variable is present we create the admin with that password and skip the
+// setup wizard.
+type AdminBootstrap =
+  | { kind: "env"; password: string }
+  | { kind: "setup-required" };
+
+function planAdminBootstrap(): AdminBootstrap {
   const fromEnv = process.env["INITIAL_ADMIN_PASSWORD"];
   if (fromEnv && fromEnv.length >= 8) {
-    return { password: fromEnv, mustChange: true, source: "env:INITIAL_ADMIN_PASSWORD" };
+    return { kind: "env", password: fromEnv };
   }
-  return { password: "admin", mustChange: true, source: "default" };
+  return { kind: "setup-required" };
 }
 
 const ROLES = [
@@ -163,12 +168,14 @@ export async function runSeed(): Promise<void> {
       .onConflictDoNothing();
   }
 
-  // Admin user — bootstrap an initial admin only if no admin exists yet. We never
-  // overwrite an existing admin's password.
+  // Admin user. On first startup we create the row in either:
+  //   (a) "setup required" mode: password_hash=NULL — the operator picks the
+  //       password the first time they visit the app via /setup; or
+  //   (b) preset mode: password_hash from INITIAL_ADMIN_PASSWORD.
+  const plan = planAdminBootstrap();
   const [adminExisting] = await db.select().from(usersTable).where(eq(usersTable.username, "admin"));
   if (!adminExisting) {
-    const { password, mustChange, source } = provisionInitialAdminPassword();
-    const passwordHash = await hashPassword(password);
+    const passwordHash = plan.kind === "env" ? await hashPassword(plan.password) : null;
     await db.insert(usersTable).values({
       username: "admin",
       email: "admin@change-mgmt.local",
@@ -177,18 +184,36 @@ export async function runSeed(): Promise<void> {
       source: "local",
       isAdmin: true,
       isActive: true,
-      mustChangePassword: mustChange,
+      mustChangePassword: false,
     });
-    if (source === "default") {
-      logger.warn(
-        { source },
-        "Seeded admin user with the default password 'admin'. Password rotation is REQUIRED at first login. " +
-          "Set INITIAL_ADMIN_PASSWORD in the environment to skip this default.",
-      );
+    if (plan.kind === "env") {
+      logger.info("Seeded admin user from INITIAL_ADMIN_PASSWORD.");
     } else {
-      logger.info({ source }, "Seeded admin user; password rotation is required at first login.");
+      logger.warn(
+        "Seeded admin user without a password. Visit the web app to complete first-time setup at /setup.",
+      );
     }
+  } else if (plan.kind === "setup-required" && process.env["RESET_ADMIN_PASSWORD"] === "1") {
+    // Opt-in recovery path. If an operator is locked out (e.g. a previous
+    // version of the seed gave the admin a password they never received),
+    // they can set RESET_ADMIN_PASSWORD=1 in the environment and restart
+    // the API. On that restart we clear the admin's password_hash so the
+    // first-time setup wizard at /setup becomes reachable again. The flag
+    // must be removed from the environment after recovery so subsequent
+    // restarts don't keep clearing the password — the seed otherwise
+    // never touches an existing admin row.
+    await db
+      .update(usersTable)
+      .set({ passwordHash: null, mustChangePassword: false })
+      .where(eq(usersTable.id, adminExisting.id));
+    logger.warn(
+      { adminId: adminExisting.id },
+      "RESET_ADMIN_PASSWORD=1 detected: cleared admin password_hash. Visit /setup to claim. REMOVE this env var after recovery.",
+    );
   }
+  // Suppress unused-import warning when the recovery branch is the only
+  // reference to `and` and is conditionally compiled out at runtime.
+  void and;
   // Templates
   const existingTemplates = await db.select().from(standardTemplatesTable);
   if (existingTemplates.length === 0) {
