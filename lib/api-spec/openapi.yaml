@@ -1,36 +1,1346 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: ITIL v4 Change Management API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+  - name: auth
+  - name: users
+  - name: roles
+  - name: changes
+  - name: templates
+  - name: planning
+  - name: testing
+  - name: approvals
+  - name: cab
+  - name: comments
+  - name: dashboard
+  - name: settings
+  - name: audit
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
           content:
             application/json:
+              schema: { $ref: "#/components/schemas/HealthStatus" }
+
+  # ---------- AUTH ----------
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginBody" }
+      responses:
+        "200":
+          description: Logged in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionUser" }
+        "401":
+          description: Invalid credentials
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      responses:
+        "204": { description: Logged out }
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionUser" }
+        "401":
+          description: Not authenticated
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangePasswordBody" }
+      responses:
+        "204": { description: OK }
+        "400": { description: Bad request, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  # ---------- USERS ----------
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      parameters:
+        - { in: query, name: search, schema: { type: string } }
+        - { in: query, name: role, schema: { type: string } }
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+    post:
+      operationId: createUser
+      tags: [users]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateUserBody" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: User
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+    patch:
+      operationId: updateUser
+      tags: [users]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateUserBody" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/User" } } }
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+  /users/{id}/notification-preferences:
+    get:
+      operationId: getNotificationPreferences
+      tags: [users]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Prefs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NotificationPreference" }
+    put:
+      operationId: updateNotificationPreferences
+      tags: [users]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: "#/components/schemas/NotificationPreference" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/NotificationPreference" }
+
+  # ---------- ROLES ----------
+  /roles:
+    get:
+      operationId: listRoles
+      tags: [roles]
+      responses:
+        "200":
+          description: Roles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Role" }
+  /role-assignments:
+    get:
+      operationId: listRoleAssignments
+      tags: [roles]
+      responses:
+        "200":
+          description: Assignments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RoleAssignment" }
+    post:
+      operationId: createRoleAssignment
+      tags: [roles]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateRoleAssignmentBody" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/RoleAssignment" } } }
+  /role-assignments/{id}:
+    delete:
+      operationId: deleteRoleAssignment
+      tags: [roles]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  # ---------- CHANGES ----------
+  /changes:
+    get:
+      operationId: listChanges
+      tags: [changes]
+      parameters:
+        - { in: query, name: status, schema: { type: string } }
+        - { in: query, name: track, schema: { type: string } }
+        - { in: query, name: ownerId, schema: { type: integer } }
+        - { in: query, name: search, schema: { type: string } }
+      responses:
+        "200":
+          description: Changes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ChangeRequest" }
+    post:
+      operationId: createChange
+      tags: [changes]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateChangeBody" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
+  /changes/{id}:
+    get:
+      operationId: getChange
+      tags: [changes]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Change
+          content: { application/json: { schema: { $ref: "#/components/schemas/ChangeDetail" } } }
+    patch:
+      operationId: updateChange
+      tags: [changes]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateChangeBody" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
+    delete:
+      operationId: deleteChange
+      tags: [changes]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+  /changes/{id}/transition:
+    post:
+      operationId: transitionChange
+      tags: [changes]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TransitionBody" } } }
+      responses:
+        "200":
+          description: Transitioned
+          content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
+        "400": { description: Invalid transition, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  # ---------- TEMPLATES ----------
+  /templates:
+    get:
+      operationId: listTemplates
+      tags: [templates]
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StandardTemplate" }
+    post:
+      operationId: createTemplate
+      tags: [templates]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateTemplateBody" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/StandardTemplate" } } }
+  /templates/{id}:
+    get:
+      operationId: getTemplate
+      tags: [templates]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Template
+          content: { application/json: { schema: { $ref: "#/components/schemas/StandardTemplate" } } }
+    patch:
+      operationId: updateTemplate
+      tags: [templates]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateTemplateBody" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/StandardTemplate" } } }
+    delete:
+      operationId: deleteTemplate
+      tags: [templates]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+
+  # ---------- PLANNING ----------
+  /changes/{id}/planning:
+    get:
+      operationId: getPlanning
+      tags: [planning]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Planning
+          content: { application/json: { schema: { $ref: "#/components/schemas/PlanningRecord" } } }
+    put:
+      operationId: upsertPlanning
+      tags: [planning]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpsertPlanningBody" } } }
+      responses:
+        "200":
+          description: Saved
+          content: { application/json: { schema: { $ref: "#/components/schemas/PlanningRecord" } } }
+
+  # ---------- TESTING / PIR ----------
+  /changes/{id}/testing:
+    get:
+      operationId: getTesting
+      tags: [testing]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Testing
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestRecord" } } }
+    put:
+      operationId: upsertTesting
+      tags: [testing]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpsertTestingBody" } } }
+      responses:
+        "200":
+          description: Saved
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestRecord" } } }
+  /changes/{id}/pir:
+    get:
+      operationId: getPir
+      tags: [testing]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: PIR
+          content: { application/json: { schema: { $ref: "#/components/schemas/PirRecord" } } }
+    put:
+      operationId: upsertPir
+      tags: [testing]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpsertPirBody" } } }
+      responses:
+        "200":
+          description: Saved
+          content: { application/json: { schema: { $ref: "#/components/schemas/PirRecord" } } }
+
+  # ---------- APPROVALS ----------
+  /changes/{id}/approvals:
+    get:
+      operationId: listApprovals
+      tags: [approvals]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Approvals
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Approval" }
+  /approvals/{id}/vote:
+    post:
+      operationId: voteApproval
+      tags: [approvals]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/VoteBody" } } }
+      responses:
+        "200":
+          description: Voted
+          content: { application/json: { schema: { $ref: "#/components/schemas/Approval" } } }
+
+  # ---------- CAB ----------
+  /cab-meetings:
+    get:
+      operationId: listCabMeetings
+      tags: [cab]
+      parameters:
+        - { in: query, name: from, schema: { type: string, format: date-time } }
+        - { in: query, name: to, schema: { type: string, format: date-time } }
+        - { in: query, name: kind, schema: { type: string } }
+      responses:
+        "200":
+          description: Meetings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CabMeeting" }
+    post:
+      operationId: createCabMeeting
+      tags: [cab]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateCabMeetingBody" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/CabMeeting" } } }
+  /cab-meetings/{id}:
+    get:
+      operationId: getCabMeeting
+      tags: [cab]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Meeting
+          content: { application/json: { schema: { $ref: "#/components/schemas/CabMeetingDetail" } } }
+    patch:
+      operationId: updateCabMeeting
+      tags: [cab]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateCabMeetingBody" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/CabMeeting" } } }
+    delete:
+      operationId: deleteCabMeeting
+      tags: [cab]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Deleted }
+  /cab-meetings/{id}/ics:
+    get:
+      operationId: getCabMeetingIcs
+      tags: [cab]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: ICS calendar invite
+          content:
+            text/calendar:
+              schema: { type: string }
+  /cab-meetings/{id}/send-invites:
+    post:
+      operationId: sendCabInvites
+      tags: [cab]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "204": { description: Invites sent }
+
+  # ---------- COMMENTS ----------
+  /changes/{id}/comments:
+    get:
+      operationId: listComments
+      tags: [comments]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Comment" }
+    post:
+      operationId: createComment
+      tags: [comments]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/CreateCommentBody" } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { $ref: "#/components/schemas/Comment" } } }
+
+  # ---------- DASHBOARD ----------
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      responses:
+        "200":
+          description: Summary
+          content: { application/json: { schema: { $ref: "#/components/schemas/DashboardSummary" } } }
+  /dashboard/activity:
+    get:
+      operationId: getDashboardActivity
+      tags: [dashboard]
+      responses:
+        "200":
+          description: Activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ActivityItem" }
+  /dashboard/upcoming-cab:
+    get:
+      operationId: getUpcomingCab
+      tags: [dashboard]
+      responses:
+        "200":
+          description: Upcoming
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/CabMeeting" }
+  /dashboard/my-tasks:
+    get:
+      operationId: getMyTasks
+      tags: [dashboard]
+      responses:
+        "200":
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TaskItem" }
+
+  # ---------- SETTINGS ----------
+  /settings/smtp:
+    get:
+      operationId: getSmtpSettings
+      tags: [settings]
+      responses:
+        "200":
+          description: SMTP
+          content: { application/json: { schema: { $ref: "#/components/schemas/SmtpSettings" } } }
+    put:
+      operationId: updateSmtpSettings
+      tags: [settings]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/SmtpSettings" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/SmtpSettings" } } }
+  /settings/smtp/test:
+    post:
+      operationId: testSmtp
+      tags: [settings]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TestEmailBody" } } }
+      responses:
+        "200":
+          description: Result
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestResult" } } }
+  /settings/ldap:
+    get:
+      operationId: getLdapSettings
+      tags: [settings]
+      responses:
+        "200":
+          description: LDAP
+          content: { application/json: { schema: { $ref: "#/components/schemas/LdapSettings" } } }
+    put:
+      operationId: updateLdapSettings
+      tags: [settings]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/LdapSettings" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/LdapSettings" } } }
+  /settings/ldap/test:
+    post:
+      operationId: testLdap
+      tags: [settings]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/TestLdapBody" } } }
+      responses:
+        "200":
+          description: Result
+          content: { application/json: { schema: { $ref: "#/components/schemas/TestResult" } } }
+  /settings/ssl:
+    get:
+      operationId: getSslSettings
+      tags: [settings]
+      responses:
+        "200":
+          description: SSL
+          content: { application/json: { schema: { $ref: "#/components/schemas/SslSettings" } } }
+    put:
+      operationId: updateSslSettings
+      tags: [settings]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/UpdateSslBody" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/SslSettings" } } }
+  /settings/workflow-timeouts:
+    get:
+      operationId: getWorkflowTimeouts
+      tags: [settings]
+      responses:
+        "200":
+          description: Timeouts
+          content: { application/json: { schema: { $ref: "#/components/schemas/WorkflowTimeouts" } } }
+    put:
+      operationId: updateWorkflowTimeouts
+      tags: [settings]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/WorkflowTimeouts" } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { $ref: "#/components/schemas/WorkflowTimeouts" } } }
+
+  # ---------- AUDIT ----------
+  /audit-log:
+    get:
+      operationId: listAuditLog
+      tags: [audit]
+      parameters:
+        - { in: query, name: actorId, schema: { type: integer } }
+        - { in: query, name: action, schema: { type: string } }
+        - { in: query, name: entityType, schema: { type: string } }
+        - { in: query, name: entityId, schema: { type: integer } }
+        - { in: query, name: from, schema: { type: string, format: date-time } }
+        - { in: query, name: to, schema: { type: string, format: date-time } }
+        - { in: query, name: limit, schema: { type: integer } }
+        - { in: query, name: offset, schema: { type: integer } }
+      responses:
+        "200":
+          description: Entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AuditEntry" }
+        "403": { description: Forbidden, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /audit-log/export:
+    get:
+      operationId: exportAuditLog
+      tags: [audit]
+      parameters:
+        - { in: query, name: actorId, schema: { type: integer } }
+        - { in: query, name: action, schema: { type: string } }
+        - { in: query, name: entityType, schema: { type: string } }
+        - { in: query, name: from, schema: { type: string, format: date-time } }
+        - { in: query, name: to, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: CSV
+          content:
+            text/csv:
+              schema: { type: string }
+        "403": { description: Forbidden, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
 components:
   schemas:
     HealthStatus:
       type: object
       properties:
-        status:
-          type: string
-      required:
-        - status
+        status: { type: string }
+      required: [status]
 
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+      required: [error]
+
+    LoginBody:
+      type: object
+      properties:
+        username: { type: string }
+        password: { type: string }
+      required: [username, password]
+
+    ChangePasswordBody:
+      type: object
+      properties:
+        currentPassword: { type: string }
+        newPassword: { type: string }
+      required: [currentPassword, newPassword]
+
+    SessionUser:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        source: { type: string, enum: [local, ldap] }
+        roles:
+          type: array
+          items: { type: string }
+        isAdmin: { type: boolean }
+      required: [id, username, email, fullName, source, roles, isAdmin]
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        source: { type: string, enum: [local, ldap] }
+        isActive: { type: boolean }
+        isAdmin: { type: boolean }
+        deputyUserId: { type: ["integer", "null"] }
+        deputyUserName: { type: ["string", "null"] }
+        roles:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, username, email, fullName, source, isActive, isAdmin, roles, createdAt]
+
+    CreateUserBody:
+      type: object
+      properties:
+        username: { type: string }
+        email: { type: string }
+        fullName: { type: string }
+        password: { type: ["string", "null"] }
+        source: { type: string, enum: [local, ldap] }
+        isAdmin: { type: boolean }
+        deputyUserId: { type: ["integer", "null"] }
+        roles:
+          type: array
+          items: { type: string }
+      required: [username, email, fullName, source]
+
+    UpdateUserBody:
+      type: object
+      properties:
+        email: { type: string }
+        fullName: { type: string }
+        isActive: { type: boolean }
+        isAdmin: { type: boolean }
+        password: { type: ["string", "null"] }
+        deputyUserId: { type: ["integer", "null"] }
+        roles:
+          type: array
+          items: { type: string }
+
+    NotificationPreference:
+      type: object
+      properties:
+        eventKey: { type: string }
+        emailEnabled: { type: boolean }
+        inAppEnabled: { type: boolean }
+      required: [eventKey, emailEnabled, inAppEnabled]
+
+    Role:
+      type: object
+      properties:
+        key: { type: string }
+        name: { type: string }
+        description: { type: string }
+        allowsDeputy: { type: boolean }
+      required: [key, name, description, allowsDeputy]
+
+    RoleAssignment:
+      type: object
+      properties:
+        id: { type: integer }
+        roleKey: { type: string }
+        userId: { type: integer }
+        userName: { type: string }
+        isDeputy: { type: boolean }
+        primaryAssignmentId: { type: ["integer", "null"] }
+      required: [id, roleKey, userId, userName, isDeputy]
+
+    CreateRoleAssignmentBody:
+      type: object
+      properties:
+        roleKey: { type: string }
+        userId: { type: integer }
+        isDeputy: { type: boolean }
+        primaryAssignmentId: { type: ["integer", "null"] }
+      required: [roleKey, userId, isDeputy]
+
+    ChangeRequest:
+      type: object
+      properties:
+        id: { type: integer }
+        ref: { type: string }
+        title: { type: string }
+        description: { type: string }
+        track: { type: string, enum: [normal, standard, emergency] }
+        status: { type: string }
+        risk: { type: string, enum: [low, medium, high] }
+        impact: { type: string, enum: [low, medium, high] }
+        priority: { type: string, enum: [low, medium, high, critical] }
+        category: { type: string }
+        ownerId: { type: integer }
+        ownerName: { type: string }
+        assigneeId: { type: ["integer", "null"] }
+        assigneeName: { type: ["string", "null"] }
+        templateId: { type: ["integer", "null"] }
+        templateName: { type: ["string", "null"] }
+        plannedStart: { type: ["string", "null"], format: date-time }
+        plannedEnd: { type: ["string", "null"], format: date-time }
+        actualStart: { type: ["string", "null"], format: date-time }
+        actualEnd: { type: ["string", "null"], format: date-time }
+        cabMeetingId: { type: ["integer", "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [id, ref, title, description, track, status, risk, impact, priority, category, ownerId, ownerName, createdAt, updatedAt]
+
+    ChangeDetail:
+      allOf:
+        - $ref: "#/components/schemas/ChangeRequest"
+        - type: object
+          properties:
+            planning: { $ref: "#/components/schemas/PlanningRecord" }
+            testing: { $ref: "#/components/schemas/TestRecord" }
+            pir: { $ref: "#/components/schemas/PirRecord" }
+            approvals:
+              type: array
+              items: { $ref: "#/components/schemas/Approval" }
+            comments:
+              type: array
+              items: { $ref: "#/components/schemas/Comment" }
+
+    CreateChangeBody:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        track: { type: string, enum: [normal, standard, emergency] }
+        risk: { type: string, enum: [low, medium, high] }
+        impact: { type: string, enum: [low, medium, high] }
+        priority: { type: string, enum: [low, medium, high, critical] }
+        category: { type: string }
+        templateId: { type: ["integer", "null"] }
+        assigneeId: { type: ["integer", "null"] }
+        plannedStart: { type: ["string", "null"], format: date-time }
+        plannedEnd: { type: ["string", "null"], format: date-time }
+      required: [title, description, track, risk, impact, priority, category]
+
+    UpdateChangeBody:
+      type: object
+      properties:
+        title: { type: string }
+        description: { type: string }
+        risk: { type: string, enum: [low, medium, high] }
+        impact: { type: string, enum: [low, medium, high] }
+        priority: { type: string, enum: [low, medium, high, critical] }
+        category: { type: string }
+        assigneeId: { type: ["integer", "null"] }
+        plannedStart: { type: ["string", "null"], format: date-time }
+        plannedEnd: { type: ["string", "null"], format: date-time }
+        cabMeetingId: { type: ["integer", "null"] }
+
+    TransitionBody:
+      type: object
+      properties:
+        toStatus: { type: string }
+        note: { type: ["string", "null"] }
+      required: [toStatus]
+
+    StandardTemplate:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        risk: { type: string, enum: [low, medium, high] }
+        impact: { type: string, enum: [low, medium, high] }
+        autoApprove: { type: boolean }
+        bypassCab: { type: boolean }
+        defaultPriority: { type: string, enum: [low, medium, high, critical] }
+        prefilledPlanning: { type: ["string", "null"] }
+        prefilledTestPlan: { type: ["string", "null"] }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+      required: [id, name, description, category, risk, impact, autoApprove, bypassCab, defaultPriority, isActive, createdAt]
+
+    CreateTemplateBody:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        risk: { type: string, enum: [low, medium, high] }
+        impact: { type: string, enum: [low, medium, high] }
+        autoApprove: { type: boolean }
+        bypassCab: { type: boolean }
+        defaultPriority: { type: string, enum: [low, medium, high, critical] }
+        prefilledPlanning: { type: ["string", "null"] }
+        prefilledTestPlan: { type: ["string", "null"] }
+      required: [name, description, category, risk, impact, autoApprove, bypassCab, defaultPriority]
+
+    UpdateTemplateBody:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        category: { type: string }
+        risk: { type: string, enum: [low, medium, high] }
+        impact: { type: string, enum: [low, medium, high] }
+        autoApprove: { type: boolean }
+        bypassCab: { type: boolean }
+        defaultPriority: { type: string, enum: [low, medium, high, critical] }
+        prefilledPlanning: { type: ["string", "null"] }
+        prefilledTestPlan: { type: ["string", "null"] }
+        isActive: { type: boolean }
+
+    PlanningRecord:
+      type: object
+      properties:
+        changeId: { type: integer }
+        scope: { type: string }
+        implementationPlan: { type: string }
+        rollbackPlan: { type: string }
+        riskAssessment: { type: string }
+        impactedServices: { type: string }
+        communicationsPlan: { type: string }
+        successCriteria: { type: string }
+        signedOff: { type: boolean }
+        signedOffAt: { type: ["string", "null"], format: date-time }
+        signedOffBy: { type: ["string", "null"] }
+      required: [changeId, scope, implementationPlan, rollbackPlan, riskAssessment, impactedServices, communicationsPlan, successCriteria, signedOff]
+
+    UpsertPlanningBody:
+      type: object
+      properties:
+        scope: { type: string }
+        implementationPlan: { type: string }
+        rollbackPlan: { type: string }
+        riskAssessment: { type: string }
+        impactedServices: { type: string }
+        communicationsPlan: { type: string }
+        successCriteria: { type: string }
+        signedOff: { type: boolean }
+      required: [scope, implementationPlan, rollbackPlan, riskAssessment, impactedServices, communicationsPlan, successCriteria, signedOff]
+
+    TestCase:
+      type: object
+      properties:
+        name: { type: string }
+        steps: { type: string }
+        expectedResult: { type: string }
+        actualResult: { type: string }
+        status: { type: string, enum: [pending, passed, failed, blocked] }
+      required: [name, steps, expectedResult, actualResult, status]
+
+    TestRecord:
+      type: object
+      properties:
+        changeId: { type: integer }
+        testPlan: { type: string }
+        environment: { type: string }
+        testedBy: { type: ["string", "null"] }
+        testedAt: { type: ["string", "null"], format: date-time }
+        overallResult: { type: string, enum: [pending, passed, failed] }
+        notes: { type: string }
+        cases:
+          type: array
+          items: { $ref: "#/components/schemas/TestCase" }
+      required: [changeId, testPlan, environment, overallResult, notes, cases]
+
+    UpsertTestingBody:
+      type: object
+      properties:
+        testPlan: { type: string }
+        environment: { type: string }
+        overallResult: { type: string, enum: [pending, passed, failed] }
+        notes: { type: string }
+        cases:
+          type: array
+          items: { $ref: "#/components/schemas/TestCase" }
+      required: [testPlan, environment, overallResult, notes, cases]
+
+    PirRecord:
+      type: object
+      properties:
+        changeId: { type: integer }
+        outcome: { type: string, enum: [successful, partial, failed, rolledback] }
+        objectivesMet: { type: string }
+        issuesEncountered: { type: string }
+        lessonsLearned: { type: string }
+        followupActions: { type: string }
+        completedBy: { type: ["string", "null"] }
+        completedAt: { type: ["string", "null"], format: date-time }
+      required: [changeId, outcome, objectivesMet, issuesEncountered, lessonsLearned, followupActions]
+
+    UpsertPirBody:
+      type: object
+      properties:
+        outcome: { type: string, enum: [successful, partial, failed, rolledback] }
+        objectivesMet: { type: string }
+        issuesEncountered: { type: string }
+        lessonsLearned: { type: string }
+        followupActions: { type: string }
+      required: [outcome, objectivesMet, issuesEncountered, lessonsLearned, followupActions]
+
+    Approval:
+      type: object
+      properties:
+        id: { type: integer }
+        changeId: { type: integer }
+        roleKey: { type: string }
+        roleName: { type: string }
+        approverId: { type: ["integer", "null"] }
+        approverName: { type: ["string", "null"] }
+        decision: { type: string, enum: [pending, approved, rejected, abstain] }
+        comment: { type: ["string", "null"] }
+        decidedAt: { type: ["string", "null"], format: date-time }
+        viaDeputy: { type: boolean }
+      required: [id, changeId, roleKey, roleName, decision, viaDeputy]
+
+    VoteBody:
+      type: object
+      properties:
+        decision: { type: string, enum: [approved, rejected, abstain] }
+        comment: { type: ["string", "null"] }
+      required: [decision]
+
+    CabMeeting:
+      type: object
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        kind: { type: string, enum: [cab, ecab] }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+        location: { type: string }
+        agenda: { type: string }
+        chairUserId: { type: ["integer", "null"] }
+        chairUserName: { type: ["string", "null"] }
+        status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+        createdAt: { type: string, format: date-time }
+      required: [id, title, kind, scheduledStart, scheduledEnd, location, agenda, status, createdAt]
+
+    CabMeetingDetail:
+      allOf:
+        - $ref: "#/components/schemas/CabMeeting"
+        - type: object
+          properties:
+            members:
+              type: array
+              items: { $ref: "#/components/schemas/CabMember" }
+            changes:
+              type: array
+              items: { $ref: "#/components/schemas/ChangeRequest" }
+            minutes: { type: string }
+
+    CabMember:
+      type: object
+      properties:
+        id: { type: integer }
+        userId: { type: integer }
+        userName: { type: string }
+        userEmail: { type: string }
+        roleKey: { type: ["string", "null"] }
+        isDeputy: { type: boolean }
+      required: [id, userId, userName, userEmail, isDeputy]
+
+    CreateCabMeetingBody:
+      type: object
+      properties:
+        title: { type: string }
+        kind: { type: string, enum: [cab, ecab] }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+        location: { type: string }
+        agenda: { type: string }
+        chairUserId: { type: ["integer", "null"] }
+        memberUserIds:
+          type: array
+          items: { type: integer }
+        changeIds:
+          type: array
+          items: { type: integer }
+      required: [title, kind, scheduledStart, scheduledEnd, location, agenda, memberUserIds, changeIds]
+
+    UpdateCabMeetingBody:
+      type: object
+      properties:
+        title: { type: string }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+        location: { type: string }
+        agenda: { type: string }
+        chairUserId: { type: ["integer", "null"] }
+        status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+        memberUserIds:
+          type: array
+          items: { type: integer }
+        changeIds:
+          type: array
+          items: { type: integer }
+        minutes: { type: string }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: integer }
+        changeId: { type: integer }
+        authorId: { type: integer }
+        authorName: { type: string }
+        body: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, changeId, authorId, authorName, body, createdAt]
+
+    CreateCommentBody:
+      type: object
+      properties:
+        body: { type: string }
+      required: [body]
+
+    DashboardSummary:
+      type: object
+      properties:
+        totalChanges: { type: integer }
+        openChanges: { type: integer }
+        awaitingApproval: { type: integer }
+        scheduledThisWeek: { type: integer }
+        emergencyOpen: { type: integer }
+        successRate: { type: number }
+        byStatus:
+          type: array
+          items:
+            type: object
+            properties:
+              status: { type: string }
+              count: { type: integer }
+            required: [status, count]
+        byTrack:
+          type: array
+          items:
+            type: object
+            properties:
+              track: { type: string }
+              count: { type: integer }
+            required: [track, count]
+        byRisk:
+          type: array
+          items:
+            type: object
+            properties:
+              risk: { type: string }
+              count: { type: integer }
+            required: [risk, count]
+      required: [totalChanges, openChanges, awaitingApproval, scheduledThisWeek, emergencyOpen, successRate, byStatus, byTrack, byRisk]
+
+    ActivityItem:
+      type: object
+      properties:
+        id: { type: integer }
+        timestamp: { type: string, format: date-time }
+        actorName: { type: string }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: ["integer", "null"] }
+        summary: { type: string }
+      required: [id, timestamp, actorName, action, entityType, summary]
+
+    TaskItem:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [approval, review, planning, testing, pir, cab] }
+        title: { type: string }
+        changeId: { type: ["integer", "null"] }
+        changeRef: { type: ["string", "null"] }
+        dueAt: { type: ["string", "null"], format: date-time }
+      required: [id, kind, title]
+
+    SmtpSettings:
+      type: object
+      properties:
+        host: { type: string }
+        port: { type: integer }
+        secure: { type: boolean }
+        username: { type: string }
+        password: { type: ["string", "null"] }
+        fromAddress: { type: string }
+        fromName: { type: string }
+        enabled: { type: boolean }
+      required: [host, port, secure, username, fromAddress, fromName, enabled]
+
+    TestEmailBody:
+      type: object
+      properties:
+        to: { type: string }
+      required: [to]
+
+    TestResult:
+      type: object
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+      required: [success, message]
+
+    LdapSettings:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        url: { type: string }
+        bindDn: { type: string }
+        bindPassword: { type: ["string", "null"] }
+        baseDn: { type: string }
+        userFilter: { type: string }
+        usernameAttr: { type: string }
+        emailAttr: { type: string }
+        nameAttr: { type: string }
+        tls: { type: boolean }
+      required: [enabled, url, bindDn, baseDn, userFilter, usernameAttr, emailAttr, nameAttr, tls]
+
+    TestLdapBody:
+      type: object
+      properties:
+        username: { type: string }
+        password: { type: string }
+      required: [username, password]
+
+    SslSettings:
+      type: object
+      properties:
+        hasCertificate: { type: boolean }
+        commonName: { type: ["string", "null"] }
+        issuer: { type: ["string", "null"] }
+        notBefore: { type: ["string", "null"], format: date-time }
+        notAfter: { type: ["string", "null"], format: date-time }
+        sanList:
+          type: array
+          items: { type: string }
+        forceHttps: { type: boolean }
+        hstsEnabled: { type: boolean }
+      required: [hasCertificate, sanList, forceHttps, hstsEnabled]
+
+    UpdateSslBody:
+      type: object
+      properties:
+        certificatePem: { type: ["string", "null"] }
+        privateKeyPem: { type: ["string", "null"] }
+        chainPem: { type: ["string", "null"] }
+        forceHttps: { type: boolean }
+        hstsEnabled: { type: boolean }
+
+    WorkflowTimeouts:
+      type: object
+      properties:
+        approvalReminderHours: { type: integer }
+        approvalEscalationHours: { type: integer }
+        cabReminderHours: { type: integer }
+        pirDueDays: { type: integer }
+        emergencyApprovalMinutes: { type: integer }
+      required: [approvalReminderHours, approvalEscalationHours, cabReminderHours, pirDueDays, emergencyApprovalMinutes]
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        timestamp: { type: string, format: date-time }
+        actorId: { type: ["integer", "null"] }
+        actorName: { type: string }
+        action: { type: string }
+        entityType: { type: string }
+        entityId: { type: ["integer", "null"] }
+        summary: { type: string }
+        ipAddress: { type: string }
+        userAgent: { type: string }
+        before: {}
+        after: {}
+      required: [id, timestamp, actorName, action, entityType, summary, ipAddress, userAgent]

@@ -1,0 +1,372 @@
+import { Router, type IRouter } from "express";
+import { and, desc, eq, ilike, or } from "drizzle-orm";
+import {
+  db,
+  changeRequestsTable,
+  usersTable,
+  standardTemplatesTable,
+  planningRecordsTable,
+  testRecordsTable,
+  pirRecordsTable,
+  approvalsTable,
+  commentsTable,
+  rolesTable,
+  roleAssignmentsTable,
+} from "@workspace/db";
+import { requireAuth } from "../lib/auth";
+import { audit } from "../lib/audit";
+import { nextRef } from "../lib/ref";
+import { notify, getUserEmail } from "../lib/email";
+
+const router: IRouter = Router();
+
+const APPROVER_ROLES_BY_TRACK: Record<string, string[]> = {
+  normal: ["change_manager", "technical_reviewer", "business_owner"],
+  emergency: ["change_manager", "ecab_member"],
+  standard: [],
+};
+
+async function expandChangeRow(c: typeof changeRequestsTable.$inferSelect) {
+  const [owner] = await db.select().from(usersTable).where(eq(usersTable.id, c.ownerId));
+  let assigneeName: string | null = null;
+  if (c.assigneeId != null) {
+    const [a] = await db.select().from(usersTable).where(eq(usersTable.id, c.assigneeId));
+    assigneeName = a?.fullName ?? null;
+  }
+  let templateName: string | null = null;
+  if (c.templateId != null) {
+    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, c.templateId));
+    templateName = t?.name ?? null;
+  }
+  return {
+    ...c,
+    ownerName: owner?.fullName ?? "Unknown",
+    assigneeName,
+    templateName,
+  };
+}
+
+async function createApprovalsForChange(changeId: number, track: string) {
+  const roleKeys = APPROVER_ROLES_BY_TRACK[track] ?? [];
+  for (const roleKey of roleKeys) {
+    await db.insert(approvalsTable).values({ changeId, roleKey, decision: "pending" });
+  }
+}
+
+async function notifyApprovers(req: import("express").Request | undefined, changeId: number, change: typeof changeRequestsTable.$inferSelect) {
+  const approvals = await db.select().from(approvalsTable).where(eq(approvalsTable.changeId, changeId));
+  for (const ap of approvals) {
+    if (ap.decision !== "pending") continue;
+    const assignees = await db
+      .select({ userId: roleAssignmentsTable.userId })
+      .from(roleAssignmentsTable)
+      .where(eq(roleAssignmentsTable.roleKey, ap.roleKey));
+    const targets = (
+      await Promise.all(assignees.map((a) => getUserEmail(a.userId)))
+    ).filter((t): t is { userId: number; email: string; name: string } => !!t);
+    if (targets.length === 0) continue;
+    await notify({
+      eventKey: "approval.requested",
+      to: targets,
+      subject: `[CHG ${change.ref}] Approval requested: ${change.title}`,
+      text: `Your approval is required for change ${change.ref} (${change.track}).\n\n${change.description}\n\nRisk: ${change.risk}, Impact: ${change.impact}, Priority: ${change.priority}.`,
+    });
+  }
+  void req;
+}
+
+router.get("/changes", requireAuth, async (req, res): Promise<void> => {
+  const status = typeof req.query["status"] === "string" ? req.query["status"] : null;
+  const track = typeof req.query["track"] === "string" ? req.query["track"] : null;
+  const ownerId = req.query["ownerId"] ? Number(req.query["ownerId"]) : null;
+  const search = typeof req.query["search"] === "string" ? req.query["search"] : null;
+  const conds = [];
+  if (status) conds.push(eq(changeRequestsTable.status, status));
+  if (track) conds.push(eq(changeRequestsTable.track, track));
+  if (ownerId && Number.isFinite(ownerId)) conds.push(eq(changeRequestsTable.ownerId, ownerId));
+  if (search) {
+    conds.push(
+      or(
+        ilike(changeRequestsTable.title, `%${search}%`),
+        ilike(changeRequestsTable.ref, `%${search}%`),
+        ilike(changeRequestsTable.description, `%${search}%`),
+      )!,
+    );
+  }
+  const rows = conds.length
+    ? await db
+        .select()
+        .from(changeRequestsTable)
+        .where(and(...conds))
+        .orderBy(desc(changeRequestsTable.createdAt))
+    : await db.select().from(changeRequestsTable).orderBy(desc(changeRequestsTable.createdAt));
+  const dtos = await Promise.all(rows.map(expandChangeRow));
+  res.json(dtos);
+});
+
+router.post("/changes", requireAuth, async (req, res): Promise<void> => {
+  const session = req.session!;
+  const b = req.body ?? {};
+  if (!b.title || !b.description || !b.track || !b.risk || !b.impact || !b.priority || !b.category) {
+    res.status(400).json({ error: "Missing required fields" });
+    return;
+  }
+  const ref = await nextRef(b.track);
+  let templateId: number | null = null;
+  let initialStatus = "draft";
+  let bypassCab = false;
+  let autoApprove = false;
+  if (b.track === "standard" && b.templateId) {
+    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, b.templateId));
+    if (t) {
+      templateId = t.id;
+      bypassCab = t.bypassCab;
+      autoApprove = t.autoApprove;
+      if (autoApprove) initialStatus = "approved";
+      if (bypassCab) initialStatus = autoApprove ? "scheduled" : "awaiting_implementation";
+    }
+  }
+  const [created] = await db
+    .insert(changeRequestsTable)
+    .values({
+      ref,
+      title: b.title,
+      description: b.description,
+      track: b.track,
+      status: initialStatus,
+      risk: b.risk,
+      impact: b.impact,
+      priority: b.priority,
+      category: b.category,
+      ownerId: session.uid,
+      assigneeId: b.assigneeId ?? null,
+      templateId,
+      plannedStart: b.plannedStart ? new Date(b.plannedStart) : null,
+      plannedEnd: b.plannedEnd ? new Date(b.plannedEnd) : null,
+    })
+    .returning();
+  // Always create an empty planning record
+  await db.insert(planningRecordsTable).values({ changeId: created.id }).onConflictDoNothing();
+  // Pre-fill planning from template
+  if (templateId) {
+    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, templateId));
+    if (t?.prefilledPlanning) {
+      await db
+        .update(planningRecordsTable)
+        .set({ implementationPlan: t.prefilledPlanning })
+        .where(eq(planningRecordsTable.changeId, created.id));
+    }
+    if (t?.prefilledTestPlan) {
+      await db
+        .insert(testRecordsTable)
+        .values({ changeId: created.id, testPlan: t.prefilledTestPlan })
+        .onConflictDoNothing();
+    }
+  }
+  if (b.track !== "standard") {
+    await createApprovalsForChange(created.id, b.track);
+  }
+  await audit(req, {
+    action: "change.created",
+    entityType: "change",
+    entityId: created.id,
+    summary: `Created ${b.track} change ${ref}: ${b.title}`,
+    after: created,
+  });
+  if (initialStatus === "draft" && b.track !== "standard") {
+    await notifyApprovers(req, created.id, created);
+  }
+  res.status(201).json(await expandChangeRow(created));
+});
+
+router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [row] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!row) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const dto = await expandChangeRow(row);
+  const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
+  const [testing] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, id));
+  const [pir] = await db.select().from(pirRecordsTable).where(eq(pirRecordsTable.changeId, id));
+  const approvals = await db
+    .select({
+      id: approvalsTable.id,
+      changeId: approvalsTable.changeId,
+      roleKey: approvalsTable.roleKey,
+      approverId: approvalsTable.approverId,
+      decision: approvalsTable.decision,
+      comment: approvalsTable.comment,
+      decidedAt: approvalsTable.decidedAt,
+      viaDeputy: approvalsTable.viaDeputy,
+      roleName: rolesTable.name,
+      approverName: usersTable.fullName,
+    })
+    .from(approvalsTable)
+    .leftJoin(rolesTable, eq(rolesTable.key, approvalsTable.roleKey))
+    .leftJoin(usersTable, eq(usersTable.id, approvalsTable.approverId))
+    .where(eq(approvalsTable.changeId, id));
+  const comments = await db
+    .select({
+      id: commentsTable.id,
+      changeId: commentsTable.changeId,
+      authorId: commentsTable.authorId,
+      body: commentsTable.body,
+      createdAt: commentsTable.createdAt,
+      authorName: usersTable.fullName,
+    })
+    .from(commentsTable)
+    .leftJoin(usersTable, eq(usersTable.id, commentsTable.authorId))
+    .where(eq(commentsTable.changeId, id))
+    .orderBy(desc(commentsTable.createdAt));
+  res.json({
+    ...dto,
+    planning: planning ?? { changeId: id, scope: "", implementationPlan: "", rollbackPlan: "", riskAssessment: "", impactedServices: "", communicationsPlan: "", successCriteria: "", signedOff: false },
+    testing: testing ?? { changeId: id, testPlan: "", environment: "", overallResult: "pending", notes: "", cases: [] },
+    pir: pir ?? { changeId: id, outcome: "successful", objectivesMet: "", issuesEncountered: "", lessonsLearned: "", followupActions: "" },
+    approvals: approvals.map((a) => ({
+      ...a,
+      roleName: a.roleName ?? a.roleKey,
+      approverName: a.approverName ?? null,
+    })),
+    comments: comments.map((c) => ({ ...c, authorName: c.authorName ?? "Unknown" })),
+  });
+});
+
+router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!before) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const b = req.body ?? {};
+  const updates: Partial<typeof changeRequestsTable.$inferInsert> = {};
+  for (const k of ["title", "description", "risk", "impact", "priority", "category"] as const) {
+    if (typeof b[k] === "string") (updates as Record<string, unknown>)[k] = b[k];
+  }
+  if (b.assigneeId === null) updates.assigneeId = null;
+  else if (typeof b.assigneeId === "number") updates.assigneeId = b.assigneeId;
+  if (b.cabMeetingId === null) updates.cabMeetingId = null;
+  else if (typeof b.cabMeetingId === "number") updates.cabMeetingId = b.cabMeetingId;
+  if (b.plannedStart) updates.plannedStart = new Date(b.plannedStart);
+  if (b.plannedStart === null) updates.plannedStart = null;
+  if (b.plannedEnd) updates.plannedEnd = new Date(b.plannedEnd);
+  if (b.plannedEnd === null) updates.plannedEnd = null;
+
+  const [updated] = await db
+    .update(changeRequestsTable)
+    .set(updates)
+    .where(eq(changeRequestsTable.id, id))
+    .returning();
+  await audit(req, {
+    action: "change.updated",
+    entityType: "change",
+    entityId: id,
+    summary: `Updated change ${before.ref}`,
+    before,
+    after: updated,
+  });
+  res.json(await expandChangeRow(updated));
+});
+
+router.delete("/changes/:id", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!before) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  await db.delete(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  await audit(req, {
+    action: "change.deleted",
+    entityType: "change",
+    entityId: id,
+    summary: `Deleted change ${before.ref}`,
+    before,
+  });
+  res.status(204).end();
+});
+
+router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const { toStatus, note } = req.body ?? {};
+  const ALLOWED = new Set([
+    "draft",
+    "submitted",
+    "in_review",
+    "awaiting_approval",
+    "approved",
+    "scheduled",
+    "in_progress",
+    "implemented",
+    "in_testing",
+    "completed",
+    "rejected",
+    "cancelled",
+    "rolled_back",
+    "awaiting_implementation",
+    "awaiting_pir",
+  ]);
+  if (typeof toStatus !== "string" || !ALLOWED.has(toStatus)) {
+    res.status(400).json({ error: "Invalid status" });
+    return;
+  }
+  const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!before) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const updates: Partial<typeof changeRequestsTable.$inferInsert> = { status: toStatus };
+  if (toStatus === "in_progress" && !before.actualStart) updates.actualStart = new Date();
+  if ((toStatus === "implemented" || toStatus === "completed") && !before.actualEnd) updates.actualEnd = new Date();
+  const [updated] = await db
+    .update(changeRequestsTable)
+    .set(updates)
+    .where(eq(changeRequestsTable.id, id))
+    .returning();
+  await audit(req, {
+    action: "change.transitioned",
+    entityType: "change",
+    entityId: id,
+    summary: `${before.ref}: ${before.status} → ${toStatus}${note ? ` (${note})` : ""}`,
+    before: { status: before.status },
+    after: { status: toStatus, note: note ?? null },
+  });
+  // Notify owner + assignee
+  const targets = [];
+  const owner = await getUserEmail(before.ownerId);
+  if (owner) targets.push(owner);
+  if (before.assigneeId && before.assigneeId !== before.ownerId) {
+    const a = await getUserEmail(before.assigneeId);
+    if (a) targets.push(a);
+  }
+  if (targets.length > 0) {
+    await notify({
+      eventKey: "change.transitioned",
+      to: targets,
+      subject: `[CHG ${before.ref}] Status: ${toStatus}`,
+      text: `${before.ref} ${before.title}\n\n${before.status} → ${toStatus}${note ? "\n\nNote: " + note : ""}`,
+    });
+  }
+  res.json(await expandChangeRow(updated));
+});
+
+export default router;
