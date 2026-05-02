@@ -271,6 +271,15 @@ export type LdapSettings = {
   tls: boolean;
 };
 
+export type LdapTestResult = {
+  success: boolean;
+  stage: "config" | "connect" | "service-bind" | "search" | "user-bind" | "ok";
+  message: string;
+  code?: string;
+  details?: string;
+  userDn?: string;
+};
+
 export type SslSettings = {
   certificateInstalled: boolean;
   privateKeyInstalled: boolean;

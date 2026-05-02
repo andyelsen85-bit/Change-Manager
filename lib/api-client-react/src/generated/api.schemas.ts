@@ -834,6 +834,36 @@ export interface TestLdapBody {
   password: string;
 }
 
+/**
+ * Phase the bind reached. On failure this is the phase that broke.
+ */
+export type LdapTestResultStage =
+  (typeof LdapTestResultStage)[keyof typeof LdapTestResultStage];
+
+export const LdapTestResultStage = {
+  config: "config",
+  connect: "connect",
+  "service-bind": "service-bind",
+  search: "search",
+  "user-bind": "user-bind",
+  ok: "ok",
+} as const;
+
+export interface LdapTestResult {
+  /** True if the user-bind succeeded end-to-end. */
+  success: boolean;
+  /** Phase the bind reached. On failure this is the phase that broke. */
+  stage: LdapTestResultStage;
+  /** Human-readable summary suitable for showing to the admin. */
+  message: string;
+  /** LDAP result-code name (e.g. InvalidCredentialsError) or socket error code (e.g. ECONNREFUSED). Optional. */
+  code?: string;
+  /** Server-side diagnostic message from the directory, when one was returned. Optional. */
+  details?: string;
+  /** The full DN that was resolved and bound. Populated only on success. */
+  userDn?: string;
+}
+
 export interface SslSettings {
   hasCertificate: boolean;
   /** @nullable */

@@ -178,8 +178,17 @@ router.post("/settings/ldap/test", requireAdmin, async (req, res): Promise<void>
     action: "settings.ldap_tested",
     entityType: "settings",
     entityId: null,
-    summary: `LDAP test for ${username}: ${r.success ? "success" : "failed"}`,
-    after: { success: r.success, message: r.message },
+    summary: `LDAP test for ${username}: ${r.success ? "success" : `failed at ${r.stage}`}`,
+    // Persist the full diagnostic so admins can review historical test
+    // attempts from the audit log without re-running the bind.
+    after: {
+      success: r.success,
+      stage: r.stage,
+      message: r.message,
+      code: r.code,
+      details: r.details,
+      userDn: r.userDn,
+    },
   });
   res.json(r);
 });
