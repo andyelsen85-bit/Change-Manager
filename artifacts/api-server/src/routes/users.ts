@@ -9,6 +9,7 @@ import {
 import { hashPassword, requireAuth, requireAdmin } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { NOTIFICATION_EVENTS } from "../lib/events";
+import { lookupLdapUser } from "../lib/ldap";
 
 const router: IRouter = Router();
 
@@ -88,20 +89,67 @@ router.get("/users", requireAuth, async (req, res): Promise<void> => {
   res.json(rows.filter((u) => u.isActive).map(userToPublicDto));
 });
 
+// Look up a directory user by their short login (sAMAccountName / uid / UPN —
+// whichever the LDAP `User filter` is configured for) so the admin "New user"
+// dialog can pre-fill displayName + mail without the operator having to retype
+// what AD already knows. Service-bind only — never asks for the user password.
+router.post("/users/ldap-lookup", requireAdmin, async (req, res): Promise<void> => {
+  const { username } = req.body ?? {};
+  if (typeof username !== "string" || !username.trim()) {
+    res.status(400).json({ error: "username required" });
+    return;
+  }
+  const r = await lookupLdapUser(username.trim());
+  if (!r.ok) {
+    res.status(r.stage === "search" ? 404 : 400).json({
+      error: r.reason,
+      stage: r.stage,
+      code: r.code,
+      details: r.details,
+    });
+    return;
+  }
+  res.json({ username: r.username, email: r.email, fullName: r.fullName, userDn: r.userDn });
+});
+
 router.post("/users", requireAdmin, async (req, res): Promise<void> => {
   const { username, email, fullName, password, source, isAdmin, deputyUserId, roles } = req.body ?? {};
-  if (typeof username !== "string" || typeof email !== "string" || typeof fullName !== "string") {
-    res.status(400).json({ error: "username, email, fullName required" });
+  if (typeof username !== "string" || !username.trim()) {
+    res.status(400).json({ error: "username required" });
     return;
   }
   const src = source === "ldap" ? "ldap" : "local";
+  // For LDAP users the operator only has to supply the short login. We pull
+  // displayName + mail from the directory ourselves so what's stored locally
+  // matches what AD has on file. Caller-supplied fullName/email are honoured
+  // when the lookup misses an attribute, so admins can still override.
+  let resolvedFullName = typeof fullName === "string" ? fullName : "";
+  let resolvedEmail = typeof email === "string" ? email : "";
+  if (src === "ldap") {
+    const r = await lookupLdapUser(username.trim());
+    if (!r.ok) {
+      res.status(r.stage === "search" ? 404 : 400).json({
+        error: r.reason,
+        stage: r.stage,
+        code: r.code,
+        details: r.details,
+      });
+      return;
+    }
+    if (!resolvedFullName) resolvedFullName = r.fullName;
+    if (!resolvedEmail) resolvedEmail = r.email;
+  }
+  if (!resolvedFullName || !resolvedEmail) {
+    res.status(400).json({ error: "email and fullName required" });
+    return;
+  }
   const passwordHash = src === "local" && typeof password === "string" && password ? await hashPassword(password) : null;
   const [created] = await db
     .insert(usersTable)
     .values({
-      username,
-      email,
-      fullName,
+      username: username.trim(),
+      email: resolvedEmail,
+      fullName: resolvedFullName,
       source: src,
       passwordHash,
       isAdmin: !!isAdmin,
@@ -120,7 +168,7 @@ router.post("/users", requireAdmin, async (req, res): Promise<void> => {
     entityType: "user",
     entityId: created.id,
     summary: `Created ${src} user ${username}`,
-    after: { username, email, fullName, source: src, isAdmin: !!isAdmin },
+    after: { username: username.trim(), email: resolvedEmail, fullName: resolvedFullName, source: src, isAdmin: !!isAdmin },
   });
   res.status(201).json(await userToDto(created));
 });

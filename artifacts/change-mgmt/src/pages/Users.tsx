@@ -44,14 +44,20 @@ export function UsersPage() {
 
   const save = useMutation({
     mutationFn: (u: EditUser) => {
+      // For NEW LDAP users we send only the short login + flags. The server
+      // looks the account up in the directory and fills in displayName / mail
+      // itself, so the form doesn't have to ask the admin for them.
+      const isNewLdap = u.id === 0 && u.source === "ldap";
       const body: Record<string, unknown> = {
         username: u.username,
-        email: u.email,
-        fullName: u.fullName,
         source: u.source,
         isAdmin: u.isAdmin,
         isActive: u.isActive,
       };
+      if (!isNewLdap) {
+        body["email"] = u.email;
+        body["fullName"] = u.fullName;
+      }
       if (u.password) body["password"] = u.password;
       return u.id === 0 ? api.post<User>("/users", body) : api.patch<User>(`/users/${u.id}`, body);
     },
@@ -150,17 +156,30 @@ export function UsersPage() {
               <DialogHeader><DialogTitle>{editing.id ? "Edit user" : "New user"}</DialogTitle></DialogHeader>
               <div className="grid gap-3 py-2">
                 <div className="space-y-2">
-                  <Label>Username <span className="text-destructive">*</span></Label>
+                  <Label>
+                    Username <span className="text-destructive">*</span>
+                    {editing.id === 0 && editing.source === "ldap" && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">(short login from your directory)</span>
+                    )}
+                  </Label>
                   <Input required value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} disabled={editing.id !== 0} data-testid="input-user-username" />
                 </div>
-                <div className="space-y-2">
-                  <Label>Full name <span className="text-destructive">*</span></Label>
-                  <Input required value={editing.fullName} onChange={(e) => setEditing({ ...editing, fullName: e.target.value })} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email <span className="text-destructive">*</span></Label>
-                  <Input required type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
-                </div>
+                {editing.id === 0 && editing.source === "ldap" ? (
+                  <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    Full name and email will be imported automatically from the directory (<code>displayName</code> / <code>mail</code>) when you save.
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Full name <span className="text-destructive">*</span></Label>
+                      <Input required value={editing.fullName} onChange={(e) => setEditing({ ...editing, fullName: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Email <span className="text-destructive">*</span></Label>
+                      <Input required type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
+                    </div>
+                  </>
+                )}
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Source <span className="text-destructive">*</span></Label>
@@ -196,9 +215,10 @@ export function UsersPage() {
                 <Button
                   onClick={() => {
                     const missing: string[] = [];
+                    const isNewLdap = editing.id === 0 && editing.source === "ldap";
                     if (!editing.username.trim()) missing.push("Username");
-                    if (!editing.fullName.trim()) missing.push("Full name");
-                    if (!editing.email.trim()) missing.push("Email");
+                    if (!isNewLdap && !editing.fullName.trim()) missing.push("Full name");
+                    if (!isNewLdap && !editing.email.trim()) missing.push("Email");
                     if (editing.source === "local" && !editing.id && !editing.password) missing.push("Password");
                     if (missing.length) {
                       toast.error(`Please fill in: ${missing.join(", ")}`);

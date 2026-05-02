@@ -86,6 +86,115 @@ function maskName(s: string): string {
   return `${s[0]}${"_".repeat(Math.min(4, s.length - 2))}(${s.length})`;
 }
 
+// Look up an LDAP user by username WITHOUT verifying their password. Used by
+// the admin "create LDAP user" flow to pull displayName / mail straight from
+// the directory so the operator only has to type the short login. Returns
+// the same shaped result as authenticateLdap but never reaches `user-bind`.
+export type LdapLookupResult =
+  | { ok: true; username: string; email: string; fullName: string; userDn: string }
+  | { ok: false; stage: LdapStage; reason: string; code?: string; details?: string };
+
+export async function lookupLdapUser(username: string): Promise<LdapLookupResult> {
+  const cfg = await getLdap();
+  if (!cfg || !cfg.enabled) {
+    return { ok: false, stage: "config", reason: "LDAP disabled" };
+  }
+  if (!cfg.url || !cfg.baseDn) {
+    return { ok: false, stage: "config", reason: "LDAP not configured (URL and Base DN required)" };
+  }
+  let ldap: typeof import("ldapjs");
+  try {
+    ldap = await import("ldapjs");
+  } catch {
+    return { ok: false, stage: "config", reason: "LDAP library missing" };
+  }
+  return new Promise<LdapLookupResult>((resolve) => {
+    const rejectUnauthorized = cfg.tlsRejectUnauthorized !== false;
+    const isLdaps = cfg.url.toLowerCase().startsWith("ldaps:");
+    const tlsOptions = (isLdaps || cfg.tls) ? { rejectUnauthorized } : undefined;
+    let client: import("ldapjs").Client;
+    try {
+      client = ldap.createClient({ url: cfg.url, tlsOptions, timeout: 5000, connectTimeout: 5000 });
+    } catch (err) {
+      const { code, details } = extractLdapError(err);
+      return resolve({ ok: false, stage: "connect", reason: "Could not initialise LDAP client", code, details });
+    }
+    let resolved = false;
+    const finish = (r: LdapLookupResult) => {
+      if (resolved) return;
+      resolved = true;
+      try { client.unbind(); } catch { /* ignore */ }
+      const ctx = { url: cfg.url, baseDn: cfg.baseDn, usernameMasked: maskName(username), ok: r.ok };
+      if (r.ok) logger.info(ctx, "LDAP lookup ok");
+      else logger.warn({ ...ctx, stage: r.stage, reason: r.reason, code: r.code }, "LDAP lookup failed");
+      resolve(r);
+    };
+    client.on("error", (err) => {
+      const { code, details } = extractLdapError(err);
+      finish({ ok: false, stage: "connect", reason: "Could not reach LDAP server", code, details });
+    });
+    const doSearch = () => {
+      const filter = cfg.userFilter.replace(/{{username}}/g, escapeLdapFilter(username));
+      const opts = { filter, scope: "sub" as const, attributes: [cfg.usernameAttr, cfg.emailAttr, cfg.nameAttr, "dn"] };
+      client.search(cfg.baseDn, opts, (searchErr, searchRes) => {
+        if (searchErr) {
+          const { code, details } = extractLdapError(searchErr);
+          return finish({ ok: false, stage: "search", reason: "LDAP search failed", code, details });
+        }
+        let entry: Record<string, string> | null = null;
+        let entryDn = "";
+        searchRes.on("searchEntry", (e: unknown) => {
+          const obj = (e as { pojo?: Record<string, unknown>; object?: Record<string, unknown>; objectName?: string }).pojo
+            ?? (e as { object?: Record<string, unknown> }).object
+            ?? (e as Record<string, unknown>);
+          const attrs: Record<string, string> = {};
+          if (obj && typeof obj === "object") {
+            for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+              if (Array.isArray(v)) attrs[k] = String(v[0] ?? "");
+              else if (typeof v === "string") attrs[k] = v;
+            }
+          }
+          entry = attrs;
+          entryDn = (obj as { objectName?: string; dn?: string }).objectName ?? (obj as { dn?: string }).dn ?? "";
+        });
+        searchRes.on("error", (e) => {
+          const { code, details } = extractLdapError(e);
+          finish({ ok: false, stage: "search", reason: "LDAP search returned an error", code, details });
+        });
+        searchRes.on("end", () => {
+          if (!entry || !entryDn) {
+            return finish({
+              ok: false,
+              stage: "search",
+              reason: "User not found — your User filter matched zero entries under the Base DN",
+              details: `filter=${filter}, baseDn=${cfg.baseDn}`,
+            });
+          }
+          finish({
+            ok: true,
+            username: entry[cfg.usernameAttr] || username,
+            email: entry[cfg.emailAttr] || `${username}@ldap.local`,
+            fullName: entry[cfg.nameAttr] || username,
+            userDn: entryDn,
+          });
+        });
+      });
+    };
+    if (cfg.bindDn && cfg.bindPasswordEnc) {
+      const bindPassword = decryptSecret(cfg.bindPasswordEnc);
+      client.bind(cfg.bindDn, bindPassword, (err) => {
+        if (err) {
+          const { code, details } = extractLdapError(err);
+          return finish({ ok: false, stage: "service-bind", reason: "Service bind failed", code, details });
+        }
+        doSearch();
+      });
+    } else {
+      doSearch();
+    }
+  });
+}
+
 // LDAP authenticate: bind as service account, search user, bind as user.
 // We import ldapjs lazily so projects without LDAP configured don't pay the load cost.
 export async function authenticateLdap(username: string, password: string): Promise<LdapAuthResult> {
