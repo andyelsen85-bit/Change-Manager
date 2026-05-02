@@ -83,6 +83,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       source: existing.source,
       roles,
       isAdmin: existing.isAdmin,
+      mustChangePassword: existing.mustChangePassword,
     });
     return;
   }
@@ -130,6 +131,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         source: userRow.source,
         roles,
         isAdmin: userRow.isAdmin,
+        mustChangePassword: false,
       });
       return;
     }
@@ -195,6 +197,7 @@ router.get("/auth/me", async (req, res): Promise<void> => {
     source: u.source,
     roles,
     isAdmin: u.isAdmin,
+    mustChangePassword: u.mustChangePassword,
   });
 });
 
@@ -218,8 +221,15 @@ router.post("/auth/change-password", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Current password is incorrect" });
     return;
   }
+  if (newPassword === currentPassword) {
+    res.status(400).json({ error: "New password must be different from the current password" });
+    return;
+  }
   const newHash = await hashPassword(newPassword);
-  await db.update(usersTable).set({ passwordHash: newHash }).where(eq(usersTable.id, u.id));
+  await db
+    .update(usersTable)
+    .set({ passwordHash: newHash, mustChangePassword: false })
+    .where(eq(usersTable.id, u.id));
   await audit(req, {
     action: "auth.password_changed",
     entityType: "user",

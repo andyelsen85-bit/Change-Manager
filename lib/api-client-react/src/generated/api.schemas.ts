@@ -39,6 +39,8 @@ export interface SessionUser {
   source: SessionUserSource;
   roles: string[];
   isAdmin: boolean;
+  /** True when the user must rotate their password before using the rest of the app (e.g. seeded admin on first login). */
+  mustChangePassword: boolean;
 }
 
 export type UserSource = (typeof UserSource)[keyof typeof UserSource];

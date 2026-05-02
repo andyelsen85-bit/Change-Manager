@@ -27,6 +27,11 @@ export const LoginResponse = zod.object({
   source: zod.enum(["local", "ldap"]),
   roles: zod.array(zod.string()),
   isAdmin: zod.boolean(),
+  mustChangePassword: zod
+    .boolean()
+    .describe(
+      "True when the user must rotate their password before using the rest of the app (e.g. seeded admin on first login).",
+    ),
 });
 
 export const GetMeResponse = zod.object({
@@ -37,6 +42,11 @@ export const GetMeResponse = zod.object({
   source: zod.enum(["local", "ldap"]),
   roles: zod.array(zod.string()),
   isAdmin: zod.boolean(),
+  mustChangePassword: zod
+    .boolean()
+    .describe(
+      "True when the user must rotate their password before using the rest of the app (e.g. seeded admin on first login).",
+    ),
 });
 
 export const ChangePasswordBody = zod.object({

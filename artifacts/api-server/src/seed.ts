@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -13,21 +12,23 @@ import {
 import { hashPassword } from "./lib/auth";
 import { logger } from "./lib/logger";
 
-// In production we never seed a known default password. If INITIAL_ADMIN_PASSWORD is
-// supplied we use it (and force rotation on first login); otherwise we generate a
-// cryptographically random one and log it once at boot. In development we still default
-// to "admin" for convenience but flag must_change_password so the user is forced to set
-// a real one before doing anything sensitive.
+// Bootstrap the initial admin password.
+//
+// Resolution order:
+//   1. INITIAL_ADMIN_PASSWORD env var (>= 8 chars) -> use it.
+//   2. Otherwise -> default to "admin".
+//
+// In every case we set must_change_password=true so the user is forced to
+// rotate the credential at first login (enforced by the auth middleware and
+// frontend routing). This matches the documented "admin / admin (change
+// immediately)" experience while still preventing the system from operating
+// with the default credential after the very first login.
 function provisionInitialAdminPassword(): { password: string; mustChange: boolean; source: string } {
   const fromEnv = process.env["INITIAL_ADMIN_PASSWORD"];
   if (fromEnv && fromEnv.length >= 8) {
     return { password: fromEnv, mustChange: true, source: "env:INITIAL_ADMIN_PASSWORD" };
   }
-  if ((process.env["NODE_ENV"] ?? "development") === "production") {
-    const generated = crypto.randomBytes(18).toString("base64url");
-    return { password: generated, mustChange: true, source: "generated" };
-  }
-  return { password: "admin", mustChange: true, source: "dev-default" };
+  return { password: "admin", mustChange: true, source: "default" };
 }
 
 const ROLES = [
@@ -178,35 +179,16 @@ export async function runSeed(): Promise<void> {
       isActive: true,
       mustChangePassword: mustChange,
     });
-    if (source === "generated") {
-      // Avoid logging the plaintext password through the structured logger pipeline
-      // (logs may be aggregated, shipped, or persisted to disk by external collectors).
-      // Instead, write the one-time bootstrap secret to a 0600 file in a state directory
-      // that the operator can read once and then delete.
-      const fs = await import("node:fs");
-      const path = await import("node:path");
-      const stateDir = process.env["STATE_DIR"] ?? "/tmp";
-      const target = path.join(stateDir, "initial_admin_password");
-      try {
-        fs.writeFileSync(target, password + "\n", { mode: 0o600 });
-        logger.warn(
-          { source, target },
-          "Generated initial admin password written to bootstrap file (mode 0600). Read it once, then delete the file. Set INITIAL_ADMIN_PASSWORD env var to skip generation in the future.",
-        );
-      } catch (err) {
-        // Last-resort fallback: if we can't write the file we MUST surface the secret
-        // so the operator can still log in. Emit on stderr (not the structured logger)
-        // and disclose location of failure so it's auditable.
-        process.stderr.write(
-          `[bootstrap] Could not write ${target} (${(err as Error).message}). Generated admin password: ${password}\n`,
-        );
-        logger.warn({ source, target, error: (err as Error).message }, "Failed to write bootstrap password file; password emitted on stderr.");
-      }
+    if (source === "default") {
+      logger.warn(
+        { source },
+        "Seeded admin user with the default password 'admin'. Password rotation is REQUIRED at first login. " +
+          "Set INITIAL_ADMIN_PASSWORD in the environment to skip this default.",
+      );
     } else {
       logger.info({ source }, "Seeded admin user; password rotation is required at first login.");
     }
   }
-
   // Templates
   const existingTemplates = await db.select().from(standardTemplatesTable);
   if (existingTemplates.length === 0) {

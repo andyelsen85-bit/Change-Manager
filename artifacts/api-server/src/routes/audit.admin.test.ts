@@ -17,6 +17,17 @@ vi.mock("@workspace/db", () => ({
     entityType: "entityType",
     entityId: "entityId",
   },
+  // Required by the password-rotation gate inside `requireAdmin`.
+  usersTable: {
+    _t: "users",
+    id: "id",
+    mustChangePassword: "must_change_password",
+  },
+  roleAssignmentsTable: {
+    _t: "role_assignments",
+    userId: "user_id",
+    roleKey: "role_key",
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -92,6 +103,8 @@ describe("audit-log admin gating", () => {
       before: null,
       after: null,
     };
+    // First select: requireAdmin's mustChangePassword lookup. Then the audit query.
+    dbMock.enqueue("select", [{ mustChangePassword: false }]);
     dbMock.enqueue("select", [fakeRow]);
     const app = buildApp();
     const cookie = await buildSignedCookie({
@@ -125,6 +138,8 @@ describe("audit-log admin gating", () => {
   });
 
   it("admin export emits CSV with header row + escaped fields", async () => {
+    // First select: requireAdmin's mustChangePassword lookup.
+    dbMock.enqueue("select", [{ mustChangePassword: false }]);
     dbMock.enqueue("select", [
       {
         id: 1,

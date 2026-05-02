@@ -771,7 +771,10 @@ components:
           type: array
           items: { type: string }
         isAdmin: { type: boolean }
-      required: [id, username, email, fullName, source, roles, isAdmin]
+        mustChangePassword:
+          type: boolean
+          description: True when the user must rotate their password before using the rest of the app (e.g. seeded admin on first login).
+      required: [id, username, email, fullName, source, roles, isAdmin, mustChangePassword]
 
     User:
       type: object
