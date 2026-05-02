@@ -32,7 +32,10 @@ const NORMAL: Record<ChangeStatus, ChangeStatus[]> = {
   approved: ["scheduled", "cancelled"],
   scheduled: ["in_progress", "cancelled"],
   in_progress: ["implemented", "rolled_back"],
-  implemented: ["in_testing", "rolled_back"],
+  // Testing is optional — teams can either record a Testing pass first
+  // (implemented → in_testing → awaiting_pir) or jump straight to PIR if the
+  // change didn't need a separate testing phase (implemented → awaiting_pir).
+  implemented: ["in_testing", "awaiting_pir", "rolled_back"],
   in_testing: ["awaiting_pir", "rolled_back"],
   awaiting_pir: ["completed", "rolled_back"],
   completed: [],
@@ -254,12 +257,14 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
       return "Standard change requires the planning record to be signed off.";
     }
   }
-  // Normal track: cannot enter awaiting_pir without the overall testing record
-  // marked PASSED. The Tester explicitly takes responsibility for that flag —
-  // we no longer require every individual case row to be marked passed (some
-  // teams use the case grid for evidence/notes rather than as a strict gate).
+  // Normal track: if a Testing record exists, it must be marked PASSED before
+  // PIR can begin (the Tester explicitly takes responsibility for that flag —
+  // we don't require every individual case row to be marked passed). If no
+  // Testing record was opened the team has chosen to skip the testing phase
+  // entirely, and we let the change go straight to PIR — the PIR step itself
+  // is the closing review for whether the change worked.
   if (p.track === "normal" && p.toStatus === "awaiting_pir") {
-    if (!p.testing || p.testing.overallResult !== "passed") {
+    if (p.testing && p.testing.overallResult !== "passed") {
       return "Testing must be marked PASSED before requesting PIR.";
     }
   }
