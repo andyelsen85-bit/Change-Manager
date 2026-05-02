@@ -168,6 +168,8 @@ const LDAP_PRESETS: Array<{
   hint: string;
   userFilter: string;
   usernameAttr: string;
+  emailAttr: string;
+  nameAttr: string;
 }> = [
   {
     id: "openldap",
@@ -175,6 +177,8 @@ const LDAP_PRESETS: Array<{
     hint: "Login is the short uid (e.g. jdoe).",
     userFilter: "(uid={{username}})",
     usernameAttr: "uid",
+    emailAttr: "mail",
+    nameAttr: "cn",
   },
   {
     id: "ad-sam",
@@ -182,6 +186,8 @@ const LDAP_PRESETS: Array<{
     hint: "Login is the pre-Windows-2000 name (e.g. jdoe).",
     userFilter: "(&(objectClass=user)(sAMAccountName={{username}}))",
     usernameAttr: "sAMAccountName",
+    emailAttr: "mail",
+    nameAttr: "displayName",
   },
   {
     id: "ad-upn",
@@ -189,6 +195,8 @@ const LDAP_PRESETS: Array<{
     hint: "Login is the full UPN (e.g. jdoe@corp.local).",
     userFilter: "(&(objectClass=user)(userPrincipalName={{username}}))",
     usernameAttr: "userPrincipalName",
+    emailAttr: "mail",
+    nameAttr: "displayName",
   },
 ];
 
@@ -242,7 +250,13 @@ function LdapPanel() {
   const applyPreset = (id: string) => {
     const preset = LDAP_PRESETS.find((p) => p.id === id);
     if (!preset) return;
-    setForm({ ...form, userFilter: preset.userFilter, usernameAttr: preset.usernameAttr });
+    setForm({
+      ...form,
+      userFilter: preset.userFilter,
+      usernameAttr: preset.usernameAttr,
+      emailAttr: preset.emailAttr,
+      nameAttr: preset.nameAttr,
+    });
     toast.success(`Applied preset: ${preset.label}`);
   };
 
