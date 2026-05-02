@@ -13,6 +13,19 @@ import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
 import { notify, getUserEmail } from "../lib/email";
 
+// Format a date in a human-friendly way for plain-text emails. CAB members
+// read these in their mail client, so use a readable representation rather
+// than the raw ISO string. Falls back to "TBD" when no date is set.
+function fmtAgendaDate(d: Date | null): string {
+  if (!d) return "TBD";
+  return d.toUTCString();
+}
+
+function titleCase(s: string): string {
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
 const router: IRouter = Router();
 const requireCabManager = requireRole(["change_manager", "ecab_member", "cab_chair"]);
 
@@ -252,7 +265,13 @@ router.get("/cab-meetings/:id/ics", requireAuth, async (req, res): Promise<void>
   res.send(ics);
 });
 
-router.post("/cab-meetings/:id/send-invites", requireCabManager, async (req, res): Promise<void> => {
+// Send the full meeting agenda (including every change on the docket with
+// its title, description, planned dates, risk and impact) to every member,
+// so they can review the material before the meeting starts. No calendar
+// invite is attached — members already have the meeting on their calendar
+// (downloaded via the .ics endpoint) and the purpose of this email is the
+// agenda content itself.
+router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -279,23 +298,74 @@ router.post("/cab-meetings/:id/send-invites", requireCabManager, async (req, res
   const targets = (
     await Promise.all(memberRows.map((r) => getUserEmail(r.userId)))
   ).filter((t): t is { userId: number; email: string; name: string } => !!t);
-  const ics = buildCabIcs(
-    m,
-    memberRows.map((r) => ({ ...r, email: r.email ?? "", fullName: r.fullName ?? "Unknown" })),
-  );
+
+  // Pull the full change record for every change attached to this meeting.
+  const changeRows = await db
+    .select({
+      id: changeRequestsTable.id,
+      ref: changeRequestsTable.ref,
+      title: changeRequestsTable.title,
+      description: changeRequestsTable.description,
+      track: changeRequestsTable.track,
+      status: changeRequestsTable.status,
+      risk: changeRequestsTable.risk,
+      impact: changeRequestsTable.impact,
+      plannedStart: changeRequestsTable.plannedStart,
+      plannedEnd: changeRequestsTable.plannedEnd,
+    })
+    .from(cabChangesTable)
+    .innerJoin(changeRequestsTable, eq(changeRequestsTable.id, cabChangesTable.changeId))
+    .where(eq(cabChangesTable.meetingId, id))
+    // Deterministic order: chronological by planned start, then by ref so
+    // the numbering in the email is stable across re-sends and reads.
+    .orderBy(asc(changeRequestsTable.plannedStart), asc(changeRequestsTable.ref));
+
+  const meetingKindLabel = m.kind === "ecab" ? "Emergency CAB" : "CAB";
+  const agendaItems = changeRows.length
+    ? changeRows
+        .map((c, i) => {
+          const desc = (c.description || "").trim() || "(no description provided)";
+          return [
+            `${i + 1}. [${c.ref}] ${c.title}`,
+            `   Track: ${titleCase(c.track)}    Status: ${c.status.replace(/_/g, " ")}`,
+            `   Risk: ${titleCase(c.risk)}      Impact: ${titleCase(c.impact)}`,
+            `   Planned start: ${fmtAgendaDate(c.plannedStart)}`,
+            `   Planned end:   ${fmtAgendaDate(c.plannedEnd)}`,
+            `   Description:`,
+            ...desc.split("\n").map((line) => `     ${line}`),
+          ].join("\n");
+        })
+        .join("\n\n")
+    : "(no changes on the agenda)";
+
+  const text = [
+    `${meetingKindLabel} agenda — ${m.title}`,
+    "",
+    `When:  ${m.scheduledStart.toUTCString()}`,
+    `Where: ${m.location}`,
+    "",
+    "Notes:",
+    m.agenda?.trim() || "(none)",
+    "",
+    "─────────────────────────────────────────",
+    `Changes for review (${changeRows.length}):`,
+    "─────────────────────────────────────────",
+    "",
+    agendaItems,
+  ].join("\n");
+
   const result = await notify({
     eventKey: "cab.invited",
     to: targets,
-    subject: `${m.kind === "ecab" ? "[eCAB]" : "[CAB]"} ${m.title} — ${m.scheduledStart.toISOString()}`,
-    text: `You are invited to a ${m.kind === "ecab" ? "Emergency CAB" : "CAB"} meeting.\n\nWhen: ${m.scheduledStart.toISOString()}\nWhere: ${m.location}\n\nAgenda:\n${m.agenda || "(none)"}\n\nA calendar invite (.ics) is attached.`,
-    ics: { content: ics, filename: `cab-${m.id}.ics` },
+    subject: `${m.kind === "ecab" ? "[eCAB Agenda]" : "[CAB Agenda]"} ${m.title} — ${m.scheduledStart.toUTCString()}`,
+    text,
   });
   await audit(req, {
-    action: "cab.invites_sent",
+    action: "cab.agenda_sent",
     entityType: "cab",
     entityId: id,
-    summary: `Sent CAB invites: ${result.sent} sent, ${result.skipped} skipped, ${result.errors} errors`,
-    after: result,
+    summary: `Sent CAB agenda: ${result.sent} sent, ${result.skipped} skipped, ${result.errors} errors (${changeRows.length} changes)`,
+    after: { ...result, changeCount: changeRows.length },
   });
   res.json(result);
 });

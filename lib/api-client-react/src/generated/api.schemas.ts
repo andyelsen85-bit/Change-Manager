@@ -915,6 +915,15 @@ export type ListCabMeetingsParams = {
   kind?: string;
 };
 
+export type SendCabAgenda200 = {
+  /** Members who received the agenda email. */
+  sent: number;
+  /** Members whose notification preference opted out, or for whom no SMTP was configured. */
+  skipped: number;
+  /** Members for whom the SMTP send failed. */
+  errors: number;
+};
+
 export type ListAuditLogParams = {
   actorId?: number;
   action?: string;
