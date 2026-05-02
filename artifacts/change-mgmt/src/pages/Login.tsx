@@ -78,7 +78,7 @@ export function LoginPage() {
               Sign in
             </Button>
             <p className="text-center text-xs text-muted-foreground">
-              Local or LDAP credentials accepted. Default admin: <code>admin</code> / <code>admin</code>
+              Local or LDAP credentials accepted.
             </p>
           </form>
         </CardContent>
