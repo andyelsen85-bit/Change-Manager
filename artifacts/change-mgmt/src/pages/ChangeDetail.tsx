@@ -144,22 +144,45 @@ const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus
   },
 };
 
-const TRANSITIONS: Record<ChangeStatus, ChangeStatus[]> = {
-  draft: ["submitted", "cancelled"],
-  submitted: ["in_review", "cancelled"],
-  in_review: ["awaiting_approval", "rejected", "cancelled"],
-  awaiting_approval: ["approved", "rejected", "cancelled"],
-  approved: ["scheduled", "cancelled"],
-  scheduled: ["in_progress", "cancelled"],
-  in_progress: ["implemented", "rolled_back"],
-  implemented: ["in_testing", "awaiting_pir"],
-  in_testing: ["awaiting_pir", "rolled_back"],
-  awaiting_implementation: ["in_progress", "cancelled"],
-  awaiting_pir: ["completed"],
-  completed: [],
-  rejected: [],
-  rolled_back: [],
-  cancelled: [],
+// Forward-transition map mirrored from api-server/src/lib/state-machine.ts.
+// Track-aware because the lifecycles diverge after `implemented` — Standard
+// goes straight to completed; Normal/Emergency route through awaiting_pir.
+// A universal map silently hides the only forward button on the track that
+// doesn't share the Normal path, so we keep one entry per track.
+const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus[]>> = {
+  normal: {
+    draft: ["submitted", "cancelled"],
+    submitted: ["in_review", "cancelled"],
+    in_review: ["awaiting_approval", "rejected", "cancelled"],
+    awaiting_approval: ["approved", "rejected", "cancelled"],
+    approved: ["scheduled", "cancelled"],
+    scheduled: ["in_progress", "cancelled"],
+    in_progress: ["implemented", "rolled_back"],
+    implemented: ["in_testing", "awaiting_pir"],
+    in_testing: ["awaiting_pir", "rolled_back"],
+    awaiting_pir: ["completed"],
+    completed: [], rejected: [], rolled_back: [], cancelled: [], awaiting_implementation: [],
+  },
+  standard: {
+    draft: ["scheduled", "awaiting_implementation", "cancelled"],
+    awaiting_implementation: ["scheduled", "in_progress", "cancelled"],
+    scheduled: ["in_progress", "cancelled"],
+    in_progress: ["implemented", "rolled_back"],
+    implemented: ["completed", "rolled_back"],
+    completed: [], cancelled: [], rolled_back: [],
+    submitted: [], in_review: [], awaiting_approval: [], approved: [], rejected: [], in_testing: [], awaiting_pir: [],
+  },
+  emergency: {
+    draft: ["submitted", "cancelled"],
+    submitted: ["awaiting_approval", "cancelled"],
+    awaiting_approval: ["approved", "rejected", "cancelled"],
+    approved: ["in_progress", "cancelled"],
+    in_progress: ["implemented", "rolled_back"],
+    implemented: ["awaiting_pir", "rolled_back"],
+    awaiting_pir: ["completed"],
+    completed: [], rejected: [], cancelled: [], rolled_back: [],
+    in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [],
+  },
 };
 
 function StatusTimeline({ track, status }: { track: ChangeTrack; status: ChangeStatus }) {
@@ -301,7 +324,7 @@ export function ChangeDetailPage() {
               <StatusTimeline track={c.track} status={c.status} />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              {TRANSITIONS[c.status].map((next) => (
+              {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).map((next) => (
                 <Button
                   key={next}
                   variant={next === "cancelled" || next === "rejected" || next === "rolled_back" ? "destructive" : next === "completed" || next === "approved" ? "default" : "secondary"}
@@ -313,7 +336,7 @@ export function ChangeDetailPage() {
                   → {next.replace(/_/g, " ")}
                 </Button>
               ))}
-              {TRANSITIONS[c.status].length === 0 && (
+              {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).length === 0 && (
                 <span className="text-xs text-muted-foreground">No further transitions available from this state.</span>
               )}
               {canRevert && REVERSIONS_BY_TRACK[c.track][c.status].length > 0 && (
