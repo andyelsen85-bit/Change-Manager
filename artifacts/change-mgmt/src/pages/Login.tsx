@@ -39,7 +39,7 @@ export function LoginPage() {
           </div>
           <div>
             <CardTitle className="text-2xl">Change Management</CardTitle>
-            <CardDescription>ITIL v4 — sign in to your account</CardDescription>
+            <CardDescription>Sign in to your account</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
