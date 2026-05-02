@@ -150,20 +150,20 @@ export function UsersPage() {
               <DialogHeader><DialogTitle>{editing.id ? "Edit user" : "New user"}</DialogTitle></DialogHeader>
               <div className="grid gap-3 py-2">
                 <div className="space-y-2">
-                  <Label>Username</Label>
-                  <Input value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} disabled={editing.id !== 0} data-testid="input-user-username" />
+                  <Label>Username <span className="text-destructive">*</span></Label>
+                  <Input required value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} disabled={editing.id !== 0} data-testid="input-user-username" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Full name</Label>
-                  <Input value={editing.fullName} onChange={(e) => setEditing({ ...editing, fullName: e.target.value })} />
+                  <Label>Full name <span className="text-destructive">*</span></Label>
+                  <Input required value={editing.fullName} onChange={(e) => setEditing({ ...editing, fullName: e.target.value })} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
+                  <Label>Email <span className="text-destructive">*</span></Label>
+                  <Input required type="email" value={editing.email} onChange={(e) => setEditing({ ...editing, email: e.target.value })} />
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label>Source</Label>
+                    <Label>Source <span className="text-destructive">*</span></Label>
                     <Select value={editing.source} onValueChange={(v) => setEditing({ ...editing, source: v as "local" | "ldap" })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -174,11 +174,14 @@ export function UsersPage() {
                   </div>
                   {editing.source === "local" && (
                     <div className="space-y-2">
-                      <Label>{editing.id ? "Reset password (leave blank to keep)" : "Password"}</Label>
-                      <Input type="password" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} data-testid="input-user-password" />
+                      <Label>
+                        {editing.id ? "Reset password (leave blank to keep)" : <>Password <span className="text-destructive">*</span></>}
+                      </Label>
+                      <Input required={!editing.id} type="password" value={editing.password} onChange={(e) => setEditing({ ...editing, password: e.target.value })} data-testid="input-user-password" />
                     </div>
                   )}
                 </div>
+                <p className="text-xs text-muted-foreground">Fields marked <span className="text-destructive">*</span> are required.</p>
                 <div className="flex items-center justify-between rounded-md border border-border p-3">
                   <Label>Administrator</Label>
                   <Switch checked={editing.isAdmin} onCheckedChange={(v) => setEditing({ ...editing, isAdmin: v })} />
@@ -190,7 +193,22 @@ export function UsersPage() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
-                <Button onClick={() => save.mutate(editing)} disabled={save.isPending} data-testid="button-save-user">
+                <Button
+                  onClick={() => {
+                    const missing: string[] = [];
+                    if (!editing.username.trim()) missing.push("Username");
+                    if (!editing.fullName.trim()) missing.push("Full name");
+                    if (!editing.email.trim()) missing.push("Email");
+                    if (editing.source === "local" && !editing.id && !editing.password) missing.push("Password");
+                    if (missing.length) {
+                      toast.error(`Please fill in: ${missing.join(", ")}`);
+                      return;
+                    }
+                    save.mutate(editing);
+                  }}
+                  disabled={save.isPending}
+                  data-testid="button-save-user"
+                >
                   {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
                 </Button>
               </DialogFooter>
