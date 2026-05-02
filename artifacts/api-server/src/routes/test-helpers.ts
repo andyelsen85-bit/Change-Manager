@@ -100,6 +100,8 @@ export const CHANGE_MANAGER_SESSION: SessionPayload = {
   isAdmin: false,
 };
 
+export type SessionLike = SessionPayload;
+
 export const ACCESS: Record<string, ChangeAccessReason> = {
   admin: "admin",
   owner: "owner",
