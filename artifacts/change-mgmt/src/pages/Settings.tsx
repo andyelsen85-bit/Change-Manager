@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Copy, Download, FileSignature, Loader2, Save, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Save, Upload, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { LdapSettings, LdapTestResult, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
@@ -59,11 +59,13 @@ export function SettingsPage() {
           <TabsTrigger value="ldap" data-testid="tab-ldap">LDAP</TabsTrigger>
           <TabsTrigger value="ssl" data-testid="tab-ssl">SSL/TLS</TabsTrigger>
           <TabsTrigger value="timeouts" data-testid="tab-timeouts">Workflow timeouts</TabsTrigger>
+          <TabsTrigger value="backup" data-testid="tab-backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="smtp"><SmtpPanel /></TabsContent>
         <TabsContent value="ldap"><LdapPanel /></TabsContent>
         <TabsContent value="ssl"><SslPanel /></TabsContent>
         <TabsContent value="timeouts"><TimeoutsPanel /></TabsContent>
+        <TabsContent value="backup"><BackupPanel /></TabsContent>
       </Tabs>
     </div>
   );
@@ -835,5 +837,158 @@ function TimeoutsPanel() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function BackupPanel() {
+  const [downloading, setDownloading] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingFile, setPendingFile] = useState<{ name: string; payload: unknown; rowCount: number } | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      await api.download(`/backup`, `change-mgmt-backup-${stamp}.json`);
+      toast.success("Backup downloaded");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Backup failed");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  async function handleFilePicked(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as { tables?: Record<string, unknown[]> };
+      const rowCount = parsed?.tables
+        ? Object.values(parsed.tables).reduce((a, rows) => a + (Array.isArray(rows) ? rows.length : 0), 0)
+        : 0;
+      setPendingFile({ name: file.name, payload: parsed, rowCount });
+      setConfirmText("");
+      setConfirmOpen(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? `Invalid backup file: ${err.message}` : "Invalid backup file");
+    }
+  }
+
+  async function handleRestore() {
+    if (!pendingFile) return;
+    setRestoring(true);
+    try {
+      await api.post<{ ok: boolean; restored: Record<string, number> }>("/backup/restore", pendingFile.payload);
+      toast.success("Database restored. Reloading…");
+      setConfirmOpen(false);
+      setPendingFile(null);
+      // Cached queries reflect the OLD data; force a full reload to pick up
+      // the new dataset and (likely) re-authenticate against restored users.
+      setTimeout(() => window.location.reload(), 800);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Restore failed");
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Backup</CardTitle>
+          <CardDescription>
+            Download a single JSON file containing every table in the database — users, roles, change requests, approvals,
+            CAB meetings, comments, audit log, and all system settings. Store the file somewhere safe; anyone with it can
+            restore your environment.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={handleDownload} disabled={downloading} data-testid="button-backup-download">
+            {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download backup
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base text-destructive">Restore</CardTitle>
+          <CardDescription>
+            Replace the entire database with the contents of a backup file. All current data — including users, change
+            requests, and the audit log — will be permanently overwritten. You will be logged out if your account does not
+            exist in the backup.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              This action cannot be undone. Take a fresh backup first if you might want to roll back.
+            </AlertDescription>
+          </Alert>
+          <div>
+            <input
+              id="backup-restore-file"
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              data-testid="input-backup-file"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) void handleFilePicked(f);
+              }}
+            />
+            <Button
+              variant="destructive"
+              onClick={() => document.getElementById("backup-restore-file")?.click()}
+              data-testid="button-backup-restore"
+            >
+              <Upload className="mr-2 h-4 w-4" /> Choose backup file…
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={confirmOpen} onOpenChange={(o) => { if (!restoring) setConfirmOpen(o); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm full restore</DialogTitle>
+            <DialogDescription>
+              You are about to overwrite the entire database with{" "}
+              <span className="font-mono">{pendingFile?.name ?? "the selected file"}</span>{" "}
+              ({pendingFile?.rowCount.toLocaleString() ?? 0} rows). Type <span className="font-semibold">RESTORE</span> below to proceed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="restore-confirm">Confirmation</Label>
+            <Input
+              id="restore-confirm"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              placeholder="RESTORE"
+              autoComplete="off"
+              data-testid="input-restore-confirm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={restoring}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleRestore}
+              disabled={confirmText !== "RESTORE" || restoring}
+              data-testid="button-restore-confirm"
+            >
+              {restoring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Restore now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

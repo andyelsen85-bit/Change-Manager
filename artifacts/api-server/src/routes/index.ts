@@ -12,6 +12,7 @@ import commentsRouter from "./comments";
 import dashboardRouter from "./dashboard";
 import settingsRouter from "./settings";
 import auditRouter from "./audit";
+import backupRouter from "./backup";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(commentsRouter);
 router.use(dashboardRouter);
 router.use(settingsRouter);
 router.use(auditRouter);
+router.use(backupRouter);
 
 export default router;
