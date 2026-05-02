@@ -135,6 +135,18 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
   if (p.track === "emergency" && p.toStatus === "approved" && !p.approvalsAllApproved) {
     return "eCAB approval has not been recorded.";
   }
+  // Defense in depth: even if a change has somehow been pre-flipped to
+  // `approved`, we re-check that every approval row is explicitly approved
+  // before allowing the Emergency change to be implemented. Abstains and
+  // pending votes do NOT satisfy this gate.
+  if (p.track === "emergency" && p.toStatus === "in_progress" && !p.approvalsAllApproved) {
+    return "All eCAB approvals must be explicitly approved before implementation.";
+  }
+  // Same defense in depth for Normal: scheduling already requires it (above),
+  // but in_progress should likewise reject abstains slipping through.
+  if (p.track === "normal" && p.toStatus === "in_progress" && !p.approvalsAllApproved) {
+    return "All required approvals must be explicitly approved before implementation.";
+  }
   // Cannot enter in_progress on a normal change without planning sign-off.
   if (p.track === "normal" && p.toStatus === "in_progress") {
     if (!p.planning || !p.planning.signedOff) {

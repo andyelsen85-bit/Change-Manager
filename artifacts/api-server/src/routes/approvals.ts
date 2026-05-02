@@ -136,10 +136,15 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
   // and bypass the state machine.
   const all = await db.select().from(approvalsTable).where(eq(approvalsTable.changeId, ap.changeId));
   const anyRejected = all.some((a) => a.decision === "rejected");
-  const allDecided = all.every((a) => a.decision === "approved" || a.decision === "abstain" || a.decision === "rejected");
+  // Auto-flip to "approved" requires that EVERY required approval is explicitly
+  // `approved`. Abstain or pending votes do NOT count as approval — abstaining
+  // approvers must either approve or reject before the change is approved.
+  // This prevents an Emergency change from being implemented on a single
+  // change_manager abstain + ecab_member approved (or vice versa).
+  const allExplicitlyApproved = all.length > 0 && all.every((a) => a.decision === "approved");
   let newStatus: string | null = null;
   if (anyRejected) newStatus = "rejected";
-  else if (allDecided && all.every((a) => a.decision !== "pending")) newStatus = "approved";
+  else if (allExplicitlyApproved) newStatus = "approved";
   if (newStatus) {
     const [current] = await db
       .select({ status: changeRequestsTable.status })
