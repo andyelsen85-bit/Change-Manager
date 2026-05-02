@@ -86,6 +86,62 @@ function maskName(s: string): string {
   return `${s[0]}${"_".repeat(Math.min(4, s.length - 2))}(${s.length})`;
 }
 
+// Parse an ldapjs SearchEntry into a flat string-valued record. ldapjs has
+// shipped three different entry shapes over its lifetime (`pojo`, `object`,
+// and a raw `attributes[]` array on older releases), so we try each in order.
+// All keys are returned in their original casing — call sites use pickAttr()
+// for case-insensitive lookups.
+function parseLdapEntry(e: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const ee = e as { pojo?: Record<string, unknown>; object?: Record<string, unknown>; attributes?: Array<{ type?: string; values?: unknown[]; vals?: unknown[] }> };
+  const obj = ee.pojo ?? ee.object;
+  if (obj && typeof obj === "object") {
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (k === "type" || k === "controls" || k === "objectName" || k === "dn") continue;
+      if (Array.isArray(v)) { if (v.length) out[k] = String(v[0] ?? ""); }
+      else if (typeof v === "string") out[k] = v;
+      else if (v != null) out[k] = String(v);
+    }
+  }
+  if (Array.isArray(ee.attributes)) {
+    for (const a of ee.attributes) {
+      const key = a?.type;
+      if (!key) continue;
+      const vals = (a.values ?? a.vals) as unknown[] | undefined;
+      if (Array.isArray(vals) && vals.length && out[key] == null) {
+        out[key] = String(vals[0] ?? "");
+      }
+    }
+  }
+  return out;
+}
+
+function extractEntryDn(e: unknown): string {
+  const ee = e as { objectName?: string; dn?: string | { toString?: () => string }; pojo?: { objectName?: string; dn?: string } };
+  if (typeof ee.objectName === "string" && ee.objectName) return ee.objectName;
+  if (typeof ee.dn === "string" && ee.dn) return ee.dn;
+  if (ee.dn && typeof (ee.dn as { toString?: () => string }).toString === "function") {
+    const s = (ee.dn as { toString: () => string }).toString();
+    if (s && s !== "[object Object]") return s;
+  }
+  if (ee.pojo) return ee.pojo.objectName ?? ee.pojo.dn ?? "";
+  return "";
+}
+
+// Case-insensitive attribute lookup. Returns the first non-empty value among
+// the supplied keys, matching keys without regard to case. Empty strings are
+// treated as "missing" so `mail=""` doesn't shadow a populated fallback.
+function pickAttr(entry: Record<string, string>, keys: string[]): string {
+  const lower: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entry)) lower[k.toLowerCase()] = v;
+  for (const k of keys) {
+    if (!k) continue;
+    const v = lower[k.toLowerCase()];
+    if (typeof v === "string" && v.trim()) return v;
+  }
+  return "";
+}
+
 // Look up an LDAP user by username WITHOUT verifying their password. Used by
 // the admin "create LDAP user" flow to pull displayName / mail straight from
 // the directory so the operator only has to type the short login. Returns
@@ -135,7 +191,15 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
     });
     const doSearch = () => {
       const filter = cfg.userFilter.replace(/{{username}}/g, escapeLdapFilter(username));
-      const opts = { filter, scope: "sub" as const, attributes: [cfg.usernameAttr, cfg.emailAttr, cfg.nameAttr, "dn"] };
+      // Request the configured attributes plus common AD aliases so that even
+      // if the admin typed "displayName" but the directory returns it under
+      // "displayname" (case differs across server versions) we still get it.
+      const wanted = Array.from(new Set([
+        cfg.usernameAttr, cfg.emailAttr, cfg.nameAttr,
+        "displayName", "cn", "name", "givenName", "sn",
+        "mail", "userPrincipalName", "sAMAccountName", "uid",
+      ]));
+      const opts = { filter, scope: "sub" as const, attributes: wanted };
       client.search(cfg.baseDn, opts, (searchErr, searchRes) => {
         if (searchErr) {
           const { code, details } = extractLdapError(searchErr);
@@ -144,18 +208,8 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
         let entry: Record<string, string> | null = null;
         let entryDn = "";
         searchRes.on("searchEntry", (e: unknown) => {
-          const obj = (e as { pojo?: Record<string, unknown>; object?: Record<string, unknown>; objectName?: string }).pojo
-            ?? (e as { object?: Record<string, unknown> }).object
-            ?? (e as Record<string, unknown>);
-          const attrs: Record<string, string> = {};
-          if (obj && typeof obj === "object") {
-            for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-              if (Array.isArray(v)) attrs[k] = String(v[0] ?? "");
-              else if (typeof v === "string") attrs[k] = v;
-            }
-          }
-          entry = attrs;
-          entryDn = (obj as { objectName?: string; dn?: string }).objectName ?? (obj as { dn?: string }).dn ?? "";
+          entry = parseLdapEntry(e);
+          entryDn = extractEntryDn(e);
         });
         searchRes.on("error", (e) => {
           const { code, details } = extractLdapError(e);
@@ -170,13 +224,23 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
               details: `filter=${filter}, baseDn=${cfg.baseDn}`,
             });
           }
-          finish({
-            ok: true,
-            username: entry[cfg.usernameAttr] || username,
-            email: entry[cfg.emailAttr] || `${username}@ldap.local`,
-            fullName: entry[cfg.nameAttr] || username,
-            userDn: entryDn,
-          });
+          const e = entry as Record<string, string>;
+          // Diagnostic: log every attribute we got back so admins can see what
+          // their directory actually returned vs. what we mapped onto fullName.
+          logger.info(
+            { usernameMasked: maskName(username), entryDn, attrs: Object.keys(e), nameAttr: cfg.nameAttr, emailAttr: cfg.emailAttr },
+            "LDAP lookup entry attributes"
+          );
+          // Case-insensitive lookup with sensible AD fallbacks. Some servers
+          // lowercase keys (`displayname`), some keep them as advertised
+          // (`displayName`); we accept either, then fall back across the
+          // commonly-populated alternatives before giving up.
+          const fullName = pickAttr(e, [cfg.nameAttr, "displayName", "cn", "name"])
+            || `${pickAttr(e, ["givenName"])} ${pickAttr(e, ["sn"])}`.trim()
+            || username;
+          const email = pickAttr(e, [cfg.emailAttr, "mail", "userPrincipalName"]) || `${username}@ldap.local`;
+          const uname = pickAttr(e, [cfg.usernameAttr, "sAMAccountName", "uid"]) || username;
+          finish({ ok: true, username: uname, email, fullName, userDn: entryDn });
         });
       });
     };
@@ -305,11 +369,12 @@ export async function authenticateLdap(username: string, password: string): Prom
       // copy/paste mistake) the filter is sent as-is and will usually return
       // zero hits — which is exactly what we want to report.
       const filter = cfg.userFilter.replace(/{{username}}/g, escapeLdapFilter(username));
-      const opts = {
-        filter,
-        scope: "sub" as const,
-        attributes: [cfg.usernameAttr, cfg.emailAttr, cfg.nameAttr, "dn"],
-      };
+      const wanted = Array.from(new Set([
+        cfg.usernameAttr, cfg.emailAttr, cfg.nameAttr,
+        "displayName", "cn", "name", "givenName", "sn",
+        "mail", "userPrincipalName", "sAMAccountName", "uid",
+      ]));
+      const opts = { filter, scope: "sub" as const, attributes: wanted };
       logger.debug({ baseDn: cfg.baseDn, filter, attrs: opts.attributes }, "LDAP search");
       client.search(cfg.baseDn, opts, (searchErr, searchRes) => {
         if (searchErr) {
@@ -326,20 +391,8 @@ export async function authenticateLdap(username: string, password: string): Prom
         let entry: Record<string, string> | null = null;
         let entryDn = "";
         searchRes.on("searchEntry", (e: unknown) => {
-          const obj = (e as { pojo?: Record<string, unknown>; object?: Record<string, unknown>; objectName?: string }).pojo
-            ?? (e as { object?: Record<string, unknown> }).object
-            ?? (e as Record<string, unknown>);
-          const attrs: Record<string, string> = {};
-          if (obj && typeof obj === "object") {
-            for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-              if (Array.isArray(v)) attrs[k] = String(v[0] ?? "");
-              else if (typeof v === "string") attrs[k] = v;
-            }
-          }
-          entry = attrs;
-          entryDn = (obj as { objectName?: string; dn?: string }).objectName
-            ?? (obj as { dn?: string }).dn
-            ?? "";
+          entry = parseLdapEntry(e);
+          entryDn = extractEntryDn(e);
         });
         searchRes.on("error", (e) => {
           const { code, details } = extractLdapError(e);
@@ -398,12 +451,18 @@ export async function authenticateLdap(username: string, password: string): Prom
               });
               return;
             }
+            const e = entry!;
+            const fullName = pickAttr(e, [cfg.nameAttr, "displayName", "cn", "name"])
+              || `${pickAttr(e, ["givenName"])} ${pickAttr(e, ["sn"])}`.trim()
+              || username;
+            const email = pickAttr(e, [cfg.emailAttr, "mail", "userPrincipalName"]) || `${username}@ldap.local`;
+            const uname = pickAttr(e, [cfg.usernameAttr, "sAMAccountName", "uid"]) || username;
             finish({
               ok: true,
               stage: "ok",
-              username: entry![cfg.usernameAttr] || username,
-              email: entry![cfg.emailAttr] || `${username}@ldap.local`,
-              fullName: entry![cfg.nameAttr] || username,
+              username: uname,
+              email,
+              fullName,
               userDn: entryDn,
             });
           });
