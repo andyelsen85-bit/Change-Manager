@@ -107,6 +107,24 @@ router.post("/auth/login", async (req, res): Promise<void> => {
           })
           .returning();
         userRow = created;
+      } else if (userRow.source === "ldap") {
+        // Self-heal: keep the local copy of name + email in sync with the
+        // directory so role-assignment lists, CAB rosters, and notifications
+        // always show the current attributes. We only touch fields where the
+        // LDAP value is non-empty so a transient attribute miss doesn't blank
+        // out a previously-good record. Admin-set isAdmin / isActive flags
+        // are never overwritten.
+        const desired: Partial<typeof usersTable.$inferInsert> = {};
+        if (r.fullName && r.fullName !== userRow.fullName) desired.fullName = r.fullName;
+        if (r.email && r.email !== userRow.email) desired.email = r.email;
+        if (Object.keys(desired).length > 0) {
+          const [refreshed] = await db
+            .update(usersTable)
+            .set(desired)
+            .where(eq(usersTable.id, userRow.id))
+            .returning();
+          if (refreshed) userRow = refreshed;
+        }
       }
       const roles = await loadUserRoles(userRow.id);
       const token = signSession({ uid: userRow.id, username: userRow.username, isAdmin: userRow.isAdmin });
