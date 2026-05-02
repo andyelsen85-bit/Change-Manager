@@ -57,7 +57,7 @@ export function ChangeDetailPage() {
   });
 
   const transition = useMutation({
-    mutationFn: (status: ChangeStatus) => api.post(`/changes/${id}/transition`, { status }),
+    mutationFn: (status: ChangeStatus) => api.post(`/changes/${id}/transition`, { toStatus: status }),
     onSuccess: () => {
       toast.success("Status updated");
       qc.invalidateQueries({ queryKey: ["change", id] });

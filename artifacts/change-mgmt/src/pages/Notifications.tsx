@@ -15,7 +15,10 @@ export function NotificationsPage() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["notifications", user?.id],
-    queryFn: () => api.get<NotificationPreference[]>(`/users/${user!.id}/notification-preferences`),
+    queryFn: () =>
+      api.get<Array<{ eventKey: string; emailEnabled: boolean; inAppEnabled: boolean }>>(
+        `/users/${user!.id}/notification-preferences`,
+      ),
     enabled: !!user,
   });
 
@@ -25,13 +28,21 @@ export function NotificationsPage() {
     if (q.data && !prefs) {
       const m = new Map<string, NotificationPreference>();
       for (const ev of NOTIFICATION_EVENTS) m.set(ev.key, { eventKey: ev.key, email: true, inApp: true });
-      for (const p of q.data) m.set(p.eventKey, p);
+      for (const p of q.data) m.set(p.eventKey, { eventKey: p.eventKey, email: p.emailEnabled, inApp: p.inAppEnabled });
       setPrefs(m);
     }
   }, [q.data, prefs]);
 
   const save = useMutation({
-    mutationFn: () => api.put(`/users/${user!.id}/notification-preferences`, { preferences: Array.from(prefs!.values()) }),
+    mutationFn: () =>
+      api.put(
+        `/users/${user!.id}/notification-preferences`,
+        Array.from(prefs!.values()).map((p) => ({
+          eventKey: p.eventKey,
+          emailEnabled: p.email,
+          inAppEnabled: p.inApp,
+        })),
+      ),
     onSuccess: () => {
       toast.success("Notification preferences saved");
       qc.invalidateQueries({ queryKey: ["notifications", user?.id] });

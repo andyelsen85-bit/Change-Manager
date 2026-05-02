@@ -18,7 +18,7 @@ export function ProfilePage() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const saveProfile = useMutation({
-    mutationFn: () => api.patch(`/users/${user!.id}`, { fullName, email }),
+    mutationFn: () => api.patch(`/users/me`, { fullName, email }),
     onSuccess: async () => {
       toast.success("Profile updated");
       await refresh();

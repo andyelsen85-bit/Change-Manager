@@ -49,6 +49,7 @@ export function NewChangePage() {
         risk,
         impact,
         priority,
+        category: selectedTemplate?.category ?? "general",
         plannedStart: fromLocalDateTimeInput(plannedStart),
         plannedEnd: fromLocalDateTimeInput(plannedEnd),
         assigneeId: assigneeId === "none" ? null : Number(assigneeId),

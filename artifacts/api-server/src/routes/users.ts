@@ -100,6 +100,33 @@ router.post("/users", requireAdmin, async (req, res): Promise<void> => {
   res.status(201).json(await userToDto(created));
 });
 
+router.patch("/users/me", requireAuth, async (req, res): Promise<void> => {
+  const session = req.session!;
+  const [before] = await db.select().from(usersTable).where(eq(usersTable.id, session.uid));
+  if (!before) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const { email, fullName } = req.body ?? {};
+  const updates: Partial<typeof usersTable.$inferInsert> = {};
+  if (typeof email === "string" && email.length > 0) updates.email = email;
+  if (typeof fullName === "string" && fullName.length > 0) updates.fullName = fullName;
+  if (Object.keys(updates).length === 0) {
+    res.json(await userToDto(before));
+    return;
+  }
+  const [updated] = await db.update(usersTable).set(updates).where(eq(usersTable.id, session.uid)).returning();
+  await audit(req, {
+    action: "user.self_updated",
+    entityType: "user",
+    entityId: session.uid,
+    summary: `Updated own profile`,
+    before: { email: before.email, fullName: before.fullName },
+    after: { email: updated.email, fullName: updated.fullName },
+  });
+  res.json(await userToDto(updated));
+});
+
 router.get("/users/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {

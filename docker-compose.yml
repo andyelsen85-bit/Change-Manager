@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-change_mgmt}
+      POSTGRES_USER: ${POSTGRES_USER:-change_mgmt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-change_mgmt} -d ${POSTGRES_DB:-change_mgmt}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  migrate:
+    build:
+      context: .
+      target: builder
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-change_mgmt}
+    command: ["pnpm", "--filter", "@workspace/db", "run", "push"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: api
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-change_mgmt}
+    expose:
+      - "8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  web:
+    build:
+      context: .
+      target: web
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      DISABLE_TLS: ${DISABLE_TLS:-false}
+      TLS_HOSTNAME: ${TLS_HOSTNAME:-change-mgmt.local}
+      TLS_SELFSIGNED_DAYS: ${TLS_SELFSIGNED_DAYS:-365}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./certs:/etc/nginx/certs
+    restart: unless-stopped
+
+volumes:
+  db_data:

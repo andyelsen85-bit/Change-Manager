@@ -48,7 +48,7 @@ export function setSessionCookie(res: Response, token: string): void {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: false,
+    secure: process.env["NODE_ENV"] === "production",
     maxAge: TOKEN_TTL_SECONDS * 1000,
     path: "/",
   });

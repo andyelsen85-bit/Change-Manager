@@ -10,7 +10,7 @@ import {
   testRecordsTable,
   pirRecordsTable,
 } from "@workspace/db";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, requireAdmin } from "../lib/auth";
 
 const router: IRouter = Router();
 
@@ -65,7 +65,7 @@ router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> =
   });
 });
 
-router.get("/dashboard/activity", requireAuth, async (_req, res): Promise<void> => {
+router.get("/dashboard/activity", requireAdmin, async (_req, res): Promise<void> => {
   const rows = await db.select().from(auditLogTable).orderBy(desc(auditLogTable.timestamp)).limit(20);
   res.json(
     rows.map((r) => ({
