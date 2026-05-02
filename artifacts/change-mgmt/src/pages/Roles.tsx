@@ -108,7 +108,7 @@ function RoleCard({
                   data-testid={`assignment-${a.id}`}
                 >
                   <div className="flex items-center gap-2">
-                    <span>{a.fullName}</span>
+                    <span data-testid={`assignment-name-${a.id}`}>{a.userName}</span>
                     {a.isDeputy ? (
                       <span className="rounded-md border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-warning">Deputy</span>
                     ) : (
