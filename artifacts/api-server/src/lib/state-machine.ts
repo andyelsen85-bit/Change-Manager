@@ -66,12 +66,10 @@ const STANDARD: Record<ChangeStatus, ChangeStatus[]> = {
 // Approval may be granted out-of-band (phone/IM) and then recorded in the system,
 // but the system enforces approved -> in_progress: no draft -> in_progress shortcut.
 const EMERGENCY: Record<ChangeStatus, ChangeStatus[]> = {
-  // Same submit-then-eCAB-approval flow as Normal but collapsed: no review,
-  // testing or scheduling stage. The Submitted hop is kept so the requester
-  // and the eCAB chair are distinct steps (requester forwards, chair approves)
-  // and so the audit trail looks the same as Normal.
-  draft: ["submitted", "cancelled"],
-  submitted: ["awaiting_approval", "cancelled"],
+  // Collapsed flow: no Submitted / In review / Scheduled / In testing hops.
+  // Requester sends the change straight to the eCAB for approval; PIR is
+  // still required before the change can be closed.
+  draft: ["awaiting_approval", "cancelled"],
   awaiting_approval: ["approved", "rejected", "cancelled"],
   approved: ["in_progress", "cancelled"],
   in_progress: ["implemented", "rolled_back"],
@@ -82,6 +80,7 @@ const EMERGENCY: Record<ChangeStatus, ChangeStatus[]> = {
   cancelled: [],
   rolled_back: [],
   // Unused for emergency:
+  submitted: [],
   in_review: [],
   scheduled: [],
   awaiting_implementation: [],

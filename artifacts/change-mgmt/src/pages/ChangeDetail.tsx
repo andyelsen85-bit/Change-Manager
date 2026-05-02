@@ -173,15 +173,14 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
     submitted: [], in_review: [], awaiting_approval: [], approved: [], rejected: [], in_testing: [], awaiting_pir: [],
   },
   emergency: {
-    draft: ["submitted", "cancelled"],
-    submitted: ["awaiting_approval", "cancelled"],
+    draft: ["awaiting_approval", "cancelled"],
     awaiting_approval: ["approved", "rejected", "cancelled"],
     approved: ["in_progress", "cancelled"],
     in_progress: ["implemented", "rolled_back"],
     implemented: ["awaiting_pir", "rolled_back"],
     awaiting_pir: ["completed"],
     completed: [], rejected: [], cancelled: [], rolled_back: [],
-    in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [],
+    submitted: [], in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [],
   },
 };
 
