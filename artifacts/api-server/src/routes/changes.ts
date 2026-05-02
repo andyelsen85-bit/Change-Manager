@@ -124,8 +124,9 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   // Standard-track classification: only allowed when an active, existing template is
-  // referenced. Submissions that claim 'standard' without a valid active template are
-  // automatically reclassified to 'normal' so they go through the full approval pipeline.
+  // referenced. Submissions that claim 'standard' without a valid + active template are
+  // rejected with HTTP 400 so callers cannot smuggle changes around the approval
+  // pipeline by claiming a non-existent or disabled template.
   let track = b.track;
   let templateId: number | null = null;
   let initialStatus = "draft";
