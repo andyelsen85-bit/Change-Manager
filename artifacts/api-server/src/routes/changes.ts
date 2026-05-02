@@ -55,7 +55,10 @@ const router: IRouter = Router();
 // Emergency changes still require an eCAB member alongside the Change Manager.
 const APPROVER_ROLES_BY_TRACK: Record<string, string[]> = {
   normal: ["change_manager"],
-  emergency: ["change_manager", "ecab_member"],
+  // Emergency: the eCAB is the sole approving authority. The Change Manager
+  // coordinates the change but does not vote — matching common ITIL practice
+  // where the eCAB has standing authority to authorise out-of-band fixes.
+  emergency: ["ecab_member"],
   standard: [],
 };
 
