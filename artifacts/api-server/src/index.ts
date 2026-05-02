@@ -15,9 +15,13 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+// applyDbConstraints installs the audit-log immutability triggers. If this fails the
+// server MUST NOT start: a running app without DB-level append-only enforcement
+// silently weakens forensic integrity. Hard-fail the boot.
 applyDbConstraints()
   .catch((err) => {
-    logger.error({ err }, "Failed to apply DB constraints");
+    logger.error({ err }, "FATAL: failed to apply DB constraints (audit-log immutability). Refusing to start.");
+    process.exit(1);
   })
   .then(() => runSeed())
   .catch((err) => {

@@ -79,7 +79,10 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     .where(eq(approvalsTable.id, id))
     .returning();
 
-  // Check whether all approvals decided -> set change status
+  // Check whether all approvals decided -> set change status. Critically, this auto-flip
+  // only happens when the change is currently in `awaiting_approval` so a vote on a stale
+  // approval row cannot teleport a draft/cancelled/in-progress change into approved/rejected
+  // and bypass the state machine.
   const all = await db.select().from(approvalsTable).where(eq(approvalsTable.changeId, ap.changeId));
   const anyRejected = all.some((a) => a.decision === "rejected");
   const allDecided = all.every((a) => a.decision === "approved" || a.decision === "abstain" || a.decision === "rejected");
@@ -87,7 +90,19 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
   if (anyRejected) newStatus = "rejected";
   else if (allDecided && all.every((a) => a.decision !== "pending")) newStatus = "approved";
   if (newStatus) {
-    await db.update(changeRequestsTable).set({ status: newStatus }).where(eq(changeRequestsTable.id, ap.changeId));
+    const [current] = await db
+      .select({ status: changeRequestsTable.status })
+      .from(changeRequestsTable)
+      .where(eq(changeRequestsTable.id, ap.changeId));
+    if (current?.status === "awaiting_approval") {
+      await db
+        .update(changeRequestsTable)
+        .set({ status: newStatus })
+        .where(eq(changeRequestsTable.id, ap.changeId));
+    } else {
+      // Vote was recorded but change isn't in awaiting_approval — don't auto-flip status.
+      newStatus = null;
+    }
   }
   const [change] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, ap.changeId));
   await audit(req, {
