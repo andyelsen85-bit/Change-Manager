@@ -64,10 +64,16 @@ docker/            # Nginx config + entrypoint for the web container
 ## Self-hosting with Docker (80 / 443)
 
 ```
-cp .env.example .env
-# edit .env: set POSTGRES_PASSWORD and JWT_SECRET (use: openssl rand -hex 64)
+./scripts/init-env.sh        # generates .env with strong random secrets
 docker compose up -d --build
 ```
+
+The init script creates a `.env` (mode 0600) at the repo root with random
+`POSTGRES_PASSWORD` and `JWT_SECRET`, copying the rest of the defaults from
+`.env.example`. It is idempotent — re-running it leaves an existing `.env`
+alone. If you'd rather author `.env` by hand, copy `.env.example` to `.env`
+and set `POSTGRES_PASSWORD` and `JWT_SECRET` (use `openssl rand -hex 64`)
+yourself; both compose services refuse to start without them.
 
 The compose stack runs Postgres, applies migrations, starts the Node API, and an Nginx
 container that serves the static frontend on `:80`/`:443` and reverse-proxies `/api/*`
