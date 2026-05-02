@@ -47,6 +47,7 @@ import type {
   PlanningRecord,
   Role,
   RoleAssignment,
+  SendCabAgenda200,
   SessionUser,
   SetupBody,
   SetupStatus,
@@ -3448,38 +3449,38 @@ export function useGetCabMeetingIcs<
   return { ...query, queryKey: queryOptions.queryKey };
 }
 
-export const getSendCabInvitesUrl = (id: number) => {
-  return `/api/cab-meetings/${id}/send-invites`;
+export const getSendCabAgendaUrl = (id: number) => {
+  return `/api/cab-meetings/${id}/send-agenda`;
 };
 
-export const sendCabInvites = async (
+export const sendCabAgenda = async (
   id: number,
   options?: RequestInit,
-): Promise<void> => {
-  return customFetch<void>(getSendCabInvitesUrl(id), {
+): Promise<SendCabAgenda200> => {
+  return customFetch<SendCabAgenda200>(getSendCabAgendaUrl(id), {
     ...options,
     method: "POST",
   });
 };
 
-export const getSendCabInvitesMutationOptions = <
+export const getSendCabAgendaMutationOptions = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof sendCabInvites>>,
+    Awaited<ReturnType<typeof sendCabAgenda>>,
     TError,
     { id: number },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof sendCabInvites>>,
+  Awaited<ReturnType<typeof sendCabAgenda>>,
   TError,
   { id: number },
   TContext
 > => {
-  const mutationKey = ["sendCabInvites"];
+  const mutationKey = ["sendCabAgenda"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -3489,41 +3490,41 @@ export const getSendCabInvitesMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof sendCabInvites>>,
+    Awaited<ReturnType<typeof sendCabAgenda>>,
     { id: number }
   > = (props) => {
     const { id } = props ?? {};
 
-    return sendCabInvites(id, requestOptions);
+    return sendCabAgenda(id, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type SendCabInvitesMutationResult = NonNullable<
-  Awaited<ReturnType<typeof sendCabInvites>>
+export type SendCabAgendaMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendCabAgenda>>
 >;
 
-export type SendCabInvitesMutationError = ErrorType<unknown>;
+export type SendCabAgendaMutationError = ErrorType<unknown>;
 
-export const useSendCabInvites = <
+export const useSendCabAgenda = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof sendCabInvites>>,
+    Awaited<ReturnType<typeof sendCabAgenda>>,
     TError,
     { id: number },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
-  Awaited<ReturnType<typeof sendCabInvites>>,
+  Awaited<ReturnType<typeof sendCabAgenda>>,
   TError,
   { id: number },
   TContext
 > => {
-  return useMutation(getSendCabInvitesMutationOptions(options));
+  return useMutation(getSendCabAgendaMutationOptions(options));
 };
 
 export const getListCommentsUrl = (id: number) => {

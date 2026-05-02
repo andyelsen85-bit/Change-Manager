@@ -897,8 +897,18 @@ export const GetCabMeetingIcsParams = zod.object({
   id: zod.coerce.number(),
 });
 
-export const SendCabInvitesParams = zod.object({
+export const SendCabAgendaParams = zod.object({
   id: zod.coerce.number(),
+});
+
+export const SendCabAgendaResponse = zod.object({
+  sent: zod.number().describe("Members who received the agenda email."),
+  skipped: zod
+    .number()
+    .describe(
+      "Members whose notification preference opted out, or for whom no SMTP was configured.",
+    ),
+  errors: zod.number().describe("Members for whom the SMTP send failed."),
 });
 
 export const ListCommentsParams = zod.object({

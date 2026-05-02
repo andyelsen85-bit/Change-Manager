@@ -81,10 +81,10 @@ export function CabDetailPage() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
   });
 
-  const sendInvites = useMutation({
-    mutationFn: () => api.post<{ sent: number; skipped: number; errors: number }>(`/cab-meetings/${id}/send-invites`),
-    onSuccess: (r) => toast.success(`Invites: ${r.sent} sent, ${r.skipped} skipped, ${r.errors} errors`),
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to send invites"),
+  const sendAgenda = useMutation({
+    mutationFn: () => api.post<{ sent: number; skipped: number; errors: number }>(`/cab-meetings/${id}/send-agenda`),
+    onSuccess: (r) => toast.success(`Agenda: ${r.sent} sent, ${r.skipped} skipped, ${r.errors} errors`),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to send agenda"),
   });
 
   const del = useMutation({
@@ -120,9 +120,9 @@ export function CabDetailPage() {
             <Button variant="outline" size="sm" onClick={() => api.download(`/cab-meetings/${id}/ics`, `cab-${id}.ics`)} data-testid="button-download-ics">
               <CalendarDays className="mr-2 h-4 w-4" /> Download .ics
             </Button>
-            <Button onClick={() => sendInvites.mutate()} disabled={sendInvites.isPending} data-testid="button-send-invites">
-              {sendInvites.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
-              Send invites
+            <Button onClick={() => sendAgenda.mutate()} disabled={sendAgenda.isPending} data-testid="button-send-agenda">
+              {sendAgenda.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
+              Send agenda
             </Button>
             <Button
               variant="destructive"

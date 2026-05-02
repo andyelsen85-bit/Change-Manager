@@ -555,14 +555,24 @@ paths:
           content:
             text/calendar:
               schema: { type: string }
-  /cab-meetings/{id}/send-invites:
+  /cab-meetings/{id}/send-agenda:
     post:
-      operationId: sendCabInvites
+      operationId: sendCabAgenda
       tags: [cab]
       parameters:
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
-        "204": { description: Invites sent }
+        "200":
+          description: Agenda sent — counts of sent/skipped/errored deliveries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sent, skipped, errors]
+                properties:
+                  sent:    { type: integer, description: "Members who received the agenda email." }
+                  skipped: { type: integer, description: "Members whose notification preference opted out, or for whom no SMTP was configured." }
+                  errors:  { type: integer, description: "Members for whom the SMTP send failed." }
 
   # ---------- COMMENTS ----------
   /changes/{id}/comments:
