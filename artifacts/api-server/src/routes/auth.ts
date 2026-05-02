@@ -26,6 +26,17 @@ router.post("/auth/login", async (req, res): Promise<void> => {
 
   if (existing && existing.source === "local") {
     if (!existing.isActive) {
+      await audit(
+        req,
+        {
+          action: "auth.login_failed",
+          entityType: "user",
+          entityId: existing.id,
+          summary: `Failed login for ${username} (account disabled)`,
+          after: { authMethod: "local", failureReason: "account_disabled", username },
+        },
+        { id: null, name: username },
+      );
       res.status(401).json({ error: "Account disabled" });
       return;
     }
