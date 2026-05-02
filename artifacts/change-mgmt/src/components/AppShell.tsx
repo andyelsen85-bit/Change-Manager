@@ -80,7 +80,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <div className="flex flex-col leading-tight">
               <span className="text-sm font-semibold">Change Mgmt</span>
-              <span className="text-[10px] uppercase tracking-wider opacity-60">ITIL v4</span>
             </div>
           </Link>
           <Button
@@ -117,7 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="absolute inset-x-0 bottom-0 border-t border-sidebar-border p-3 text-xs text-sidebar-foreground/60">
-          <div>v1.0 · ITIL v4</div>
+          <div>v1.0</div>
           <div>{user?.source === "ldap" ? "LDAP-authenticated session" : "Local session"}</div>
         </div>
       </aside>
