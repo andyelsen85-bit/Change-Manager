@@ -11,7 +11,7 @@ router.get("/roles", requireAuth, async (_req, res): Promise<void> => {
   res.json(rows);
 });
 
-router.get("/role-assignments", requireAuth, async (_req, res): Promise<void> => {
+router.get("/role-assignments", requireAdmin, async (_req, res): Promise<void> => {
   const rows = await db
     .select({
       id: roleAssignmentsTable.id,

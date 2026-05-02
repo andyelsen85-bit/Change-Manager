@@ -72,9 +72,40 @@ export function readSessionCookie(req: Request): SessionPayload | null {
   return verifySession(token);
 }
 
+// Returns true when the request carried a session cookie that failed verification —
+// i.e. an expired or tampered JWT. Used by middleware to emit `auth.session_expired`
+// audit events distinct from anonymous (no-cookie) traffic.
+export function hasInvalidSessionCookie(req: Request): boolean {
+  const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[COOKIE_NAME];
+  if (!token) return false;
+  return verifySession(token) === null;
+}
+
+async function maybeAuditExpired(req: Request): Promise<void> {
+  if (!hasInvalidSessionCookie(req)) return;
+  // Best-effort; never fail the request because of audit IO.
+  try {
+    const { audit } = await import("./audit");
+    await audit(
+      req,
+      {
+        action: "auth.session_expired",
+        entityType: "user",
+        entityId: null,
+        summary: "Rejected request: expired or invalid session token",
+        after: { reason: "invalid_or_expired_token" },
+      },
+      { id: null, name: "anonymous" },
+    );
+  } catch {
+    // swallow — audit failures shouldn't change request semantics
+  }
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const session = readSessionCookie(req);
   if (!session) {
+    await maybeAuditExpired(req);
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
@@ -85,6 +116,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
   const session = readSessionCookie(req);
   if (!session) {
+    await maybeAuditExpired(req);
     res.status(401).json({ error: "Not authenticated" });
     return;
   }

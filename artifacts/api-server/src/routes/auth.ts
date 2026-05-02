@@ -31,24 +31,34 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     }
     const ok = existing.passwordHash ? await verifyPassword(password, existing.passwordHash) : false;
     if (!ok) {
-      await audit(req, {
-        action: "auth.login_failed",
-        entityType: "user",
-        entityId: existing.id,
-        summary: `Failed login for ${username}`,
-      }, { id: null, name: username });
+      await audit(
+        req,
+        {
+          action: "auth.login_failed",
+          entityType: "user",
+          entityId: existing.id,
+          summary: `Failed login for ${username}`,
+          after: { authMethod: "local", failureReason: "bad_password", username },
+        },
+        { id: null, name: username },
+      );
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
     const roles = await loadUserRoles(existing.id);
     const token = signSession({ uid: existing.id, username: existing.username, isAdmin: existing.isAdmin });
     setSessionCookie(res, token);
-    await audit(req, {
-      action: "auth.login",
-      entityType: "user",
-      entityId: existing.id,
-      summary: `User ${existing.username} logged in (local)`,
-    }, { id: existing.id, name: existing.username });
+    await audit(
+      req,
+      {
+        action: "auth.login",
+        entityType: "user",
+        entityId: existing.id,
+        summary: `User ${existing.username} logged in (local)`,
+        after: { authMethod: "local", username: existing.username },
+      },
+      { id: existing.id, name: existing.username },
+    );
     res.json({
       id: existing.id,
       username: existing.username,
@@ -84,12 +94,17 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       const roles = await loadUserRoles(userRow.id);
       const token = signSession({ uid: userRow.id, username: userRow.username, isAdmin: userRow.isAdmin });
       setSessionCookie(res, token);
-      await audit(req, {
-        action: "auth.login",
-        entityType: "user",
-        entityId: userRow.id,
-        summary: `User ${userRow.username} logged in (ldap)`,
-      }, { id: userRow.id, name: userRow.username });
+      await audit(
+        req,
+        {
+          action: "auth.login",
+          entityType: "user",
+          entityId: userRow.id,
+          summary: `User ${userRow.username} logged in (ldap)`,
+          after: { authMethod: "ldap", username: userRow.username },
+        },
+        { id: userRow.id, name: userRow.username },
+      );
       res.json({
         id: userRow.id,
         username: userRow.username,
@@ -103,12 +118,21 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     }
   }
 
-  await audit(req, {
-    action: "auth.login_failed",
-    entityType: "user",
-    entityId: null,
-    summary: `Failed login for ${username}`,
-  }, { id: null, name: username });
+  await audit(
+    req,
+    {
+      action: "auth.login_failed",
+      entityType: "user",
+      entityId: null,
+      summary: `Failed login for ${username}`,
+      after: {
+        authMethod: existing?.source === "ldap" || ldapCfg?.enabled ? "ldap" : "local",
+        failureReason: existing ? "bad_credentials" : "unknown_user",
+        username,
+      },
+    },
+    { id: null, name: username },
+  );
   res.status(401).json({ error: "Invalid credentials" });
 });
 

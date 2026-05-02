@@ -38,6 +38,18 @@ async function userToDto(u: typeof usersTable.$inferSelect) {
   };
 }
 
+// Slim DTO returned to non-admin callers. The full directory (including email,
+// admin flag, deputies, account source) is admin-only — non-admins only need to
+// pick assignees / display names. We deliberately omit username so identifiers
+// useful for authentication enumeration aren't leaked.
+function userToPublicDto(u: typeof usersTable.$inferSelect) {
+  return {
+    id: u.id,
+    fullName: u.fullName,
+    isActive: u.isActive,
+  };
+}
+
 router.get("/users", requireAuth, async (req, res): Promise<void> => {
   const search = typeof req.query["search"] === "string" ? req.query["search"] : null;
   const role = typeof req.query["role"] === "string" ? req.query["role"] : null;
@@ -59,8 +71,13 @@ router.get("/users", requireAuth, async (req, res): Promise<void> => {
     const ids = new Set(ra.map((r) => r.userId));
     rows = rows.filter((u) => ids.has(u.id));
   }
-  const dtos = await Promise.all(rows.map(userToDto));
-  res.json(dtos);
+  if (req.session?.isAdmin) {
+    const dtos = await Promise.all(rows.map(userToDto));
+    res.json(dtos);
+    return;
+  }
+  // Non-admin: only active users, slim public DTO (assignee dropdown use case).
+  res.json(rows.filter((u) => u.isActive).map(userToPublicDto));
 });
 
 router.post("/users", requireAdmin, async (req, res): Promise<void> => {
@@ -138,7 +155,13 @@ router.get("/users/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "User not found" });
     return;
   }
-  res.json(await userToDto(u));
+  // Admins and the user themselves get the full record. Everyone else gets the
+  // slim public DTO (no email, no admin flag, no deputy, no source).
+  if (req.session?.isAdmin || req.session?.uid === id) {
+    res.json(await userToDto(u));
+    return;
+  }
+  res.json(userToPublicDto(u));
 });
 
 router.patch("/users/:id", requireAdmin, async (req, res): Promise<void> => {
