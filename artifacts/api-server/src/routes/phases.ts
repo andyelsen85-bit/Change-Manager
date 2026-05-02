@@ -8,7 +8,7 @@ import {
   changeRequestsTable,
   type TestCase,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess } from "../lib/auth";
+import { requireAuth, getChangeAccess, isPrivilegedAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify, getUserEmail } from "../lib/email";
 
@@ -66,12 +66,13 @@ router.put("/changes/:id/planning", requireAuth, async (req, res): Promise<void>
   const c = await loadChangeForCaller(req, res);
   if (!c) return;
   const id = c.id;
-  // Once planning has been signed off it is locked; only an admin/change_manager can
-  // overwrite (e.g. to clear sign-off) and the caller must explicitly do so.
+  // Once planning has been signed off it is locked; only an admin or governance
+  // role holder (change_manager / eCAB member / CAB chair) can overwrite (e.g.
+  // to clear sign-off). Owners / assignees must request a reopen.
   const [existing] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
   if (existing?.signedOff) {
     const access = await getChangeAccess(req.session!, c);
-    if (access !== "admin" && access !== "change_manager") {
+    if (!isPrivilegedAccess(access)) {
       res.status(409).json({ error: "Planning is signed off and locked. Ask a Change Manager to reopen it." });
       return;
     }

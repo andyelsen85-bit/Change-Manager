@@ -14,7 +14,7 @@ import {
   roleAssignmentsTable,
   cabMeetingsTable,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess } from "../lib/auth";
+import { requireAuth, getChangeAccess, isPrivilegedAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
 import { notify, getUserEmail } from "../lib/email";
@@ -327,11 +327,13 @@ router.delete("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  // Only admins or change_managers can delete a change. Owners cannot delete an
-  // already-progressed change to preserve the immutable audit trail.
+  // Per policy, deleting a change is permitted to the same group authorised to
+  // edit / transition it: the owner, the assignee, a governance role (change
+  // manager / eCAB member / CAB chair), or an admin. Other authenticated users
+  // are rejected to prevent IDOR-style mass deletion.
   const access = await getChangeAccess(req.session!, before);
-  if (access !== "admin" && access !== "change_manager") {
-    res.status(403).json({ error: "Only an admin or change manager can delete a change." });
+  if (!access) {
+    res.status(403).json({ error: "Only the owner, assignee, a governance role holder, or an admin can delete this change." });
     return;
   }
   await db.delete(changeRequestsTable).where(eq(changeRequestsTable.id, id));
@@ -383,13 +385,14 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   //    Emergency tracks requires that the linked CAB / eCAB meeting has actually
   //    concluded. This complements the per-vote gate so a status flip itself cannot
   //    be used to fast-track around CAB.
-  // 2) Only an admin or change_manager may put a change into `awaiting_approval` —
-  //    owners/assignees should not be able to self-flip into the approval state.
+  // 2) Only an admin or governance role holder (change_manager / eCAB / CAB chair)
+  //    may put a change into `awaiting_approval` — owners/assignees should not be
+  //    able to self-flip into the approval state.
   if (targetStatus === "awaiting_approval" && (track === "normal" || track === "emergency")) {
-    if (access !== "admin" && access !== "change_manager") {
+    if (!isPrivilegedAccess(access)) {
       res
         .status(403)
-        .json({ error: "Only an admin or Change Manager can move a change into approval." });
+        .json({ error: "Only an admin or governance role holder can move a change into approval." });
       return;
     }
     let postCab = false;

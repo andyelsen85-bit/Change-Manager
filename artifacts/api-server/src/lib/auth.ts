@@ -219,7 +219,21 @@ export function requireRole(roles: string[]) {
   };
 }
 
-export type ChangeAccessReason = "owner" | "assignee" | "admin" | "change_manager" | null;
+// Governance roles whose holders are authorised to act on any change request
+// regardless of ownership / assignment. These are the cross-cutting roles that
+// run the change-management process: the Change Manager, the eCAB members who
+// authorise emergency changes, and the CAB chair who runs the meeting. Other
+// roles (technical_reviewer, business_owner, implementer, ...) are scoped to
+// their specific contributions and do not get blanket access.
+export const GOVERNANCE_ROLES = ["change_manager", "ecab_member", "cab_chair"] as const;
+export type GovernanceRole = (typeof GOVERNANCE_ROLES)[number];
+
+export type ChangeAccessReason =
+  | "owner"
+  | "assignee"
+  | "admin"
+  | GovernanceRole
+  | null;
 
 export async function getChangeAccess(
   session: SessionPayload,
@@ -229,6 +243,18 @@ export async function getChangeAccess(
   if (change.ownerId === session.uid) return "owner";
   if (change.assigneeId === session.uid) return "assignee";
   const userRoles = await loadUserRoles(session.uid);
-  if (userRoles.includes("change_manager")) return "change_manager";
+  for (const role of GOVERNANCE_ROLES) {
+    if (userRoles.includes(role)) return role;
+  }
   return null;
+}
+
+// Returns true when the access reason represents a privileged caller — admin
+// or any governance role — i.e. someone who can perform restricted operations
+// (deletion, signed-off planning override, transitions into the approval
+// state) regardless of whether they are owner / assignee.
+export function isPrivilegedAccess(reason: ChangeAccessReason): boolean {
+  if (reason === "admin") return true;
+  if (reason === null) return false;
+  return (GOVERNANCE_ROLES as readonly string[]).includes(reason);
 }
