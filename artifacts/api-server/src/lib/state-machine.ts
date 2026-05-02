@@ -90,6 +90,90 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
   emergency: EMERGENCY,
 };
 
+// ---------------------------------------------------------------------------
+// REVERSE TRANSITIONS — controlled "walk-back" graphs.
+//
+// The forward graph is strict: a Normal change can only progress draft → …
+// → completed. In real ITIL operations changes are sometimes pushed forward
+// prematurely (the reviewer hits "Send for approval" before the Change
+// Manager is ready, or a CAB needs to rework an already-approved change).
+// We expose a separate "revert" action restricted to Change Manager / Admin
+// that walks the change BACK to a sensible earlier status. The maps below
+// list, for each current status, which prior statuses are valid revert
+// targets. `rolled_back` is intentionally empty: a physically rolled-back
+// change cannot be un-rolled back.
+// ---------------------------------------------------------------------------
+
+const REVERSE_NORMAL: Record<ChangeStatus, ChangeStatus[]> = {
+  draft: [],
+  submitted: ["draft"],
+  in_review: ["submitted", "draft"],
+  awaiting_approval: ["in_review", "submitted", "draft"],
+  approved: ["awaiting_approval", "in_review", "draft"],
+  scheduled: ["approved", "awaiting_approval"],
+  in_progress: ["scheduled", "approved"],
+  implemented: ["in_progress"],
+  in_testing: ["implemented", "in_progress"],
+  awaiting_pir: ["in_testing", "implemented"],
+  completed: ["awaiting_pir"], // reopen after closure
+  cancelled: ["draft"], // reopen a cancelled change
+  rejected: ["draft", "in_review"], // reopen a rejected change
+  rolled_back: [], // truly terminal
+  awaiting_implementation: [],
+};
+
+const REVERSE_STANDARD: Record<ChangeStatus, ChangeStatus[]> = {
+  draft: [],
+  awaiting_implementation: ["draft"],
+  scheduled: ["awaiting_implementation", "draft"],
+  in_progress: ["scheduled", "awaiting_implementation"],
+  implemented: ["in_progress"],
+  completed: ["implemented"],
+  cancelled: ["draft"],
+  rolled_back: [],
+  // unused for standard
+  submitted: [],
+  in_review: [],
+  awaiting_approval: [],
+  approved: [],
+  rejected: [],
+  in_testing: [],
+  awaiting_pir: [],
+};
+
+const REVERSE_EMERGENCY: Record<ChangeStatus, ChangeStatus[]> = {
+  draft: [],
+  awaiting_approval: ["draft"],
+  approved: ["awaiting_approval", "draft"],
+  in_progress: ["approved"],
+  implemented: ["in_progress"],
+  awaiting_pir: ["implemented"],
+  completed: ["awaiting_pir"],
+  cancelled: ["draft"],
+  rejected: ["draft", "awaiting_approval"],
+  rolled_back: [],
+  // unused for emergency
+  submitted: [],
+  in_review: [],
+  scheduled: [],
+  awaiting_implementation: [],
+  in_testing: [],
+};
+
+const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus[]>> = {
+  normal: REVERSE_NORMAL,
+  standard: REVERSE_STANDARD,
+  emergency: REVERSE_EMERGENCY,
+};
+
+export function listAllowedReversions(track: ChangeTrack, from: ChangeStatus): ChangeStatus[] {
+  return Array.from(new Set(REVERSIONS_BY_TRACK[track][from] ?? []));
+}
+
+export function isReversionAllowed(track: ChangeTrack, from: ChangeStatus, to: ChangeStatus): boolean {
+  return listAllowedReversions(track, from).includes(to);
+}
+
 export function isTransitionAllowed(track: ChangeTrack, from: ChangeStatus, to: ChangeStatus): boolean {
   if (TERMINAL_FROM_ANY.includes(to)) {
     // cancelled/rolled_back are reachable from any non-terminal, but not from another terminal

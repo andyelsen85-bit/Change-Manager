@@ -269,6 +269,7 @@ export type LdapSettings = {
   emailAttr: string;
   nameAttr: string;
   tls: boolean;
+  tlsRejectUnauthorized: boolean;
 };
 
 export type LdapTestResult = {

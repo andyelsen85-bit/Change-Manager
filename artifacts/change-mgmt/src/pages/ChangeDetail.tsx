@@ -1,7 +1,15 @@
 import { useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Loader2, MessageSquare, Send, X } from "lucide-react";
+import { ArrowLeft, Check, Loader2, MessageSquare, Send, Undo2, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import {
@@ -87,6 +95,54 @@ function stepLabelStatus(step: TimelineStep, currentStatus: ChangeStatus): Chang
   if (step.includes(currentStatus)) return currentStatus;
   return step[0];
 }
+
+// Reverse-transition map mirrored from api-server/src/lib/state-machine.ts.
+// The backend is authoritative — this client copy is purely for populating
+// the "Revert to" dropdown without an extra API call. If the server rejects
+// the choice, the mutation surfaces the error toast.
+const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus[]>> = {
+  normal: {
+    draft: [],
+    submitted: ["draft"],
+    in_review: ["submitted", "draft"],
+    awaiting_approval: ["in_review", "submitted", "draft"],
+    approved: ["awaiting_approval", "in_review", "draft"],
+    scheduled: ["approved", "awaiting_approval"],
+    in_progress: ["scheduled", "approved"],
+    implemented: ["in_progress"],
+    in_testing: ["implemented", "in_progress"],
+    awaiting_pir: ["in_testing", "implemented"],
+    completed: ["awaiting_pir"],
+    cancelled: ["draft"],
+    rejected: ["draft", "in_review"],
+    rolled_back: [],
+    awaiting_implementation: [],
+  },
+  standard: {
+    draft: [],
+    awaiting_implementation: ["draft"],
+    scheduled: ["awaiting_implementation", "draft"],
+    in_progress: ["scheduled", "awaiting_implementation"],
+    implemented: ["in_progress"],
+    completed: ["implemented"],
+    cancelled: ["draft"],
+    rolled_back: [],
+    submitted: [], in_review: [], awaiting_approval: [], approved: [], rejected: [], in_testing: [], awaiting_pir: [],
+  },
+  emergency: {
+    draft: [],
+    awaiting_approval: ["draft"],
+    approved: ["awaiting_approval", "draft"],
+    in_progress: ["approved"],
+    implemented: ["in_progress"],
+    awaiting_pir: ["implemented"],
+    completed: ["awaiting_pir"],
+    cancelled: ["draft"],
+    rejected: ["draft", "awaiting_approval"],
+    rolled_back: [],
+    submitted: [], in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [],
+  },
+};
 
 const TRANSITIONS: Record<ChangeStatus, ChangeStatus[]> = {
   draft: ["submitted", "cancelled"],
@@ -189,6 +245,27 @@ export function ChangeDetailPage() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Transition failed"),
   });
 
+  // Revert (Change Manager / Admin only). Walks the change BACK to an
+  // earlier status; the backend is the source of truth on what's allowed
+  // and resets approvals + execution timestamps when crossing those gates.
+  const canRevert = !!user && (user.isAdmin || (user.roles ?? []).includes("change_manager"));
+  const [revertOpen, setRevertOpen] = useState(false);
+  const [revertTo, setRevertTo] = useState<ChangeStatus | "">("");
+  const [revertReason, setRevertReason] = useState("");
+  const revert = useMutation({
+    mutationFn: (payload: { toStatus: ChangeStatus; reason: string }) =>
+      api.post(`/changes/${id}/revert`, payload),
+    onSuccess: () => {
+      toast.success("Change reverted");
+      setRevertOpen(false);
+      setRevertTo("");
+      setRevertReason("");
+      qc.invalidateQueries({ queryKey: ["change", id] });
+      qc.invalidateQueries({ queryKey: ["change.approvals", id] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Revert failed"),
+  });
+
   const c = changeQ.data;
   if (!Number.isFinite(id)) return <div className="p-8">Invalid change id.</div>;
 
@@ -239,9 +316,80 @@ export function ChangeDetailPage() {
               {TRANSITIONS[c.status].length === 0 && (
                 <span className="text-xs text-muted-foreground">No further transitions available from this state.</span>
               )}
+              {canRevert && REVERSIONS_BY_TRACK[c.track][c.status].length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const opts = REVERSIONS_BY_TRACK[c.track][c.status];
+                    setRevertTo(opts[0] ?? "");
+                    setRevertReason("");
+                    setRevertOpen(true);
+                  }}
+                  data-testid="button-revert"
+                  title="Walk this change back to an earlier status (Change Manager / Admin only)"
+                >
+                  <Undo2 className="mr-1.5 h-3.5 w-3.5" /> Revert…
+                </Button>
+              )}
             </div>
           </CardHeader>
         </Card>
+      )}
+
+      {c && (
+        <Dialog open={revertOpen} onOpenChange={setRevertOpen}>
+          <DialogContent data-testid="dialog-revert">
+            <DialogHeader>
+              <DialogTitle>Revert change {c.ref}</DialogTitle>
+              <DialogDescription>
+                Walk the change back from <strong>{STATUS_LABELS[c.status]}</strong> to an earlier status.
+                Reverting past <em>Awaiting approval</em> resets all approval votes to pending; reverting
+                past <em>In progress</em> clears recorded start/end timestamps. The action is recorded in
+                the audit log with your reason.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="revert-to">Revert to</Label>
+                <Select value={revertTo} onValueChange={(v) => setRevertTo(v as ChangeStatus)}>
+                  <SelectTrigger id="revert-to" data-testid="select-revert-to">
+                    <SelectValue placeholder="Choose target status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REVERSIONS_BY_TRACK[c.track][c.status].map((s) => (
+                      <SelectItem key={s} value={s}>{STATUS_LABELS[s] ?? s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="revert-reason">Reason (required, min 5 chars)</Label>
+                <Textarea
+                  id="revert-reason"
+                  rows={3}
+                  value={revertReason}
+                  onChange={(e) => setRevertReason(e.target.value)}
+                  placeholder="e.g. Sent for approval prematurely — Change Manager hasn't reviewed yet."
+                  data-testid="textarea-revert-reason"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setRevertOpen(false)} data-testid="button-revert-cancel">
+                Cancel
+              </Button>
+              <Button
+                disabled={!revertTo || revertReason.trim().length < 5 || revert.isPending}
+                onClick={() => revertTo && revert.mutate({ toStatus: revertTo, reason: revertReason.trim() })}
+                data-testid="button-revert-confirm"
+              >
+                {revert.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Revert
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {c && (

@@ -14,7 +14,7 @@ import {
   roleAssignmentsTable,
   cabMeetingsTable,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess, isPrivilegedAccess } from "../lib/auth";
+import { requireAuth, getChangeAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
 import { notify, getUserEmail } from "../lib/email";
@@ -22,9 +22,29 @@ import {
   isTransitionAllowed,
   listAllowedTransitions,
   checkPhaseGates,
+  isReversionAllowed,
+  listAllowedReversions,
   type ChangeTrack,
   type ChangeStatus,
 } from "../lib/state-machine";
+
+// Statuses considered "active" — i.e. work is still in flight. The list
+// excludes terminal outcomes (cancelled, completed, rejected, rolled_back).
+// Used by the GET /changes?status=active filter so the changes list shows
+// the operator's working queue by default.
+const ACTIVE_STATUSES: ChangeStatus[] = [
+  "draft",
+  "submitted",
+  "in_review",
+  "awaiting_approval",
+  "approved",
+  "scheduled",
+  "awaiting_implementation",
+  "in_progress",
+  "implemented",
+  "in_testing",
+  "awaiting_pir",
+];
 
 const router: IRouter = Router();
 
@@ -93,7 +113,11 @@ router.get("/changes", requireAuth, async (req, res): Promise<void> => {
   const ownerId = req.query["ownerId"] ? Number(req.query["ownerId"]) : null;
   const search = typeof req.query["search"] === "string" ? req.query["search"] : null;
   const conds = [];
-  if (status) conds.push(eq(changeRequestsTable.status, status));
+  if (status === "active") {
+    conds.push(sql`${changeRequestsTable.status} IN (${sql.join(ACTIVE_STATUSES.map((s) => sql`${s}`), sql`, `)})`);
+  } else if (status) {
+    conds.push(eq(changeRequestsTable.status, status));
+  }
   if (track) conds.push(eq(changeRequestsTable.track, track));
   if (ownerId && Number.isFinite(ownerId)) conds.push(eq(changeRequestsTable.ownerId, ownerId));
   if (search) {
@@ -464,6 +488,137 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
       to: targets,
       subject: `[CHG ${before.ref}] Status: ${toStatus}`,
       text: `${before.ref} ${before.title}\n\n${before.status} → ${toStatus}${note ? "\n\nNote: " + note : ""}`,
+    });
+  }
+  res.json(await expandChangeRow(updated));
+});
+
+// ---------------------------------------------------------------------------
+// REVERT — walk a change BACK to an earlier status.
+//
+// Restricted to Change Manager and Admin (admins implicitly satisfy the
+// requireRole check). Body: { toStatus, reason } — reason is mandatory and
+// must be at least 5 characters so the audit log captures justification.
+//
+// Side-effects on revert:
+//   * Reverting from awaiting_approval / approved (or later) BACK past
+//     awaiting_approval resets every approval row to "pending" so the
+//     change cannot move forward again on stale votes.
+//   * Reverting back across in_progress clears actualStart.
+//   * Reverting back across implemented clears actualEnd.
+// All side-effects are recorded in the audit row alongside the status flip.
+// ---------------------------------------------------------------------------
+router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const { toStatus, reason } = req.body ?? {};
+  if (typeof toStatus !== "string") {
+    res.status(400).json({ error: "toStatus is required" });
+    return;
+  }
+  if (typeof reason !== "string" || reason.trim().length < 5) {
+    res.status(400).json({ error: "reason is required (minimum 5 characters)" });
+    return;
+  }
+  const session = req.session!;
+  // RBAC — Change Manager OR Admin only. We do not allow owner/assignee to
+  // self-revert: walking a change backward is a governance action.
+  let allowed = session.isAdmin;
+  if (!allowed) {
+    const roles = await loadUserRoles(session.uid);
+    allowed = roles.includes("change_manager");
+  }
+  if (!allowed) {
+    res.status(403).json({ error: "Only a Change Manager or Admin can revert a change." });
+    return;
+  }
+  const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!before) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const track = before.track as ChangeTrack;
+  const fromStatus = before.status as ChangeStatus;
+  const targetStatus = toStatus as ChangeStatus;
+  if (fromStatus === targetStatus) {
+    res.status(400).json({ error: "Change is already in that status." });
+    return;
+  }
+  if (!isReversionAllowed(track, fromStatus, targetStatus)) {
+    res.status(400).json({
+      error: `Revert ${fromStatus} → ${targetStatus} is not allowed for ${track} changes.`,
+      allowed: listAllowedReversions(track, fromStatus),
+    });
+    return;
+  }
+  // Build update payload + side-effects.
+  const updates: Partial<typeof changeRequestsTable.$inferInsert> = { status: targetStatus };
+  // If we are reverting back PAST the implementation point, the previously
+  // recorded execution timestamps become stale. Clear them so a future
+  // forward run records fresh ones.
+  const PRE_EXECUTION: ChangeStatus[] = [
+    "draft",
+    "submitted",
+    "in_review",
+    "awaiting_approval",
+    "approved",
+    "scheduled",
+    "awaiting_implementation",
+  ];
+  if (PRE_EXECUTION.includes(targetStatus)) {
+    updates.actualStart = null;
+    updates.actualEnd = null;
+  } else if (targetStatus === "in_progress") {
+    updates.actualEnd = null;
+  }
+  // If we are reverting BACK past awaiting_approval, reset existing approvals
+  // to pending so the change cannot leap forward on stale votes.
+  const PRE_APPROVAL: ChangeStatus[] = ["draft", "submitted", "in_review"];
+  let approvalsResetCount = 0;
+  if (PRE_APPROVAL.includes(targetStatus)) {
+    const reset = await db
+      .update(approvalsTable)
+      .set({ decision: "pending", decidedAt: null, comment: null })
+      .where(eq(approvalsTable.changeId, id))
+      .returning();
+    approvalsResetCount = reset.length;
+  }
+  const [updated] = await db
+    .update(changeRequestsTable)
+    .set(updates)
+    .where(eq(changeRequestsTable.id, id))
+    .returning();
+  await audit(req, {
+    action: "change.reverted",
+    entityType: "change",
+    entityId: id,
+    summary: `${before.ref}: REVERTED ${fromStatus} → ${targetStatus} — ${reason.trim()}`,
+    before: { status: before.status, actualStart: before.actualStart, actualEnd: before.actualEnd },
+    after: {
+      status: targetStatus,
+      reason: reason.trim(),
+      approvalsReset: approvalsResetCount,
+      actualStartCleared: updates.actualStart === null && before.actualStart != null,
+      actualEndCleared: updates.actualEnd === null && before.actualEnd != null,
+    },
+  });
+  // Notify owner + assignee that the change was walked back.
+  const targets = [];
+  const owner = await getUserEmail(before.ownerId);
+  if (owner) targets.push(owner);
+  if (before.assigneeId && before.assigneeId !== before.ownerId) {
+    const a = await getUserEmail(before.assigneeId);
+    if (a) targets.push(a);
+  }
+  if (targets.length > 0) {
+    await notify({
+      eventKey: "change.transitioned",
+      to: targets,
+      subject: `[CHG ${before.ref}] Reverted: ${fromStatus} → ${targetStatus}`,
+      text: `${before.ref} ${before.title}\n\nA Change Manager reverted this change from ${fromStatus} back to ${targetStatus}.\n\nReason: ${reason.trim()}${approvalsResetCount > 0 ? `\n\n${approvalsResetCount} approval(s) were reset to pending — fresh votes are required before this change can move forward again.` : ""}`,
     });
   }
   res.json(await expandChangeRow(updated));

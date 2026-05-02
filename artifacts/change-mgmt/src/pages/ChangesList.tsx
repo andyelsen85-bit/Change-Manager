@@ -14,6 +14,9 @@ import { fmtDateShort, fmtDateTime } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const TRACKS: ChangeTrack[] = ["normal", "standard", "emergency"];
+// Active statuses = anything not terminal. Used as the DEFAULT view so
+// operators see only changes that still need work; cancelled / completed /
+// rejected / rolled_back are filtered out unless explicitly selected.
 const STATUSES: ChangeStatus[] = [
   "draft",
   "submitted",
@@ -36,7 +39,9 @@ export function ChangesListPage() {
   const [, setLocation] = useLocation();
   const [search, setSearch] = useState("");
   const [trackFilter, setTrackFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Default to "active" — hides the noise of closed/cancelled/rejected
+  // changes so the operator sees their working queue first.
+  const [statusFilter, setStatusFilter] = useState<string>("active");
 
   const params = new URLSearchParams();
   if (trackFilter !== "all") params.set("track", trackFilter);
@@ -99,6 +104,7 @@ export function ChangesListPage() {
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="active">All active</SelectItem>
                 <SelectItem value="all">All statuses</SelectItem>
                 {STATUSES.map((s) => (
                   <SelectItem key={s} value={s}>{s.replace(/_/g, " ")}</SelectItem>

@@ -25,6 +25,12 @@ export const ldapSettingsTable = pgTable("ldap_settings", {
   emailAttr: text("email_attr").notNull().default("mail"),
   nameAttr: text("name_attr").notNull().default("cn"),
   tls: boolean("tls").notNull().default(false),
+  // When false, the TLS handshake to the directory will accept any
+  // server certificate (self-signed, expired, hostname mismatch).
+  // Default is true (verify). Disabling is a security trade-off and is
+  // surfaced in the admin UI with a warning. Honoured by both
+  // ldaps:// and StartTLS code paths in lib/ldap.ts.
+  tlsRejectUnauthorized: boolean("tls_reject_unauthorized").notNull().default(true),
 });
 
 export const sslSettingsTable = pgTable("ssl_settings", {

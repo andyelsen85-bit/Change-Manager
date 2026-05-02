@@ -353,6 +353,23 @@ function LdapPanel() {
             <Label>StartTLS</Label>
             <Switch checked={form.tls} onCheckedChange={(v) => setForm({ ...form, tls: v })} />
           </div>
+          <div className="md:col-span-2 space-y-2 rounded-md border border-border p-3">
+            <div className="flex items-center justify-between">
+              <Label>Verify TLS certificate</Label>
+              <Switch
+                checked={form.tlsRejectUnauthorized}
+                onCheckedChange={(v) => setForm({ ...form, tlsRejectUnauthorized: v })}
+                data-testid="switch-ldap-tls-verify"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              On (recommended) the server certificate must be valid and its name must match the URL hostname.
+              Turn OFF only if your directory uses a self-signed cert, an internal CA Node doesn't trust, or
+              you connect by IP address. With verification disabled the connection is still encrypted but
+              <strong> no longer authenticated</strong> — an attacker who can intercept traffic to the
+              directory can impersonate it.
+            </p>
+          </div>
         </div>
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-ldap">

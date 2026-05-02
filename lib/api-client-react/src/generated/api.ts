@@ -46,6 +46,7 @@ import type {
   NotificationPreference,
   PirRecord,
   PlanningRecord,
+  RevertBody,
   Role,
   RoleAssignment,
   SendCabAgenda200,
@@ -1943,6 +1944,93 @@ export const useTransitionChange = <
   TContext
 > => {
   return useMutation(getTransitionChangeMutationOptions(options));
+};
+
+/**
+ * @summary Walk a change back to an earlier status (Change Manager / Admin only).
+ */
+export const getRevertChangeUrl = (id: number) => {
+  return `/api/changes/${id}/revert`;
+};
+
+export const revertChange = async (
+  id: number,
+  revertBody: RevertBody,
+  options?: RequestInit,
+): Promise<ChangeRequest> => {
+  return customFetch<ChangeRequest>(getRevertChangeUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(revertBody),
+  });
+};
+
+export const getRevertChangeMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof revertChange>>,
+    TError,
+    { id: number; data: BodyType<RevertBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof revertChange>>,
+  TError,
+  { id: number; data: BodyType<RevertBody> },
+  TContext
+> => {
+  const mutationKey = ["revertChange"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof revertChange>>,
+    { id: number; data: BodyType<RevertBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return revertChange(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RevertChangeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof revertChange>>
+>;
+export type RevertChangeMutationBody = BodyType<RevertBody>;
+export type RevertChangeMutationError = ErrorType<Error>;
+
+/**
+ * @summary Walk a change back to an earlier status (Change Manager / Admin only).
+ */
+export const useRevertChange = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof revertChange>>,
+    TError,
+    { id: number; data: BodyType<RevertBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof revertChange>>,
+  TError,
+  { id: number; data: BodyType<RevertBody> },
+  TContext
+> => {
+  return useMutation(getRevertChangeMutationOptions(options));
 };
 
 export const getListTemplatesUrl = () => {

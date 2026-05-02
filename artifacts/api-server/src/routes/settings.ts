@@ -111,6 +111,7 @@ function maskLdap(row: typeof ldapSettingsTable.$inferSelect | undefined) {
       emailAttr: "mail",
       nameAttr: "cn",
       tls: false,
+      tlsRejectUnauthorized: true,
     };
   }
   return {
@@ -124,6 +125,7 @@ function maskLdap(row: typeof ldapSettingsTable.$inferSelect | undefined) {
     emailAttr: row.emailAttr,
     nameAttr: row.nameAttr,
     tls: row.tls,
+    tlsRejectUnauthorized: row.tlsRejectUnauthorized,
   };
 }
 
@@ -150,6 +152,9 @@ router.put("/settings/ldap", requireAdmin, async (req, res): Promise<void> => {
     emailAttr: b.emailAttr ?? "mail",
     nameAttr: b.nameAttr ?? "cn",
     tls: !!b.tls,
+    // Default to TRUE (verify) when the admin hasn't explicitly opted out,
+    // even if the body omitted the field — preserves the secure default.
+    tlsRejectUnauthorized: b.tlsRejectUnauthorized === false ? false : true,
   };
   const [row] = await db
     .insert(ldapSettingsTable)

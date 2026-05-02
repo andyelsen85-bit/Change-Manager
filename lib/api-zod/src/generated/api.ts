@@ -483,6 +483,49 @@ export const TransitionChangeResponse = zod.object({
   updatedAt: zod.coerce.date(),
 });
 
+/**
+ * @summary Walk a change back to an earlier status (Change Manager / Admin only).
+ */
+export const RevertChangeParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const revertChangeBodyReasonMin = 5;
+
+export const RevertChangeBody = zod.object({
+  toStatus: zod.string().describe("Target earlier status to revert to."),
+  reason: zod
+    .string()
+    .min(revertChangeBodyReasonMin)
+    .describe("Required justification, captured in the audit log."),
+});
+
+export const RevertChangeResponse = zod.object({
+  id: zod.number(),
+  ref: zod.string(),
+  title: zod.string(),
+  description: zod.string(),
+  track: zod.enum(["normal", "standard", "emergency"]),
+  status: zod.string(),
+  risk: zod.enum(["low", "medium", "high"]),
+  impact: zod.enum(["low", "medium", "high"]),
+  priority: zod.enum(["low", "medium", "high", "critical"]),
+  category: zod.string(),
+  ownerId: zod.number(),
+  ownerName: zod.string(),
+  assigneeId: zod.number().nullish(),
+  assigneeName: zod.string().nullish(),
+  templateId: zod.number().nullish(),
+  templateName: zod.string().nullish(),
+  plannedStart: zod.coerce.date().nullish(),
+  plannedEnd: zod.coerce.date().nullish(),
+  actualStart: zod.coerce.date().nullish(),
+  actualEnd: zod.coerce.date().nullish(),
+  cabMeetingId: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+
 export const ListTemplatesResponseItem = zod.object({
   id: zod.number(),
   name: zod.string(),
