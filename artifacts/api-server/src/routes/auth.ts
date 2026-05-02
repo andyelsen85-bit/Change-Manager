@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
 import {
   hashPassword,
@@ -198,6 +198,78 @@ router.get("/auth/me", async (req, res): Promise<void> => {
     roles,
     isAdmin: u.isAdmin,
     mustChangePassword: u.mustChangePassword,
+  });
+});
+
+// First-time setup. The seeded admin row is created with password_hash=NULL.
+// Until that row gets a password, the app exposes a setup wizard that lets
+// any visitor set the admin password. Once set, this endpoint refuses
+// further calls and the only way to change the admin password is through
+// the authenticated /auth/change-password flow.
+router.get("/auth/setup-status", async (_req, res): Promise<void> => {
+  const [admin] = await db
+    .select({ id: usersTable.id, passwordHash: usersTable.passwordHash })
+    .from(usersTable)
+    .where(eq(usersTable.username, "admin"));
+  // We only consider the system "needs setup" when the seeded admin row
+  // exists with no password. If the admin has been seeded with a password
+  // (env: INITIAL_ADMIN_PASSWORD) or has already claimed it, the wizard is
+  // off. If the admin row is missing entirely, that's a degenerate state we
+  // also treat as "no setup" so we don't expose a wizard that would create
+  // an admin out of nowhere.
+  const needsSetup = !!admin && admin.passwordHash === null;
+  res.json({ needsSetup });
+});
+
+router.post("/auth/setup", async (req, res): Promise<void> => {
+  const { password } = req.body ?? {};
+  if (typeof password !== "string" || password.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+  // Atomic claim: hash first, then a single conditional UPDATE that
+  // matches only the un-claimed admin row. This ensures that if two
+  // requests race, only the first one gets a row back; the loser sees 0
+  // rows and returns 409 without overwriting the winner's password. We
+  // intentionally do not run a SELECT-then-UPDATE, which is racy.
+  const passwordHash = await hashPassword(password);
+  const claimed = await db
+    .update(usersTable)
+    .set({ passwordHash, mustChangePassword: false })
+    .where(and(eq(usersTable.username, "admin"), isNull(usersTable.passwordHash)))
+    .returning();
+  if (claimed.length === 0) {
+    // Either no admin row exists (degenerate) or it is already claimed.
+    // We return the same generic 409 in both cases so the response does
+    // not leak which.
+    res.status(409).json({ error: "Setup already completed" });
+    return;
+  }
+  const admin = claimed[0]!;
+  // Auto-login: mint a session so the operator goes straight into the app.
+  const token = signSession({ uid: admin.id, username: admin.username, isAdmin: admin.isAdmin });
+  setSessionCookie(req, res, token);
+  setCsrfCookie(req, res, generateCsrfToken());
+  await audit(
+    req,
+    {
+      action: "auth.setup_completed",
+      entityType: "user",
+      entityId: admin.id,
+      summary: `First-time setup completed for ${admin.username}`,
+    },
+    { id: admin.id, name: admin.username },
+  );
+  const roles = await loadUserRoles(admin.id);
+  res.json({
+    id: admin.id,
+    username: admin.username,
+    email: admin.email,
+    fullName: admin.fullName,
+    source: admin.source,
+    roles,
+    isAdmin: admin.isAdmin,
+    mustChangePassword: false,
   });
 });
 

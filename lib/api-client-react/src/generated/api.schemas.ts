@@ -23,6 +23,15 @@ export interface ChangePasswordBody {
   newPassword: string;
 }
 
+export interface SetupStatus {
+  needsSetup: boolean;
+}
+
+export interface SetupBody {
+  /** @minLength 8 */
+  password: string;
+}
+
 export type SessionUserSource =
   (typeof SessionUserSource)[keyof typeof SessionUserSource];
 

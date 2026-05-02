@@ -49,9 +49,26 @@ lib/
 docker/            # Nginx config + entrypoint for the web container
 ```
 
-## Default credentials
+## First-time setup
 
-`admin` / `admin` (local user, seeded on first boot — change immediately).
+There is no default admin password. On first boot the API seeds an `admin`
+local user with **no password**, and the web app shows a one-time setup
+wizard at `/setup` where the operator picks the password. The wizard
+auto-logs them in and disappears for good once setup is done.
+
+For an unattended deployment, set `INITIAL_ADMIN_PASSWORD` (>= 8 chars) in
+the API container's environment before the first boot. The seed will
+create the admin with that password and skip the wizard.
+
+### Recovering a locked-out install
+
+If an existing deployment was bootstrapped by an older version of this
+codebase and the admin password is unknown, set
+`RESET_ADMIN_PASSWORD=1` in the API container's environment and restart
+the API. The next boot will clear the admin's password and re-enable the
+`/setup` wizard. **Remove the variable after you complete setup** — the
+seed will keep clearing the password on every restart while the variable
+is set.
 
 ## Key commands
 

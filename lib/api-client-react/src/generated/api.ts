@@ -48,6 +48,8 @@ import type {
   Role,
   RoleAssignment,
   SessionUser,
+  SetupBody,
+  SetupStatus,
   SmtpSettings,
   SslSettings,
   StandardTemplate,
@@ -232,6 +234,167 @@ export const useLogin = <
   TContext
 > => {
   return useMutation(getLoginMutationOptions(options));
+};
+
+/**
+ * First-time setup probe. Returns `{ needsSetup: true }` only when the
+seeded `admin` row exists with no password — i.e. the operator has
+not yet completed first-time setup. Unauthenticated.
+
+ */
+export const getGetSetupStatusUrl = () => {
+  return `/api/auth/setup-status`;
+};
+
+export const getSetupStatus = async (
+  options?: RequestInit,
+): Promise<SetupStatus> => {
+  return customFetch<SetupStatus>(getGetSetupStatusUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSetupStatusQueryKey = () => {
+  return [`/api/auth/setup-status`] as const;
+};
+
+export const getGetSetupStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSetupStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSetupStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSetupStatusQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getSetupStatus>>> = ({
+    signal,
+  }) => getSetupStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSetupStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSetupStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSetupStatus>>
+>;
+export type GetSetupStatusQueryError = ErrorType<unknown>;
+
+export function useGetSetupStatus<
+  TData = Awaited<ReturnType<typeof getSetupStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSetupStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSetupStatusQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Claim the seeded `admin` account by setting its password. Only valid
+while `getSetupStatus` reports `needsSetup: true`. On success the
+response also sets the session and CSRF cookies so the operator is
+signed in immediately. Returns 409 once setup has already been done.
+
+ */
+export const getCompleteSetupUrl = () => {
+  return `/api/auth/setup`;
+};
+
+export const completeSetup = async (
+  setupBody: SetupBody,
+  options?: RequestInit,
+): Promise<SessionUser> => {
+  return customFetch<SessionUser>(getCompleteSetupUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(setupBody),
+  });
+};
+
+export const getCompleteSetupMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof completeSetup>>,
+    TError,
+    { data: BodyType<SetupBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof completeSetup>>,
+  TError,
+  { data: BodyType<SetupBody> },
+  TContext
+> => {
+  const mutationKey = ["completeSetup"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof completeSetup>>,
+    { data: BodyType<SetupBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return completeSetup(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CompleteSetupMutationResult = NonNullable<
+  Awaited<ReturnType<typeof completeSetup>>
+>;
+export type CompleteSetupMutationBody = BodyType<SetupBody>;
+export type CompleteSetupMutationError = ErrorType<Error>;
+
+export const useCompleteSetup = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof completeSetup>>,
+    TError,
+    { data: BodyType<SetupBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof completeSetup>>,
+  TError,
+  { data: BodyType<SetupBody> },
+  TContext
+> => {
+  return useMutation(getCompleteSetupMutationOptions(options));
 };
 
 export const getLogoutUrl = () => {

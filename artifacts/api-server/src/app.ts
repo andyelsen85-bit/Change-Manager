@@ -38,14 +38,21 @@ app.use(cookieParser());
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// CSRF protection (double-submit cookie). Login is exempt because the user
-// has no session yet — login is what issues the CSRF token. All other
-// state-changing requests under /api must include a matching X-CSRF-Token
-// header that mirrors the `cm_csrf` cookie value set on login. The exemption
-// is scoped to POST and tolerates a trailing slash so unintended verbs on
-// /auth/login still go through the CSRF check.
+// CSRF protection (double-submit cookie). Login and first-time setup are
+// exempt because the user has no session yet — those endpoints are what
+// issue the CSRF token. All other state-changing requests under /api must
+// include a matching X-CSRF-Token header that mirrors the `cm_csrf` cookie
+// value set on login/setup. The exemption is scoped to POST and tolerates a
+// trailing slash so unintended verbs on these paths still go through the
+// CSRF check.
+const CSRF_EXEMPT_POST_PATHS = new Set([
+  "/auth/login",
+  "/auth/login/",
+  "/auth/setup",
+  "/auth/setup/",
+]);
 const csrfGate: RequestHandler = (req, res, next) => {
-  if (req.method === "POST" && (req.path === "/auth/login" || req.path === "/auth/login/")) {
+  if (req.method === "POST" && CSRF_EXEMPT_POST_PATHS.has(req.path)) {
     next();
     return;
   }

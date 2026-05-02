@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { AppShell } from "@/components/AppShell";
 import { LoginPage } from "@/pages/Login";
+import { SetupPage } from "@/pages/Setup";
 import { DashboardPage } from "@/pages/Dashboard";
 import { ChangesListPage } from "@/pages/ChangesList";
 import { NewChangePage } from "@/pages/NewChange";
@@ -36,7 +37,7 @@ const queryClient = new QueryClient({
 });
 
 function ProtectedRoutes() {
-  const { user, loading } = useAuth();
+  const { user, loading, needsSetup } = useAuth();
   const [location] = useLocation();
   if (loading) {
     return (
@@ -45,14 +46,25 @@ function ProtectedRoutes() {
       </div>
     );
   }
+  // First-time setup. The backend reports needsSetup=true when the seeded
+  // admin row has no password. The wizard is the only thing the user can
+  // see until they pick a password — at which point the API returns an
+  // authenticated session and the rest of the app unlocks.
+  if (needsSetup && !user) {
+    if (location !== "/setup") return <Redirect to="/setup" />;
+    return <SetupPage />;
+  }
   if (!user) {
+    if (location === "/setup") return <Redirect to="/login" />;
     if (location !== "/login") return <Redirect to="/login" />;
     return <LoginPage />;
   }
+  // /setup is meaningless once the user is authenticated.
+  if (location === "/setup") return <Redirect to="/" />;
   if (location === "/login") return <Redirect to="/" />;
-  // Force users who must change their password (e.g. the seeded admin on
-  // first login) onto the Profile page until they rotate. The Profile
-  // page knows how to surface a banner when `mustChangePassword` is true.
+  // Force users who must change their password (e.g. operators promoted by
+  // an admin and given a temporary password) onto the Profile page until
+  // they rotate. The Profile page surfaces a banner when the flag is true.
   if (user.mustChangePassword && location !== "/profile") {
     return <Redirect to="/profile" />;
   }

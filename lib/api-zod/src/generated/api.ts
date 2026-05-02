@@ -34,6 +34,44 @@ export const LoginResponse = zod.object({
     ),
 });
 
+/**
+ * First-time setup probe. Returns `{ needsSetup: true }` only when the
+seeded `admin` row exists with no password — i.e. the operator has
+not yet completed first-time setup. Unauthenticated.
+
+ */
+export const GetSetupStatusResponse = zod.object({
+  needsSetup: zod.boolean(),
+});
+
+/**
+ * Claim the seeded `admin` account by setting its password. Only valid
+while `getSetupStatus` reports `needsSetup: true`. On success the
+response also sets the session and CSRF cookies so the operator is
+signed in immediately. Returns 409 once setup has already been done.
+
+ */
+export const completeSetupBodyPasswordMin = 8;
+
+export const CompleteSetupBody = zod.object({
+  password: zod.string().min(completeSetupBodyPasswordMin),
+});
+
+export const CompleteSetupResponse = zod.object({
+  id: zod.number(),
+  username: zod.string(),
+  email: zod.string(),
+  fullName: zod.string(),
+  source: zod.enum(["local", "ldap"]),
+  roles: zod.array(zod.string()),
+  isAdmin: zod.boolean(),
+  mustChangePassword: zod
+    .boolean()
+    .describe(
+      "True when the user must rotate their password before using the rest of the app (e.g. seeded admin on first login).",
+    ),
+});
+
 export const GetMeResponse = zod.object({
   id: zod.number(),
   username: zod.string(),
