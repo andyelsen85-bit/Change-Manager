@@ -41,7 +41,21 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+// Hits /auth/me which the API uses to heal sessions that pre-date the CSRF
+// rollout (or whose CSRF cookie was pruned by the browser) by minting a
+// fresh `cm_csrf` cookie. Used as a one-shot recovery after a 403
+// "Invalid or missing CSRF token" so the user does not have to log out.
+async function refreshCsrfCookie(): Promise<string | null> {
+  try {
+    const res = await fetch(buildUrl("/auth/me"), { credentials: "include" });
+    if (!res.ok) return null;
+    return readCsrfCookie();
+  } catch {
+    return null;
+  }
+}
+
+async function performFetch(path: string, init: RequestInit): Promise<Response> {
   const url = buildUrl(path);
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData) && !headers.has("content-type")) {
@@ -53,14 +67,47 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const token = readCsrfCookie();
     if (token) headers.set("x-csrf-token", token);
   }
-  const res = await fetch(url, { ...init, headers, credentials: "include" });
-  const text = await res.text();
+  return fetch(url, { ...init, headers, credentials: "include" });
+}
+
+function isCsrfFailure(status: number, data: unknown): boolean {
+  if (status !== 403) return false;
+  if (data && typeof data === "object" && "error" in data) {
+    const err = (data as { error: unknown }).error;
+    return typeof err === "string" && err.toLowerCase().includes("csrf");
+  }
+  return false;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let res = await performFetch(path, init);
+  let text = await res.text();
   let data: unknown = null;
   if (text.length > 0) {
     try {
       data = JSON.parse(text);
     } catch {
       data = text;
+    }
+  }
+  // Stale-session recovery: if the request was a state-changing call and was
+  // rejected with a CSRF error, hit /auth/me to mint a fresh CSRF cookie and
+  // retry the original request exactly once. This is what unblocks users who
+  // were already signed in before CSRF protection was deployed.
+  const method = (init.method ?? "GET").toUpperCase();
+  if (!res.ok && !SAFE_METHODS.has(method) && isCsrfFailure(res.status, data)) {
+    const refreshed = await refreshCsrfCookie();
+    if (refreshed) {
+      res = await performFetch(path, init);
+      text = await res.text();
+      data = null;
+      if (text.length > 0) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = text;
+        }
+      }
     }
   }
   if (!res.ok) {
