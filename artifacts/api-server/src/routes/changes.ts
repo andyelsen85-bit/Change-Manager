@@ -419,19 +419,27 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
         .json({ error: "Only an admin or governance role holder can move a change into approval." });
       return;
     }
-    let postCab = false;
-    if (before.cabMeetingId != null) {
-      const [meeting] = await db
-        .select()
-        .from(cabMeetingsTable)
-        .where(eq(cabMeetingsTable.id, before.cabMeetingId));
-      if (meeting?.status === "completed") postCab = true;
-    }
-    if (!postCab) {
-      res.status(409).json({
-        error: "The CAB / eCAB meeting must be marked completed before approval can begin.",
-      });
-      return;
+    // Normal track: a CAB meeting must have been held & marked completed
+    // before approval voting begins — that's where the change is reviewed.
+    // Emergency track: the eCAB votes directly in the Approvals tab without
+    // a scheduled meeting (the whole point of the emergency flow), so we
+    // skip the meeting gate. The per-vote approval gate still enforces that
+    // every required approver has explicitly approved before in_progress.
+    if (track === "normal") {
+      let postCab = false;
+      if (before.cabMeetingId != null) {
+        const [meeting] = await db
+          .select()
+          .from(cabMeetingsTable)
+          .where(eq(cabMeetingsTable.id, before.cabMeetingId));
+        if (meeting?.status === "completed") postCab = true;
+      }
+      if (!postCab) {
+        res.status(409).json({
+          error: "The CAB meeting must be marked completed before approval can begin.",
+        });
+        return;
+      }
     }
   }
   // Phase gates (planning sign-off, testing passed, PIR completed, approvals)
