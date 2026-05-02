@@ -55,11 +55,29 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
-export function setSessionCookie(res: Response, token: string): void {
+// When the app is being viewed inside the Replit preview iframe (or any
+// other cross-site embedding), browsers will only send/receive cookies that
+// are flagged `SameSite=None; Secure`. For plain-HTTP local dev we still
+// want the cookie to work, so we fall back to `SameSite=Lax` without the
+// Secure flag. We detect the channel from `req.secure`, which reflects the
+// `X-Forwarded-Proto` header once `app.set("trust proxy", true)` is set.
+function cookieChannelOptions(req: Request): {
+  sameSite: "lax" | "none";
+  secure: boolean;
+} {
+  const httpsRequest = req.secure || req.protocol === "https";
+  if (httpsRequest || NODE_ENV === "production") {
+    return { sameSite: "none", secure: true };
+  }
+  return { sameSite: "lax", secure: false };
+}
+
+export function setSessionCookie(req: Request, res: Response, token: string): void {
+  const { sameSite, secure } = cookieChannelOptions(req);
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: NODE_ENV === "production",
+    sameSite,
+    secure,
     maxAge: TOKEN_TTL_SECONDS * 1000,
     path: "/",
   });
@@ -76,11 +94,12 @@ export function generateCsrfToken(): string {
 // Sets the CSRF token cookie used by the double-submit pattern. The cookie
 // is intentionally NOT HttpOnly so the frontend can read it and echo the
 // value back in the `X-CSRF-Token` header on every mutating request.
-export function setCsrfCookie(res: Response, token: string): void {
+export function setCsrfCookie(req: Request, res: Response, token: string): void {
+  const { sameSite, secure } = cookieChannelOptions(req);
   res.cookie(CSRF_COOKIE_NAME, token, {
     httpOnly: false,
-    sameSite: "lax",
-    secure: NODE_ENV === "production",
+    sameSite,
+    secure,
     maxAge: TOKEN_TTL_SECONDS * 1000,
     path: "/",
   });

@@ -8,6 +8,12 @@ import { requireCsrf } from "./lib/auth";
 
 const app: Express = express();
 
+// We sit behind the Replit edge / preview proxy, which terminates TLS and
+// forwards over HTTP with `X-Forwarded-Proto: https`. Trusting that header
+// lets `req.secure` reflect the original scheme so we can correctly emit
+// `Secure; SameSite=None` cookies for the iframe context.
+app.set("trust proxy", true);
+
 app.use(
   pinoHttp({
     logger,

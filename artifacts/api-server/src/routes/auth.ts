@@ -62,8 +62,8 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     }
     const roles = await loadUserRoles(existing.id);
     const token = signSession({ uid: existing.id, username: existing.username, isAdmin: existing.isAdmin });
-    setSessionCookie(res, token);
-    setCsrfCookie(res, generateCsrfToken());
+    setSessionCookie(req, res, token);
+    setCsrfCookie(req, res, generateCsrfToken());
     await audit(
       req,
       {
@@ -109,8 +109,8 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       }
       const roles = await loadUserRoles(userRow.id);
       const token = signSession({ uid: userRow.id, username: userRow.username, isAdmin: userRow.isAdmin });
-      setSessionCookie(res, token);
-      setCsrfCookie(res, generateCsrfToken());
+      setSessionCookie(req, res, token);
+      setCsrfCookie(req, res, generateCsrfToken());
       await audit(
         req,
         {
@@ -184,7 +184,7 @@ router.get("/auth/me", async (req, res): Promise<void> => {
   // would be unable to perform any mutating action until they log out and
   // back in.
   if (!readCsrfCookie(req)) {
-    setCsrfCookie(res, generateCsrfToken());
+    setCsrfCookie(req, res, generateCsrfToken());
   }
   const roles = await loadUserRoles(u.id);
   res.json({
