@@ -83,15 +83,25 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     .from(changeRequestsTable)
     .where(eq(changeRequestsTable.id, ap.changeId));
   if (chgForGate && (chgForGate.track === "normal" || chgForGate.track === "emergency")) {
-    let postCab = chgForGate.status === "awaiting_approval";
-    if (!postCab && chgForGate.cabMeetingId != null) {
+    // The vote is only valid when the change is in `awaiting_approval` AND the linked
+    // CAB / eCAB meeting has been marked completed. Both checks are required: the
+    // status-only check would otherwise let a caller who flipped status by another
+    // path bypass the CAB requirement.
+    if (chgForGate.status !== "awaiting_approval") {
+      res.status(409).json({
+        error: "Approval votes can only be recorded while the change is awaiting approval.",
+      });
+      return;
+    }
+    let cabCompleted = false;
+    if (chgForGate.cabMeetingId != null) {
       const [meeting] = await db
         .select()
         .from(cabMeetingsTable)
         .where(eq(cabMeetingsTable.id, chgForGate.cabMeetingId));
-      if (meeting?.status === "completed") postCab = true;
+      if (meeting?.status === "completed") cabCompleted = true;
     }
-    if (!postCab) {
+    if (!cabCompleted) {
       res.status(409).json({
         error: "Approval can only be recorded after the CAB / eCAB meeting has concluded.",
       });

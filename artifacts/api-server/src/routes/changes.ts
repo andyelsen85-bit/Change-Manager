@@ -12,6 +12,7 @@ import {
   commentsTable,
   rolesTable,
   roleAssignmentsTable,
+  cabMeetingsTable,
 } from "@workspace/db";
 import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
@@ -216,6 +217,10 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
+  if (!(await getChangeAccess(req.session!, row))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
   const dto = await expandChangeRow(row);
   const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
   const [testing] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, id));
@@ -371,6 +376,35 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
       allowed: listAllowedTransitions(track, fromStatus),
     });
     return;
+  }
+  // Governance gates on the transition itself.
+  // 1) Moving INTO the post-CAB approval state (`awaiting_approval`) for Normal /
+  //    Emergency tracks requires that the linked CAB / eCAB meeting has actually
+  //    concluded. This complements the per-vote gate so a status flip itself cannot
+  //    be used to fast-track around CAB.
+  // 2) Only an admin or change_manager may put a change into `awaiting_approval` —
+  //    owners/assignees should not be able to self-flip into the approval state.
+  if (targetStatus === "awaiting_approval" && (track === "normal" || track === "emergency")) {
+    if (access !== "admin" && access !== "change_manager") {
+      res
+        .status(403)
+        .json({ error: "Only an admin or Change Manager can move a change into approval." });
+      return;
+    }
+    let postCab = false;
+    if (before.cabMeetingId != null) {
+      const [meeting] = await db
+        .select()
+        .from(cabMeetingsTable)
+        .where(eq(cabMeetingsTable.id, before.cabMeetingId));
+      if (meeting?.status === "completed") postCab = true;
+    }
+    if (!postCab) {
+      res.status(409).json({
+        error: "The CAB / eCAB meeting must be marked completed before approval can begin.",
+      });
+      return;
+    }
   }
   // Phase gates (planning sign-off, testing passed, PIR completed, approvals)
   const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
