@@ -219,6 +219,14 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
   if (p.track === "emergency" && p.toStatus === "approved" && !p.approvalsAllApproved) {
     return "eCAB approval has not been recorded.";
   }
+  // Normal track: the awaiting_approval -> approved flip itself must be gated
+  // on every approval row being explicitly approved. Otherwise a Change Manager
+  // (or admin) could click "→ Approved" on the status bar and skip the vote.
+  // The auto-flip path in approvals.ts already enforces this when the last
+  // vote lands; this guard catches the manual status-button path.
+  if (p.track === "normal" && p.toStatus === "approved" && !p.approvalsAllApproved) {
+    return "All required approvals must be recorded before the change can be marked Approved.";
+  }
   // Defense in depth: even if a change has somehow been pre-flipped to
   // `approved`, we re-check that every approval row is explicitly approved
   // before allowing the Emergency change to be implemented. Abstains and
