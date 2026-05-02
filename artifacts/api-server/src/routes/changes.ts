@@ -363,7 +363,12 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     track,
     toStatus: targetStatus,
     planning: planning ? { signedOff: planning.signedOff } : null,
-    testing: testing ? { overallResult: testing.overallResult } : null,
+    testing: testing
+      ? {
+          overallResult: testing.overallResult,
+          cases: (testing.cases ?? []).map((c) => ({ status: c.status })),
+        }
+      : null,
     pir: pir ? { completedAt: pir.completedAt ?? null } : null,
     approvalsAllApproved,
   });

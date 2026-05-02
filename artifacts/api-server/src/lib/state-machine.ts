@@ -62,10 +62,11 @@ const STANDARD: Record<ChangeStatus, ChangeStatus[]> = {
   awaiting_pir: [],
 };
 
-// Emergency: collapsed flow, eCAB approval may run in parallel with implementation
-// (recorded retroactively), so we permit jumping from draft straight to in_progress.
+// Emergency: collapsed flow but eCAB approval is mandatory before implementation.
+// Approval may be granted out-of-band (phone/IM) and then recorded in the system,
+// but the system enforces approved -> in_progress: no draft -> in_progress shortcut.
 const EMERGENCY: Record<ChangeStatus, ChangeStatus[]> = {
-  draft: ["awaiting_approval", "in_progress", "cancelled"],
+  draft: ["awaiting_approval", "cancelled"],
   awaiting_approval: ["approved", "rejected", "cancelled"],
   approved: ["in_progress", "cancelled"],
   in_progress: ["implemented", "rolled_back"],
@@ -116,7 +117,10 @@ export type PhaseGateInputs = {
   track: ChangeTrack;
   toStatus: ChangeStatus;
   planning: { signedOff: boolean } | null;
-  testing: { overallResult: string } | null;
+  testing: {
+    overallResult: string;
+    cases: Array<{ status: "pending" | "passed" | "failed" | "blocked" }>;
+  } | null;
   pir: { completedAt: Date | null } | null;
   approvalsAllApproved: boolean;
 };
@@ -143,10 +147,19 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
       return "Standard change requires the planning record to be signed off.";
     }
   }
-  // Normal track: cannot enter awaiting_pir without testing passed.
+  // Normal track: cannot enter awaiting_pir without testing passed AND every individual
+  // test case marked passed (no failed/blocked/pending allowed). This prevents an admin
+  // from flipping the overall flag to passed while individual cases are still failing.
   if (p.track === "normal" && p.toStatus === "awaiting_pir") {
     if (!p.testing || p.testing.overallResult !== "passed") {
       return "Testing must be marked PASSED before requesting PIR.";
+    }
+    if (p.testing.cases.length === 0) {
+      return "Testing must include at least one test case before requesting PIR.";
+    }
+    const bad = p.testing.cases.filter((c) => c.status !== "passed");
+    if (bad.length > 0) {
+      return `All test cases must be PASSED before requesting PIR (${bad.length} case(s) are pending/failed/blocked).`;
     }
   }
   // Cannot mark completed without PIR completion.

@@ -12,6 +12,7 @@ import { audit } from "../lib/audit";
 import { sendTestEmail } from "../lib/email";
 import { testLdapConnection } from "../lib/ldap";
 import { generateCsr } from "../lib/csr";
+import { encryptSecret } from "../lib/secret-crypto";
 
 const router: IRouter = Router();
 
@@ -56,7 +57,10 @@ router.put("/settings/smtp", requireAdmin, async (req, res): Promise<void> => {
     port: typeof b.port === "number" ? b.port : 587,
     secure: !!b.secure,
     username: b.username ?? "",
-    passwordEnc: typeof b.password === "string" && b.password ? b.password : before?.passwordEnc ?? null,
+    passwordEnc:
+      typeof b.password === "string" && b.password
+        ? encryptSecret(b.password)
+        : before?.passwordEnc ?? null,
     fromAddress: b.fromAddress ?? "",
     fromName: b.fromName ?? "Change Management",
     enabled: !!b.enabled,
@@ -136,7 +140,10 @@ router.put("/settings/ldap", requireAdmin, async (req, res): Promise<void> => {
     enabled: !!b.enabled,
     url: b.url ?? "",
     bindDn: b.bindDn ?? "",
-    bindPasswordEnc: typeof b.bindPassword === "string" && b.bindPassword ? b.bindPassword : before?.bindPasswordEnc ?? null,
+    bindPasswordEnc:
+      typeof b.bindPassword === "string" && b.bindPassword
+        ? encryptSecret(b.bindPassword)
+        : before?.bindPasswordEnc ?? null,
     baseDn: b.baseDn ?? "",
     userFilter: b.userFilter ?? "(uid={{username}})",
     usernameAttr: b.usernameAttr ?? "uid",

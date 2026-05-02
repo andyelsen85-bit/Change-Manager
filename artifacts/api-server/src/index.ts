@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { runSeed } from "./seed";
+import { applyDbConstraints } from "./lib/db-bootstrap";
 
 const rawPort = process.env["PORT"];
 
@@ -14,7 +15,11 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-runSeed()
+applyDbConstraints()
+  .catch((err) => {
+    logger.error({ err }, "Failed to apply DB constraints");
+  })
+  .then(() => runSeed())
   .catch((err) => {
     logger.error({ err }, "Seed failed");
   })

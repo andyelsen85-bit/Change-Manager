@@ -7,6 +7,7 @@ import {
   usersTable,
 } from "@workspace/db";
 import { logger } from "./logger";
+import { decryptSecret } from "./secret-crypto";
 
 export async function getSmtp() {
   const [row] = await db.select().from(smtpSettingsTable).where(eq(smtpSettingsTable.key, "global"));
@@ -21,7 +22,7 @@ export async function buildTransporter() {
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.username
-      ? { user: cfg.username, pass: cfg.passwordEnc ?? "" }
+      ? { user: cfg.username, pass: decryptSecret(cfg.passwordEnc) }
       : undefined,
   });
 }

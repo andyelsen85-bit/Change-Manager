@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, ldapSettingsTable } from "@workspace/db";
 import { logger } from "./logger";
+import { decryptSecret } from "./secret-crypto";
 
 export async function getLdap() {
   const [row] = await db.select().from(ldapSettingsTable).where(eq(ldapSettingsTable.key, "global"));
@@ -56,7 +57,8 @@ export async function authenticateLdap(username: string, password: string): Prom
 
     const bindAsService = (cb: (err: Error | null) => void) => {
       if (cfg.bindDn && cfg.bindPasswordEnc) {
-        client.bind(cfg.bindDn, cfg.bindPasswordEnc, (err) => cb(err));
+        const bindPassword = decryptSecret(cfg.bindPasswordEnc);
+        client.bind(cfg.bindDn, bindPassword, (err) => cb(err));
       } else {
         cb(null);
       }
