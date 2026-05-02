@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { addMonths, endOfMonth, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, addDays } from "date-fns";
@@ -146,6 +146,17 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [, setLocation] = useLocation();
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
+  // Primary (non-deputy) members per role — used to pre-select attendees
+  // based on the meeting kind. Standard CAB meetings default to all primary
+  // CAB Members; eCAB meetings default to all primary eCAB Members.
+  const cabPrimaryQ = useQuery({
+    queryKey: ["users.role.cab_member.primary"],
+    queryFn: () => api.get<User[]>("/users?role=cab_member&primary=1"),
+  });
+  const ecabPrimaryQ = useQuery({
+    queryKey: ["users.role.ecab_member.primary"],
+    queryFn: () => api.get<User[]>("/users?role=ecab_member&primary=1"),
+  });
   const changesQ = useQuery({
     queryKey: ["changes.cab-eligible"],
     queryFn: () => api.get<ChangeRequest[]>("/changes?status=awaiting_approval"),
@@ -164,6 +175,23 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
   const [chairUserId, setChairUserId] = useState<string>("none");
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [changeIds, setChangeIds] = useState<number[]>([]);
+
+  // Auto-select the appropriate primary role members when the meeting kind
+  // changes (or when their data first arrives for the active kind). Manual
+  // additions/removals made by the operator are NOT overwritten by background
+  // refetches of either query — the ref tracks which kind we last applied
+  // defaults for, so the effect only fires on a real kind switch or on the
+  // initial arrival of the active kind's data.
+  const cabDefaults = cabPrimaryQ.data;
+  const ecabDefaults = ecabPrimaryQ.data;
+  const lastAppliedKindRef = useRef<"cab" | "ecab" | null>(null);
+  useEffect(() => {
+    const defaults = kind === "ecab" ? ecabDefaults : cabDefaults;
+    if (!defaults) return;
+    if (lastAppliedKindRef.current === kind) return;
+    lastAppliedKindRef.current = kind;
+    setMemberIds(defaults.map((u) => u.id));
+  }, [kind, cabDefaults, ecabDefaults]);
 
   const create = useMutation({
     mutationFn: () =>

@@ -67,7 +67,15 @@ router.get("/users", requireAuth, async (req, res): Promise<void> => {
     ? await db.select().from(usersTable).where(and(...conds))
     : await db.select().from(usersTable);
   if (role) {
-    const ra = await db.select().from(roleAssignmentsTable).where(eq(roleAssignmentsTable.roleKey, role));
+    // Optional `primary=1` filters out deputy assignments — used by the CAB
+    // meeting creator to pre-select the standing primary members for a role.
+    const primaryOnly = req.query["primary"] === "1" || req.query["primary"] === "true";
+    const roleConds = [eq(roleAssignmentsTable.roleKey, role)];
+    if (primaryOnly) roleConds.push(eq(roleAssignmentsTable.isDeputy, false));
+    const ra = await db
+      .select()
+      .from(roleAssignmentsTable)
+      .where(and(...roleConds));
     const ids = new Set(ra.map((r) => r.userId));
     rows = rows.filter((u) => ids.has(u.id));
   }

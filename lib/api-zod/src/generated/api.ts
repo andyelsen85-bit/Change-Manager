@@ -95,6 +95,10 @@ export const ChangePasswordBody = zod.object({
 export const ListUsersQueryParams = zod.object({
   search: zod.coerce.string().optional(),
   role: zod.coerce.string().optional(),
+  primary: zod
+    .enum(["1", "true"])
+    .optional()
+    .describe("When combined with `role`, restrict to non-deputy assignments."),
 });
 
 export const ListUsersResponseItem = zod.object({

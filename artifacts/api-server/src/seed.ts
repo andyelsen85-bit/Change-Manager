@@ -40,6 +40,7 @@ const ROLES = [
   { key: "change_manager", name: "Change Manager", description: "Owns the change management process end-to-end." },
   { key: "technical_reviewer", name: "Technical Reviewer", description: "Reviews technical risk and feasibility." },
   { key: "business_owner", name: "Business Owner", description: "Approves business impact and timing." },
+  { key: "cab_member", name: "CAB Member", description: "Standing member of the Change Advisory Board." },
   { key: "ecab_member", name: "eCAB Member", description: "Emergency CAB member, expedited approval authority." },
   { key: "implementer", name: "Implementer", description: "Carries out the change in production." },
   { key: "tester", name: "Tester", description: "Validates change in pre-prod / prod." },
