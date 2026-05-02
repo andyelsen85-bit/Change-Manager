@@ -2,10 +2,15 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    # NOTE on POSTGRES_PASSWORD: this service binds Postgres to the internal
+    # docker network only (no `ports:` mapping), so the password is never
+    # reachable from outside the host. The default below lets a clean
+    # `docker compose up` succeed without any prior bootstrap; deployments
+    # that want a custom password can still set POSTGRES_PASSWORD in .env.
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-change_mgmt}
       POSTGRES_USER: ${POSTGRES_USER:-change_mgmt}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_mgmt_internal_only}
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,7 +27,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-change_mgmt}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD:-change_mgmt_internal_only}@db:5432/${POSTGRES_DB:-change_mgmt}
     command: ["pnpm", "--filter", "@workspace/db", "run", "push"]
     restart: "no"
 
@@ -35,12 +40,18 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # JWT_SECRET resolution: if .env (or the host environment) supplies one,
+    # the entrypoint honours it. Otherwise the entrypoint generates a strong
+    # 64-byte hex secret on first boot and persists it to the `api_secrets`
+    # volume so it survives restarts and existing sessions stay valid.
     environment:
       NODE_ENV: production
       PORT: "8080"
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-change_mgmt}
+      JWT_SECRET: ${JWT_SECRET:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD:-change_mgmt_internal_only}@db:5432/${POSTGRES_DB:-change_mgmt}
+    volumes:
+      - api_secrets:/var/secrets
     expose:
       - "8080"
     restart: unless-stopped
@@ -70,3 +81,4 @@ services:
 
 volumes:
   db_data:
+  api_secrets:

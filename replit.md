@@ -63,28 +63,32 @@ docker/            # Nginx config + entrypoint for the web container
 
 ## Self-hosting with Docker (80 / 443)
 
-After cloning the repo, run **one** command:
+After cloning the repo, the simplest path is just:
 
 ```
-./scripts/up.sh
-```
-
-This bootstraps a `.env` with strong random `POSTGRES_PASSWORD` and
-`JWT_SECRET` (idempotent — only writes the file if missing) and then
-runs `docker compose up -d --build` and tails the logs.
-
-If you prefer to drive `docker compose` yourself, run the bootstrap step
-manually first:
-
-```
-./scripts/init-env.sh        # generates .env with strong random secrets
 docker compose up -d --build
 ```
 
-Both compose services refuse to start without `POSTGRES_PASSWORD` and
-`JWT_SECRET` set, which is why the bootstrap step is required. You can
-also author `.env` by hand by copying `.env.example` and setting those
-two values (use `openssl rand -hex 64` for `JWT_SECRET`).
+This works without any pre-bootstrap. The compose file ships with a safe
+internal-only default for `POSTGRES_PASSWORD` (the `db` service has no
+exposed port — it is only reachable from inside the docker network) and
+the api container's entrypoint auto-generates a strong `JWT_SECRET` on
+first boot, persisting it to the `api_secrets` named volume so existing
+sessions survive `docker compose down`/`up` cycles.
+
+To override either value (recommended for production), create a `.env`
+at the repo root and set them explicitly:
+
+```
+./scripts/init-env.sh        # generates .env with strong random secrets
+# …or copy .env.example to .env and edit by hand, e.g.
+#   POSTGRES_PASSWORD=$(openssl rand -hex 24)
+#   JWT_SECRET=$(openssl rand -hex 64)
+docker compose up -d --build
+```
+
+Wrapper for the lazy: `./scripts/up.sh` runs `init-env.sh` (if no `.env`)
+then `docker compose up -d --build` and tails the logs.
 
 The compose stack runs Postgres, applies migrations, starts the Node API, and an Nginx
 container that serves the static frontend on `:80`/`:443` and reverse-proxies `/api/*`

@@ -39,9 +39,17 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 COPY --from=builder /repo/artifacts/api-server/dist ./dist
+COPY docker/entrypoint-api.sh /entrypoint-api.sh
+# /var/secrets is backed by the `api_secrets` named volume in compose; the
+# entrypoint persists an auto-generated JWT_SECRET there when one is not
+# supplied via the environment. Pre-create it owned by the node user so the
+# unprivileged process can write to it.
+RUN chmod +x /entrypoint-api.sh \
+ && mkdir -p /var/secrets \
+ && chown -R node:node /var/secrets
 EXPOSE 8080
 USER node
-CMD ["node", "--enable-source-maps", "./dist/index.mjs"]
+ENTRYPOINT ["/entrypoint-api.sh"]
 
 # --- web runtime (Nginx serving static frontend + TLS + reverse proxy) ------
 FROM nginx:1.27-alpine AS web
