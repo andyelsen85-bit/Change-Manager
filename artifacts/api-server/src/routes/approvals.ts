@@ -72,40 +72,38 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     res.status(404).json({ error: "Approval not found" });
     return;
   }
-  // Post-CAB sign-off gate: for Normal and Emergency tracks the approval vote must be
-  // recorded *after* the linked CAB / eCAB meeting has concluded. We allow either
-  // (a) the change to already be in `awaiting_approval` status (meaning the state
-  //     machine has explicitly moved it past the CAB step), or
-  // (b) the linked cab meeting status to be `completed`.
-  // Standard-track changes never carry approval rows, so this never fires for them.
+  // Post-CAB sign-off gate: only enforced for the Normal track. Normal changes
+  // are reviewed at a scheduled CAB meeting and votes are recorded after the
+  // meeting has concluded, so we require the linked meeting to be `completed`.
+  // Emergency changes vote directly in the Approvals tab without a meeting
+  // (that is the entire point of the emergency flow), so they only need to be
+  // in `awaiting_approval`. Standard changes carry no approval rows at all.
   const [chgForGate] = await db
     .select()
     .from(changeRequestsTable)
     .where(eq(changeRequestsTable.id, ap.changeId));
   if (chgForGate && (chgForGate.track === "normal" || chgForGate.track === "emergency")) {
-    // The vote is only valid when the change is in `awaiting_approval` AND the linked
-    // CAB / eCAB meeting has been marked completed. Both checks are required: the
-    // status-only check would otherwise let a caller who flipped status by another
-    // path bypass the CAB requirement.
     if (chgForGate.status !== "awaiting_approval") {
       res.status(409).json({
         error: "Approval votes can only be recorded while the change is awaiting approval.",
       });
       return;
     }
-    let cabCompleted = false;
-    if (chgForGate.cabMeetingId != null) {
-      const [meeting] = await db
-        .select()
-        .from(cabMeetingsTable)
-        .where(eq(cabMeetingsTable.id, chgForGate.cabMeetingId));
-      if (meeting?.status === "completed") cabCompleted = true;
-    }
-    if (!cabCompleted) {
-      res.status(409).json({
-        error: "Approval can only be recorded after the CAB / eCAB meeting has concluded.",
-      });
-      return;
+    if (chgForGate.track === "normal") {
+      let cabCompleted = false;
+      if (chgForGate.cabMeetingId != null) {
+        const [meeting] = await db
+          .select()
+          .from(cabMeetingsTable)
+          .where(eq(cabMeetingsTable.id, chgForGate.cabMeetingId));
+        if (meeting?.status === "completed") cabCompleted = true;
+      }
+      if (!cabCompleted) {
+        res.status(409).json({
+          error: "Approval can only be recorded after the CAB meeting has concluded.",
+        });
+        return;
+      }
     }
   }
   // Verify the user is in this role (or its deputy)
