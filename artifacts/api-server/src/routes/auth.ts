@@ -9,6 +9,10 @@ import {
   clearSessionCookie,
   readSessionCookie,
   loadUserRoles,
+  generateCsrfToken,
+  setCsrfCookie,
+  clearCsrfCookie,
+  readCsrfCookie,
 } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { authenticateLdap, getLdap } from "../lib/ldap";
@@ -59,6 +63,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     const roles = await loadUserRoles(existing.id);
     const token = signSession({ uid: existing.id, username: existing.username, isAdmin: existing.isAdmin });
     setSessionCookie(res, token);
+    setCsrfCookie(res, generateCsrfToken());
     await audit(
       req,
       {
@@ -105,6 +110,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       const roles = await loadUserRoles(userRow.id);
       const token = signSession({ uid: userRow.id, username: userRow.username, isAdmin: userRow.isAdmin });
       setSessionCookie(res, token);
+      setCsrfCookie(res, generateCsrfToken());
       await audit(
         req,
         {
@@ -150,6 +156,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
 router.post("/auth/logout", async (req, res): Promise<void> => {
   const session = readSessionCookie(req);
   clearSessionCookie(res);
+  clearCsrfCookie(res);
   if (session) {
     await audit(req, {
       action: "auth.logout",
@@ -171,6 +178,13 @@ router.get("/auth/me", async (req, res): Promise<void> => {
   if (!u) {
     res.status(401).json({ error: "Not authenticated" });
     return;
+  }
+  // Heal sessions that pre-date CSRF rollout (or where the CSRF cookie was
+  // pruned by the browser) by minting a fresh token. Without this the user
+  // would be unable to perform any mutating action until they log out and
+  // back in.
+  if (!readCsrfCookie(req)) {
+    setCsrfCookie(res, generateCsrfToken());
   }
   const roles = await loadUserRoles(u.id);
   res.json({

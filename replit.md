@@ -20,7 +20,7 @@ A pnpm workspace monorepo (TypeScript) that ships:
 - **CAB / eCAB**: calendar of meetings, attendee management, ICS invite download + email send.
 - **Deputies / replacements** for every governance role (incl. Change Manager) so approvals never block.
 - **Notifications**: per-user granular email + in-app preferences keyed by event.
-- **Auth**: local users (bcrypt) + LDAP. JWT cookie session (`cm_session`).
+- **Auth**: local users (bcrypt) + LDAP. JWT cookie session (`cm_session`). CSRF protection via double-submit cookie (`cm_csrf` non-HttpOnly cookie + `X-CSRF-Token` header) — required on every POST/PATCH/PUT/DELETE under `/api` except `/api/auth/login`. Token issued on login, cleared on logout, healed by `/api/auth/me`. The frontend `api` client in `artifacts/change-mgmt/src/lib/api.ts` reads the cookie and attaches the header automatically.
 - **Settings (admin)**: SMTP, LDAP, SSL/TLS upload + in-app CSR generation (POST /api/settings/ssl/csr — RSA 2048/3072/4096, DNS+IP SANs, key usage / extKeyUsage server-auth, private key persisted server-side until the signed cert is uploaded), session/lockout timeouts. Sensitive values returned as `*Set` booleans on GET.
 - **Audit log**: immutable JSONB before/after snapshots, including login/logout with IP and user agent. Admin-only; CSV export.
 

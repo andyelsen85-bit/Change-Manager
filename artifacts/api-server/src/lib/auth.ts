@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
@@ -14,6 +15,8 @@ if (NODE_ENV === "production" && (!RAW_SECRET || RAW_SECRET.length < 16)) {
 }
 const JWT_SECRET = RAW_SECRET ?? "dev-only-change-mgmt-secret-do-not-use-in-prod";
 const COOKIE_NAME = "cm_session";
+const CSRF_COOKIE_NAME = "cm_csrf";
+const CSRF_HEADER_NAME = "x-csrf-token";
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 
 export type SessionPayload = {
@@ -64,6 +67,58 @@ export function setSessionCookie(res: Response, token: string): void {
 
 export function clearSessionCookie(res: Response): void {
   res.clearCookie(COOKIE_NAME, { path: "/" });
+}
+
+export function generateCsrfToken(): string {
+  return randomBytes(32).toString("hex");
+}
+
+// Sets the CSRF token cookie used by the double-submit pattern. The cookie
+// is intentionally NOT HttpOnly so the frontend can read it and echo the
+// value back in the `X-CSRF-Token` header on every mutating request.
+export function setCsrfCookie(res: Response, token: string): void {
+  res.cookie(CSRF_COOKIE_NAME, token, {
+    httpOnly: false,
+    sameSite: "lax",
+    secure: NODE_ENV === "production",
+    maxAge: TOKEN_TTL_SECONDS * 1000,
+    path: "/",
+  });
+}
+
+export function clearCsrfCookie(res: Response): void {
+  res.clearCookie(CSRF_COOKIE_NAME, { path: "/" });
+}
+
+export function readCsrfCookie(req: Request): string | null {
+  const value = (req as Request & { cookies?: Record<string, string> }).cookies?.[CSRF_COOKIE_NAME];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+// Double-submit CSRF check: requires the request to carry both the
+// non-HttpOnly `cm_csrf` cookie and a matching `X-CSRF-Token` header on
+// state-changing methods. Safe (read-only) methods are passed through.
+export function requireCsrf(req: Request, res: Response, next: NextFunction): void {
+  const method = req.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") {
+    next();
+    return;
+  }
+  const cookieToken = readCsrfCookie(req);
+  const headerRaw = req.headers[CSRF_HEADER_NAME];
+  const headerToken = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+  if (!cookieToken || !headerToken || !safeEqual(cookieToken, headerToken)) {
+    res.status(403).json({ error: "Invalid or missing CSRF token" });
+    return;
+  }
+  next();
 }
 
 export function readSessionCookie(req: Request): SessionPayload | null {

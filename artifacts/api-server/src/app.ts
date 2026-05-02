@@ -1,9 +1,10 @@
-import express, { type Express, type ErrorRequestHandler } from "express";
+import express, { type Express, type ErrorRequestHandler, type RequestHandler } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { requireCsrf } from "./lib/auth";
 
 const app: Express = express();
 
@@ -30,6 +31,21 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+// CSRF protection (double-submit cookie). Login is exempt because the user
+// has no session yet — login is what issues the CSRF token. All other
+// state-changing requests under /api must include a matching X-CSRF-Token
+// header that mirrors the `cm_csrf` cookie value set on login. The exemption
+// is scoped to POST and tolerates a trailing slash so unintended verbs on
+// /auth/login still go through the CSRF check.
+const csrfGate: RequestHandler = (req, res, next) => {
+  if (req.method === "POST" && (req.path === "/auth/login" || req.path === "/auth/login/")) {
+    next();
+    return;
+  }
+  requireCsrf(req, res, next);
+};
+app.use("/api", csrfGate);
 
 app.use("/api", router);
 
