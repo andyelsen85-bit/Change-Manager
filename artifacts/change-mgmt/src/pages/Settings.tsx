@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Save } from "lucide-react";
+import { Copy, Download, FileSignature, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { LdapSettings, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
@@ -13,6 +13,38 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+type CsrResponse = {
+  csrPem: string;
+  publicKeyFingerprintSha256: string;
+  subject: {
+    commonName: string;
+    organization?: string;
+    organizationalUnit?: string;
+    locality?: string;
+    state?: string;
+    country?: string;
+    emailAddress?: string;
+  };
+  subjectAltNames: string[];
+  keyBits: number;
+};
 
 export function SettingsPage() {
   return (
@@ -297,7 +329,10 @@ function SslPanel() {
             <Switch checked={hstsEnabled} onCheckedChange={setHstsEnabled} />
           </div>
         </div>
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+          <CsrDialog
+            onGenerated={() => qc.invalidateQueries({ queryKey: ["settings.ssl"] })}
+          />
           <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-ssl">
             {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             <Save className="mr-2 h-4 w-4" /> Save
@@ -305,6 +340,234 @@ function SslPanel() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CsrDialog({ onGenerated }: { onGenerated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [commonName, setCommonName] = useState("");
+  const [organization, setOrganization] = useState("");
+  const [organizationalUnit, setOrganizationalUnit] = useState("");
+  const [locality, setLocality] = useState("");
+  const [stateField, setStateField] = useState("");
+  const [country, setCountry] = useState("");
+  const [emailAddress, setEmailAddress] = useState("");
+  const [sansText, setSansText] = useState("");
+  const [keyBits, setKeyBits] = useState<2048 | 3072 | 4096>(2048);
+  const [result, setResult] = useState<CsrResponse | null>(null);
+
+  const reset = () => {
+    setCommonName("");
+    setOrganization("");
+    setOrganizationalUnit("");
+    setLocality("");
+    setStateField("");
+    setCountry("");
+    setEmailAddress("");
+    setSansText("");
+    setKeyBits(2048);
+    setResult(null);
+  };
+
+  const generate = useMutation({
+    mutationFn: () => {
+      const sans = sansText
+        .split(/[\n,]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      return api.post<CsrResponse>("/settings/ssl/csr", {
+        commonName: commonName.trim(),
+        organization: organization.trim() || undefined,
+        organizationalUnit: organizationalUnit.trim() || undefined,
+        locality: locality.trim() || undefined,
+        state: stateField.trim() || undefined,
+        country: country.trim() || undefined,
+        emailAddress: emailAddress.trim() || undefined,
+        subjectAltNames: sans,
+        keyBits,
+      });
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      onGenerated();
+      toast.success("CSR generated. The private key is held on the server until your CA returns the signed certificate.");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "CSR generation failed"),
+  });
+
+  const copyCsr = async () => {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.csrPem);
+      toast.success("CSR copied to clipboard");
+    } catch {
+      toast.error("Clipboard not available");
+    }
+  };
+
+  const downloadCsr = () => {
+    if (!result) return;
+    const blob = new Blob([result.csrPem], { type: "application/pkcs10" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const safeCn = result.subject.commonName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    a.href = url;
+    a.download = `${safeCn || "request"}.csr`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) reset();
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="outline" data-testid="button-open-csr">
+          <FileSignature className="mr-2 h-4 w-4" /> Generate CSR
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Generate certificate signing request</DialogTitle>
+          <DialogDescription>
+            Create a fresh RSA key pair and a CSR for your internal PKI to sign. The private key is
+            stored on this server; once the CA returns the signed certificate, paste it into the
+            Certificate field above and save.
+          </DialogDescription>
+        </DialogHeader>
+
+        {!result ? (
+          <div className="grid gap-4 py-2 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label>Common name (CN) <span className="text-destructive">*</span></Label>
+              <Input
+                value={commonName}
+                onChange={(e) => setCommonName(e.target.value)}
+                placeholder="change-mgmt.example.com"
+                data-testid="input-csr-cn"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Organization (O)</Label>
+              <Input value={organization} onChange={(e) => setOrganization(e.target.value)} placeholder="Acme Corp" />
+            </div>
+            <div className="space-y-2">
+              <Label>Organizational unit (OU)</Label>
+              <Input value={organizationalUnit} onChange={(e) => setOrganizationalUnit(e.target.value)} placeholder="IT Operations" />
+            </div>
+            <div className="space-y-2">
+              <Label>Locality (L)</Label>
+              <Input value={locality} onChange={(e) => setLocality(e.target.value)} placeholder="Berlin" />
+            </div>
+            <div className="space-y-2">
+              <Label>State / province (ST)</Label>
+              <Input value={stateField} onChange={(e) => setStateField(e.target.value)} placeholder="Berlin" />
+            </div>
+            <div className="space-y-2">
+              <Label>Country (C, 2-letter)</Label>
+              <Input
+                value={country}
+                onChange={(e) => setCountry(e.target.value.toUpperCase())}
+                maxLength={2}
+                placeholder="DE"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email address</Label>
+              <Input value={emailAddress} onChange={(e) => setEmailAddress(e.target.value)} placeholder="pki@example.com" />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Subject alternative names (one per line)</Label>
+              <Textarea
+                rows={3}
+                value={sansText}
+                onChange={(e) => setSansText(e.target.value)}
+                placeholder={"change-mgmt.example.com\nchange-mgmt-internal.example.com\n10.0.1.42"}
+                data-testid="textarea-csr-sans"
+              />
+              <p className="text-xs text-muted-foreground">
+                Hostnames or IP addresses. The common name is added automatically.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Key size</Label>
+              <Select value={String(keyBits)} onValueChange={(v) => setKeyBits(Number(v) as 2048 | 3072 | 4096)}>
+                <SelectTrigger data-testid="select-csr-keybits">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="2048">RSA 2048</SelectItem>
+                  <SelectItem value="3072">RSA 3072</SelectItem>
+                  <SelectItem value="4096">RSA 4096</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3 py-2">
+            <Alert>
+              <AlertDescription className="space-y-1 text-xs">
+                <div>
+                  <strong>CN:</strong> {result.subject.commonName}
+                  {result.subject.organization ? ` · O=${result.subject.organization}` : ""}
+                </div>
+                <div>
+                  <strong>SANs:</strong> {result.subjectAltNames.join(", ") || "(none)"}
+                </div>
+                <div>
+                  <strong>Key:</strong> RSA {result.keyBits} ·{" "}
+                  <span className="font-mono">SHA-256 {result.publicKeyFingerprintSha256}</span>
+                </div>
+                <div className="pt-1 text-muted-foreground">
+                  Submit the CSR below to your internal PKI. When the signed certificate is
+                  returned, paste it into the Certificate field and click Save — the matching
+                  private key is already stored.
+                </div>
+              </AlertDescription>
+            </Alert>
+            <Textarea
+              rows={12}
+              readOnly
+              value={result.csrPem}
+              className="font-mono text-xs"
+              data-testid="textarea-csr-result"
+            />
+          </div>
+        )}
+
+        <DialogFooter>
+          {result ? (
+            <>
+              <Button variant="outline" onClick={copyCsr} data-testid="button-copy-csr">
+                <Copy className="mr-2 h-4 w-4" /> Copy
+              </Button>
+              <Button variant="outline" onClick={downloadCsr} data-testid="button-download-csr">
+                <Download className="mr-2 h-4 w-4" /> Download .csr
+              </Button>
+              <Button onClick={() => setOpen(false)}>Done</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button
+                onClick={() => generate.mutate()}
+                disabled={generate.isPending || !commonName.trim()}
+                data-testid="button-generate-csr"
+              >
+                {generate.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Generate
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

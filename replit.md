@@ -21,7 +21,7 @@ A pnpm workspace monorepo (TypeScript) that ships:
 - **Deputies / replacements** for every governance role (incl. Change Manager) so approvals never block.
 - **Notifications**: per-user granular email + in-app preferences keyed by event.
 - **Auth**: local users (bcrypt) + LDAP. JWT cookie session (`cm_session`).
-- **Settings (admin)**: SMTP, LDAP, SSL/TLS upload, session/lockout timeouts. Sensitive values returned as `*Set` booleans on GET.
+- **Settings (admin)**: SMTP, LDAP, SSL/TLS upload + in-app CSR generation (POST /api/settings/ssl/csr — RSA 2048/3072/4096, DNS+IP SANs, key usage / extKeyUsage server-auth, private key persisted server-side until the signed cert is uploaded), session/lockout timeouts. Sensitive values returned as `*Set` booleans on GET.
 - **Audit log**: immutable JSONB before/after snapshots, including login/logout with IP and user agent. Admin-only; CSV export.
 
 ## Stack

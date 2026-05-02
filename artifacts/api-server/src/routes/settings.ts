@@ -11,6 +11,7 @@ import { requireAdmin } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { sendTestEmail } from "../lib/email";
 import { testLdapConnection } from "../lib/ldap";
+import { generateCsr } from "../lib/csr";
 
 const router: IRouter = Router();
 
@@ -216,6 +217,69 @@ router.put("/settings/ssl", requireAdmin, async (req, res): Promise<void> => {
     after: maskSsl(row),
   });
   res.json(maskSsl(row));
+});
+
+router.post("/settings/ssl/csr", requireAdmin, async (req, res): Promise<void> => {
+  const b = req.body ?? {};
+  if (typeof b.commonName !== "string" || !b.commonName.trim()) {
+    res.status(400).json({ error: "commonName is required" });
+    return;
+  }
+  let result;
+  try {
+    result = generateCsr({
+      commonName: b.commonName,
+      organization: typeof b.organization === "string" ? b.organization : undefined,
+      organizationalUnit: typeof b.organizationalUnit === "string" ? b.organizationalUnit : undefined,
+      locality: typeof b.locality === "string" ? b.locality : undefined,
+      state: typeof b.state === "string" ? b.state : undefined,
+      country: typeof b.country === "string" ? b.country : undefined,
+      emailAddress: typeof b.emailAddress === "string" ? b.emailAddress : undefined,
+      subjectAltNames: Array.isArray(b.subjectAltNames)
+        ? b.subjectAltNames.filter((s: unknown): s is string => typeof s === "string")
+        : [],
+      keyBits: b.keyBits === 3072 || b.keyBits === 4096 ? b.keyBits : 2048,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : "Invalid CSR input" });
+    return;
+  }
+  // Persist the freshly-generated private key on the SSL settings row so that
+  // when the admin uploads the signed certificate later it pairs correctly.
+  const [before] = await db.select().from(sslSettingsTable).where(eq(sslSettingsTable.key, KEY));
+  const values = {
+    key: KEY,
+    certificatePem: before?.certificatePem ?? null,
+    privateKeyPem: result.privateKeyPem,
+    chainPem: before?.chainPem ?? null,
+    forceHttps: before?.forceHttps ?? false,
+    hstsEnabled: before?.hstsEnabled ?? false,
+  };
+  await db
+    .insert(sslSettingsTable)
+    .values(values)
+    .onConflictDoUpdate({ target: sslSettingsTable.key, set: values });
+  await audit(req, {
+    action: "settings.ssl_csr_generated",
+    entityType: "settings",
+    entityId: null,
+    summary: `Generated CSR (CN=${result.subject.commonName}, ${result.keyBits}-bit, SANs=${result.subjectAltNames.length})`,
+    after: {
+      subject: result.subject,
+      subjectAltNames: result.subjectAltNames,
+      keyBits: result.keyBits,
+      publicKeyFingerprintSha256: result.publicKeyFingerprintSha256,
+    },
+  });
+  // Return the CSR + metadata. The private key is intentionally NOT returned —
+  // it is held server-side and paired with the cert that comes back from the PKI.
+  res.json({
+    csrPem: result.csrPem,
+    publicKeyFingerprintSha256: result.publicKeyFingerprintSha256,
+    subject: result.subject,
+    subjectAltNames: result.subjectAltNames,
+    keyBits: result.keyBits,
+  });
 });
 
 router.get("/settings/workflow-timeouts", requireAdmin, async (_req, res): Promise<void> => {
