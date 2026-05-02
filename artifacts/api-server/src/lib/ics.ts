@@ -1,5 +1,5 @@
 import { createEvent, type EventAttributes, type DateArray } from "ics";
-import type { CabMeetingRow, CabMemberRow, User } from "@workspace/db";
+import type { CabMeetingRow, CabMemberRow } from "@workspace/db";
 
 function toDateArray(d: Date): DateArray {
   return [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes()];
@@ -41,6 +41,3 @@ export function buildCabIcs(
   return value;
 }
 
-export function _unused(_: User) {
-  return _;
-}

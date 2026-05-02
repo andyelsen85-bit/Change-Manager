@@ -8,12 +8,13 @@ import {
   changeRequestsTable,
   usersTable,
 } from "@workspace/db";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, requireRole } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
 import { notify, getUserEmail } from "../lib/email";
 
 const router: IRouter = Router();
+const requireCabManager = requireRole(["change_manager", "ecab_member", "cab_chair"]);
 
 async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
   const memberRows = await db
@@ -86,7 +87,7 @@ router.get("/cab-meetings", requireAuth, async (req, res): Promise<void> => {
   );
 });
 
-router.post("/cab-meetings", requireAuth, async (req, res): Promise<void> => {
+router.post("/cab-meetings", requireCabManager, async (req, res): Promise<void> => {
   const b = req.body ?? {};
   if (!b.title || !b.scheduledStart || !b.scheduledEnd) {
     res.status(400).json({ error: "title, scheduledStart, scheduledEnd required" });
@@ -143,7 +144,7 @@ router.get("/cab-meetings/:id", requireAuth, async (req, res): Promise<void> => 
   res.json(await expandMeeting(row));
 });
 
-router.patch("/cab-meetings/:id", requireAuth, async (req, res): Promise<void> => {
+router.patch("/cab-meetings/:id", requireCabManager, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -194,7 +195,7 @@ router.patch("/cab-meetings/:id", requireAuth, async (req, res): Promise<void> =
   res.json(await expandMeeting(updated));
 });
 
-router.delete("/cab-meetings/:id", requireAuth, async (req, res): Promise<void> => {
+router.delete("/cab-meetings/:id", requireCabManager, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -251,7 +252,7 @@ router.get("/cab-meetings/:id/ics", requireAuth, async (req, res): Promise<void>
   res.send(ics);
 });
 
-router.post("/cab-meetings/:id/send-invites", requireAuth, async (req, res): Promise<void> => {
+router.post("/cab-meetings/:id/send-invites", requireCabManager, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });

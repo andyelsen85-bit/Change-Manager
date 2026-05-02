@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import {
   db,
   changeRequestsTable,
@@ -151,11 +151,6 @@ router.get("/dashboard/my-tasks", requireAuth, async (req, res): Promise<void> =
       }
     }
   }
-  // Bookkeeping - silence unused-imports
-  void isNull;
-  void ne;
-  void lte;
-  void sql;
   res.json(tasks.slice(0, 20));
 });
 

@@ -13,10 +13,17 @@ import {
   rolesTable,
   roleAssignmentsTable,
 } from "@workspace/db";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
 import { notify, getUserEmail } from "../lib/email";
+import {
+  isTransitionAllowed,
+  listAllowedTransitions,
+  checkPhaseGates,
+  type ChangeTrack,
+  type ChangeStatus,
+} from "../lib/state-machine";
 
 const router: IRouter = Router();
 
@@ -53,7 +60,7 @@ async function createApprovalsForChange(changeId: number, track: string) {
   }
 }
 
-async function notifyApprovers(req: import("express").Request | undefined, changeId: number, change: typeof changeRequestsTable.$inferSelect) {
+async function notifyApprovers(changeId: number, change: typeof changeRequestsTable.$inferSelect) {
   const approvals = await db.select().from(approvalsTable).where(eq(approvalsTable.changeId, changeId));
   for (const ap of approvals) {
     if (ap.decision !== "pending") continue;
@@ -72,7 +79,6 @@ async function notifyApprovers(req: import("express").Request | undefined, chang
       text: `Your approval is required for change ${change.ref} (${change.track}).\n\n${change.description}\n\nRisk: ${change.risk}, Impact: ${change.impact}, Priority: ${change.priority}.`,
     });
   }
-  void req;
 }
 
 router.get("/changes", requireAuth, async (req, res): Promise<void> => {
@@ -174,7 +180,7 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
     after: created,
   });
   if (initialStatus === "draft" && b.track !== "standard") {
-    await notifyApprovers(req, created.id, created);
+    await notifyApprovers(created.id, created);
   }
   res.status(201).json(await expandChangeRow(created));
 });
@@ -249,6 +255,11 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
+  const access = await getChangeAccess(req.session!, before);
+  if (!access) {
+    res.status(403).json({ error: "Only the owner, assignee, change manager, or an admin can edit this change." });
+    return;
+  }
   const b = req.body ?? {};
   const updates: Partial<typeof changeRequestsTable.$inferInsert> = {};
   for (const k of ["title", "description", "risk", "impact", "priority", "category"] as const) {
@@ -290,6 +301,13 @@ router.delete("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
+  // Only admins or change_managers can delete a change. Owners cannot delete an
+  // already-progressed change to preserve the immutable audit trail.
+  const access = await getChangeAccess(req.session!, before);
+  if (access !== "admin" && access !== "change_manager") {
+    res.status(403).json({ error: "Only an admin or change manager can delete a change." });
+    return;
+  }
   await db.delete(changeRequestsTable).where(eq(changeRequestsTable.id, id));
   await audit(req, {
     action: "change.deleted",
@@ -308,30 +326,49 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     return;
   }
   const { toStatus, note } = req.body ?? {};
-  const ALLOWED = new Set([
-    "draft",
-    "submitted",
-    "in_review",
-    "awaiting_approval",
-    "approved",
-    "scheduled",
-    "in_progress",
-    "implemented",
-    "in_testing",
-    "completed",
-    "rejected",
-    "cancelled",
-    "rolled_back",
-    "awaiting_implementation",
-    "awaiting_pir",
-  ]);
-  if (typeof toStatus !== "string" || !ALLOWED.has(toStatus)) {
-    res.status(400).json({ error: "Invalid status" });
+  if (typeof toStatus !== "string") {
+    res.status(400).json({ error: "toStatus is required" });
     return;
   }
   const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
   if (!before) {
     res.status(404).json({ error: "Not found" });
+    return;
+  }
+  // Authorization
+  const access = await getChangeAccess(req.session!, before);
+  if (!access) {
+    res.status(403).json({ error: "Only the owner, assignee, change manager, or an admin can transition this change." });
+    return;
+  }
+  // Per-track state machine
+  const track = before.track as ChangeTrack;
+  const fromStatus = before.status as ChangeStatus;
+  const targetStatus = toStatus as ChangeStatus;
+  if (!isTransitionAllowed(track, fromStatus, targetStatus)) {
+    res.status(400).json({
+      error: `Transition ${fromStatus} → ${targetStatus} is not allowed for ${track} changes.`,
+      allowed: listAllowedTransitions(track, fromStatus),
+    });
+    return;
+  }
+  // Phase gates (planning sign-off, testing passed, PIR completed, approvals)
+  const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
+  const [testing] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, id));
+  const [pir] = await db.select().from(pirRecordsTable).where(eq(pirRecordsTable.changeId, id));
+  const allApprovals = await db.select().from(approvalsTable).where(eq(approvalsTable.changeId, id));
+  const approvalsAllApproved =
+    allApprovals.length === 0 || allApprovals.every((a) => a.decision === "approved");
+  const gateError = checkPhaseGates({
+    track,
+    toStatus: targetStatus,
+    planning: planning ? { signedOff: planning.signedOff } : null,
+    testing: testing ? { overallResult: testing.overallResult } : null,
+    pir: pir ? { completedAt: pir.completedAt ?? null } : null,
+    approvalsAllApproved,
+  });
+  if (gateError) {
+    res.status(400).json({ error: gateError });
     return;
   }
   const updates: Partial<typeof changeRequestsTable.$inferInsert> = { status: toStatus };

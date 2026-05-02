@@ -27,9 +27,12 @@ export async function authenticateLdap(username: string, password: string): Prom
   }
 
   return new Promise<LdapAuthResult>((resolve) => {
+    // ldapTlsRejectUnauthorized in cfg overrides default (true). Only set false when admin explicitly opts in.
+    const rejectUnauthorized =
+      (cfg as unknown as { ldapTlsRejectUnauthorized?: boolean }).ldapTlsRejectUnauthorized !== false;
     const client = ldap.createClient({
       url: cfg.url,
-      tlsOptions: cfg.tls ? { rejectUnauthorized: false } : undefined,
+      tlsOptions: cfg.tls ? { rejectUnauthorized } : undefined,
       timeout: 5000,
       connectTimeout: 5000,
     });
@@ -101,7 +104,7 @@ export async function authenticateLdap(username: string, password: string): Prom
           }
           const userClient = ldap.createClient({
             url: cfg.url,
-            tlsOptions: cfg.tls ? { rejectUnauthorized: false } : undefined,
+            tlsOptions: cfg.tls ? { rejectUnauthorized } : undefined,
             timeout: 5000,
             connectTimeout: 5000,
           });

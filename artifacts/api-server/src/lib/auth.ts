@@ -4,7 +4,15 @@ import type { Request, Response, NextFunction } from "express";
 import { eq } from "drizzle-orm";
 import { db, usersTable, roleAssignmentsTable } from "@workspace/db";
 
-const JWT_SECRET = process.env["JWT_SECRET"] ?? "dev-change-mgmt-secret-change-me";
+const NODE_ENV = process.env["NODE_ENV"] ?? "development";
+const RAW_SECRET = process.env["JWT_SECRET"];
+if (NODE_ENV === "production" && (!RAW_SECRET || RAW_SECRET.length < 16)) {
+  throw new Error(
+    "JWT_SECRET environment variable is required in production (min 16 chars). " +
+      "Refusing to start with a default secret.",
+  );
+}
+const JWT_SECRET = RAW_SECRET ?? "dev-only-change-mgmt-secret-do-not-use-in-prod";
 const COOKIE_NAME = "cm_session";
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
 
@@ -48,7 +56,7 @@ export function setSessionCookie(res: Response, token: string): void {
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env["NODE_ENV"] === "production",
+    secure: NODE_ENV === "production",
     maxAge: TOKEN_TTL_SECONDS * 1000,
     path: "/",
   });
@@ -99,4 +107,41 @@ export async function loadUserRoles(userId: number): Promise<string[]> {
 export async function loadUserById(id: number) {
   const [u] = await db.select().from(usersTable).where(eq(usersTable.id, id));
   return u;
+}
+
+export function requireRole(roles: string[]) {
+  return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
+    const session = readSessionCookie(req);
+    if (!session) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+    if (session.isAdmin) {
+      req.session = session;
+      next();
+      return;
+    }
+    const userRoles = await loadUserRoles(session.uid);
+    const ok = userRoles.some((r) => roles.includes(r));
+    if (!ok) {
+      res.status(403).json({ error: `Requires role: ${roles.join(" or ")}` });
+      return;
+    }
+    req.session = session;
+    next();
+  };
+}
+
+export type ChangeAccessReason = "owner" | "assignee" | "admin" | "change_manager" | null;
+
+export async function getChangeAccess(
+  session: SessionPayload,
+  change: { ownerId: number; assigneeId: number | null },
+): Promise<ChangeAccessReason> {
+  if (session.isAdmin) return "admin";
+  if (change.ownerId === session.uid) return "owner";
+  if (change.assigneeId === session.uid) return "assignee";
+  const userRoles = await loadUserRoles(session.uid);
+  if (userRoles.includes("change_manager")) return "change_manager";
+  return null;
 }

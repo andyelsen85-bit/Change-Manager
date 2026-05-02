@@ -18,6 +18,7 @@ import { SettingsPage } from "@/pages/Settings";
 import { AuditLogPage } from "@/pages/AuditLog";
 import { NotificationsPage } from "@/pages/Notifications";
 import { ProfilePage } from "@/pages/Profile";
+import { ForbiddenPage } from "@/pages/Forbidden";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
 
@@ -59,10 +60,11 @@ function ProtectedRoutes() {
         <Route path="/cab" component={CabCalendarPage} />
         <Route path="/cab/:id" component={CabDetailPage} />
         <Route path="/templates" component={TemplatesPage} />
-        {user.isAdmin && <Route path="/users" component={UsersPage} />}
-        {user.isAdmin && <Route path="/roles" component={RolesPage} />}
-        {user.isAdmin && <Route path="/settings" component={SettingsPage} />}
-        {user.isAdmin && <Route path="/audit" component={AuditLogPage} />}
+        <Route path="/users" component={user.isAdmin ? UsersPage : ForbiddenPage} />
+        <Route path="/roles" component={user.isAdmin ? RolesPage : ForbiddenPage} />
+        <Route path="/settings" component={user.isAdmin ? SettingsPage : ForbiddenPage} />
+        <Route path="/admin/audit-log" component={user.isAdmin ? AuditLogPage : ForbiddenPage} />
+        <Route path="/audit">{() => <Redirect to="/admin/audit-log" />}</Route>
         <Route path="/notifications" component={NotificationsPage} />
         <Route path="/profile" component={ProfilePage} />
         <Route component={NotFound} />

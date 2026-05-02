@@ -38,7 +38,7 @@ const NAV: NavItem[] = [
   { label: "Templates", path: "/templates", icon: FileText },
   { label: "Users", path: "/users", icon: Users, adminOnly: true },
   { label: "Roles", path: "/roles", icon: ShieldCheck, adminOnly: true },
-  { label: "Audit Log", path: "/audit", icon: ScrollText, adminOnly: true },
+  { label: "Audit Log", path: "/admin/audit-log", icon: ScrollText, adminOnly: true },
   { label: "Settings", path: "/settings", icon: Settings, adminOnly: true },
 ];
 
@@ -212,7 +212,7 @@ function titleFor(path: string): string {
   if (path.startsWith("/templates")) return "Standard Templates";
   if (path.startsWith("/users")) return "Users";
   if (path.startsWith("/roles")) return "Roles & Assignments";
-  if (path.startsWith("/audit")) return "Audit Log";
+  if (path.startsWith("/admin/audit-log") || path.startsWith("/audit")) return "Audit Log";
   if (path.startsWith("/settings")) return "System Settings";
   if (path.startsWith("/notifications")) return "Notification Preferences";
   if (path.startsWith("/profile")) return "My Profile";

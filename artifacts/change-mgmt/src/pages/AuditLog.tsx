@@ -23,7 +23,7 @@ export function AuditLogPage() {
   if (from) params.set("from", new Date(from).toISOString());
   if (to) params.set("to", new Date(to).toISOString());
   params.set("limit", "200");
-  const path = `/audit-log?${params.toString()}`;
+  const path = `/admin/audit-log?${params.toString()}`;
   const q = useQuery({ queryKey: [path], queryFn: () => api.get<AuditEntry[]>(path) });
 
   const filtered = useMemo(() => {
@@ -40,7 +40,7 @@ export function AuditLogPage() {
   }, [q.data, search]);
 
   const downloadCsv = () => {
-    const exportPath = `/audit-log/export?${params.toString()}`;
+    const exportPath = `/admin/audit-log/export?${params.toString()}`;
     api.download(exportPath, `audit-log-${new Date().toISOString().slice(0, 10)}.csv`).catch((err) =>
       console.error(err),
     );

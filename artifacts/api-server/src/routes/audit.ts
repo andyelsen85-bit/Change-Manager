@@ -26,7 +26,7 @@ function buildConds(q: Record<string, unknown>) {
   return conds;
 }
 
-router.get("/audit-log", requireAdmin, async (req, res): Promise<void> => {
+router.get("/admin/audit-log", requireAdmin, async (req, res): Promise<void> => {
   const conds = buildConds(req.query as Record<string, unknown>);
   const limit = Math.min(500, Math.max(1, Number(req.query["limit"] ?? 100)));
   const offset = Math.max(0, Number(req.query["offset"] ?? 0));
@@ -45,7 +45,7 @@ function csvEscape(s: unknown): string {
   return str;
 }
 
-router.get("/audit-log/export", requireAdmin, async (req, res): Promise<void> => {
+router.get("/admin/audit-log/export", requireAdmin, async (req, res): Promise<void> => {
   const conds = buildConds(req.query as Record<string, unknown>);
   const base = db.select().from(auditLogTable);
   const rows = await (conds.length ? base.where(and(...conds)) : base).orderBy(desc(auditLogTable.timestamp));
