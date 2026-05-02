@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Download, FileSignature, Loader2, Save } from "lucide-react";
+import { CheckCircle2, Copy, Download, FileSignature, Loader2, Save, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { LdapSettings, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
+import type { LdapSettings, LdapTestResult, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -159,6 +159,50 @@ function SmtpPanel() {
   );
 }
 
+// Quick presets for the most common directory layouts. Clicking one fills
+// the user-filter and username-attribute together so admins don't have to
+// remember which AD attribute matches which schema.
+const LDAP_PRESETS: Array<{
+  id: string;
+  label: string;
+  hint: string;
+  userFilter: string;
+  usernameAttr: string;
+}> = [
+  {
+    id: "openldap",
+    label: "OpenLDAP / posixAccount",
+    hint: "Login is the short uid (e.g. jdoe).",
+    userFilter: "(uid={{username}})",
+    usernameAttr: "uid",
+  },
+  {
+    id: "ad-sam",
+    label: "Active Directory (sAMAccountName)",
+    hint: "Login is the pre-Windows-2000 name (e.g. jdoe).",
+    userFilter: "(&(objectClass=user)(sAMAccountName={{username}}))",
+    usernameAttr: "sAMAccountName",
+  },
+  {
+    id: "ad-upn",
+    label: "Active Directory (userPrincipalName)",
+    hint: "Login is the full UPN (e.g. jdoe@corp.local).",
+    userFilter: "(&(objectClass=user)(userPrincipalName={{username}}))",
+    usernameAttr: "userPrincipalName",
+  },
+];
+
+// Friendly label for each phase the bind can fail at — mirrors the LdapStage
+// union on the backend.
+const STAGE_LABEL: Record<LdapTestResult["stage"], string> = {
+  config: "Configuration",
+  connect: "Connection / TLS",
+  "service-bind": "Service account bind",
+  search: "User lookup",
+  "user-bind": "User password bind",
+  ok: "Success",
+};
+
 function LdapPanel() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["settings.ldap"], queryFn: () => api.get<LdapSettings>("/settings/ldap") });
@@ -177,12 +221,31 @@ function LdapPanel() {
   });
   const [testUser, setTestUser] = useState("");
   const [testPass, setTestPass] = useState("");
+  // Persist the most recent diagnostic so admins can keep the failure
+  // details on screen while editing the form to fix them.
+  const [lastResult, setLastResult] = useState<LdapTestResult | null>(null);
   const test = useMutation({
-    mutationFn: () => api.post<{ success: boolean; message: string }>("/settings/ldap/test", { username: testUser, password: testPass }),
-    onSuccess: (r) => (r.success ? toast.success(r.message) : toast.error(r.message)),
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Test failed"),
+    mutationFn: () => api.post<LdapTestResult>("/settings/ldap/test", { username: testUser, password: testPass }),
+    onSuccess: (r) => {
+      setLastResult(r);
+      if (r.success) toast.success(r.message);
+      else toast.error(`${STAGE_LABEL[r.stage]}: ${r.message}`);
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : "Test failed";
+      setLastResult({ success: false, stage: "config", message: msg });
+      toast.error(msg);
+    },
   });
   if (!form) return <Skeleton className="mt-4 h-72 w-full" />;
+
+  const applyPreset = (id: string) => {
+    const preset = LDAP_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    setForm({ ...form, userFilter: preset.userFilter, usernameAttr: preset.usernameAttr });
+    toast.success(`Applied preset: ${preset.label}`);
+  };
+
   return (
     <Card className="mt-4">
       <CardHeader>
@@ -197,36 +260,94 @@ function LdapPanel() {
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2 md:col-span-2">
             <Label>URL</Label>
-            <Input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="ldaps://ldap.example.com:636" data-testid="input-ldap-url" />
+            <Input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="ldaps://dc01.corp.local:636" data-testid="input-ldap-url" />
+            <p className="text-xs text-muted-foreground">
+              Use <code>ldaps://</code> on port 636 for AD over TLS, or <code>ldap://</code> on 389 + StartTLS.
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Bind DN</Label>
-            <Input value={form.bindDn} onChange={(e) => setForm({ ...form, bindDn: e.target.value })} placeholder="cn=admin,dc=example,dc=com" />
+            <Input
+              value={form.bindDn}
+              onChange={(e) => setForm({ ...form, bindDn: e.target.value })}
+              placeholder="cn=svc-changemgmt,ou=Service Accounts,dc=corp,dc=local"
+              data-testid="input-ldap-bind-dn"
+            />
+            <p className="text-xs text-muted-foreground">
+              Service account used to look up users. AD also accepts the UPN form (e.g. <code>svc-changemgmt@corp.local</code>).
+            </p>
           </div>
           <div className="space-y-2">
             <Label>{form.bindPasswordSet ? "Bind password (leave blank to keep)" : "Bind password"}</Label>
-            <Input type="password" value={form.bindPassword} onChange={(e) => setForm({ ...form, bindPassword: e.target.value })} />
+            <Input
+              type="password"
+              value={form.bindPassword}
+              onChange={(e) => setForm({ ...form, bindPassword: e.target.value })}
+              data-testid="input-ldap-bind-password"
+            />
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label>Base DN</Label>
-            <Input value={form.baseDn} onChange={(e) => setForm({ ...form, baseDn: e.target.value })} placeholder="ou=people,dc=example,dc=com" />
+            <Input
+              value={form.baseDn}
+              onChange={(e) => setForm({ ...form, baseDn: e.target.value })}
+              placeholder="dc=corp,dc=local"
+              data-testid="input-ldap-base-dn"
+            />
+            <p className="text-xs text-muted-foreground">
+              Where the user lookup begins. For AD this is usually the domain root, e.g. <code>dc=corp,dc=local</code>.
+            </p>
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label>User filter</Label>
-            <Input value={form.userFilter} onChange={(e) => setForm({ ...form, userFilter: e.target.value })} placeholder="(uid={{username}})" />
-            <p className="text-xs text-muted-foreground"><code>{`{{username}}`}</code> is replaced at login.</p>
+            <Input
+              value={form.userFilter}
+              onChange={(e) => setForm({ ...form, userFilter: e.target.value })}
+              placeholder="(&(objectClass=user)(sAMAccountName={{username}}))"
+              data-testid="input-ldap-user-filter"
+            />
+            <p className="text-xs text-muted-foreground">
+              An LDAP search filter the server runs under <em>Base DN</em> to find the account that's logging in.
+              The literal token <code>{`{{username}}`}</code> is replaced with whatever the user typed in the
+              login form before the search runs. The first matching entry's DN is then used for the password bind.
+            </p>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <span className="self-center text-xs text-muted-foreground">Quick presets:</span>
+              {LDAP_PRESETS.map((p) => (
+                <Button
+                  key={p.id}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => applyPreset(p.id)}
+                  title={p.hint}
+                  data-testid={`button-ldap-preset-${p.id}`}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
           </div>
           <div className="space-y-2">
             <Label>Username attribute</Label>
-            <Input value={form.usernameAttr} onChange={(e) => setForm({ ...form, usernameAttr: e.target.value })} />
+            <Input
+              value={form.usernameAttr}
+              onChange={(e) => setForm({ ...form, usernameAttr: e.target.value })}
+              data-testid="input-ldap-username-attr"
+            />
+            <p className="text-xs text-muted-foreground">
+              Attribute to read for the local username. AD: <code>sAMAccountName</code> or <code>userPrincipalName</code>; OpenLDAP: <code>uid</code>.
+            </p>
           </div>
           <div className="space-y-2">
             <Label>Email attribute</Label>
             <Input value={form.emailAttr} onChange={(e) => setForm({ ...form, emailAttr: e.target.value })} />
+            <p className="text-xs text-muted-foreground">AD: <code>mail</code>. OpenLDAP: <code>mail</code>.</p>
           </div>
           <div className="space-y-2">
             <Label>Display name attribute</Label>
             <Input value={form.nameAttr} onChange={(e) => setForm({ ...form, nameAttr: e.target.value })} />
+            <p className="text-xs text-muted-foreground">AD: <code>displayName</code> (or <code>cn</code>). OpenLDAP: <code>cn</code>.</p>
           </div>
           <div className="flex items-center justify-between rounded-md border border-border p-3">
             <Label>StartTLS</Label>
@@ -240,14 +361,81 @@ function LdapPanel() {
           </Button>
         </div>
         <div className="rounded-md border border-border bg-muted/30 p-4 space-y-3">
-          <Label>Test bind</Label>
+          <div className="space-y-1">
+            <Label>Test bind</Label>
+            <p className="text-xs text-muted-foreground">
+              Run a real bind against the directory using the saved settings. Save the form first
+              if you've just made changes — the test uses the stored values, not the form draft.
+            </p>
+          </div>
           <div className="grid gap-2 md:grid-cols-3">
-            <Input placeholder="username" value={testUser} onChange={(e) => setTestUser(e.target.value)} />
-            <Input type="password" placeholder="password" value={testPass} onChange={(e) => setTestPass(e.target.value)} />
-            <Button variant="outline" onClick={() => test.mutate()} disabled={test.isPending || !testUser || !testPass}>
+            <Input
+              placeholder="username"
+              value={testUser}
+              onChange={(e) => setTestUser(e.target.value)}
+              data-testid="input-ldap-test-username"
+            />
+            <Input
+              type="password"
+              placeholder="password"
+              value={testPass}
+              onChange={(e) => setTestPass(e.target.value)}
+              data-testid="input-ldap-test-password"
+            />
+            <Button
+              variant="outline"
+              onClick={() => test.mutate()}
+              disabled={test.isPending || !testUser || !testPass}
+              data-testid="button-ldap-test"
+            >
               {test.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Test
             </Button>
           </div>
+          {lastResult && (
+            <div
+              className={
+                "rounded-md border p-3 text-sm " +
+                (lastResult.success
+                  ? "border-emerald-500/40 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
+                  : "border-destructive/40 bg-destructive/5 text-destructive")
+              }
+              data-testid="ldap-test-result"
+            >
+              <div className="flex items-center gap-2 font-medium">
+                {lastResult.success ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                {lastResult.success
+                  ? "Bind succeeded"
+                  : `Failed at: ${STAGE_LABEL[lastResult.stage]}`}
+              </div>
+              <p className="mt-1 text-foreground/90">{lastResult.message}</p>
+              <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs text-muted-foreground sm:grid-cols-[max-content_1fr]">
+                {lastResult.code && (
+                  <>
+                    <dt className="font-medium">LDAP code:</dt>
+                    <dd><code>{lastResult.code}</code></dd>
+                  </>
+                )}
+                {lastResult.userDn && (
+                  <>
+                    <dt className="font-medium">User DN:</dt>
+                    <dd className="break-all"><code>{lastResult.userDn}</code></dd>
+                  </>
+                )}
+                {lastResult.details && (
+                  <>
+                    <dt className="font-medium">Server message:</dt>
+                    <dd className="break-words whitespace-pre-wrap"><code>{lastResult.details}</code></dd>
+                  </>
+                )}
+              </dl>
+              {!lastResult.success && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Full structured logs (with the masked username, base DN and stage) are written to the API
+                  server's log stream — check <code>docker compose logs api</code> on the host.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

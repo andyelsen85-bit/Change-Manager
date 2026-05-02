@@ -705,8 +705,8 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/TestLdapBody" } } }
       responses:
         "200":
-          description: Result
-          content: { application/json: { schema: { $ref: "#/components/schemas/TestResult" } } }
+          description: Diagnostic result of the bind attempt — includes which stage failed and the underlying LDAP error code so admins can fix configuration without reading server logs.
+          content: { application/json: { schema: { $ref: "#/components/schemas/LdapTestResult" } } }
   /settings/ssl:
     get:
       operationId: getSslSettings
@@ -1362,6 +1362,20 @@ components:
         username: { type: string }
         password: { type: string }
       required: [username, password]
+
+    LdapTestResult:
+      type: object
+      required: [success, stage, message]
+      properties:
+        success: { type: boolean, description: "True if the user-bind succeeded end-to-end." }
+        stage:
+          type: string
+          enum: [config, connect, service-bind, search, user-bind, ok]
+          description: "Phase the bind reached. On failure this is the phase that broke."
+        message: { type: string, description: "Human-readable summary suitable for showing to the admin." }
+        code:    { type: string, description: "LDAP result-code name (e.g. InvalidCredentialsError) or socket error code (e.g. ECONNREFUSED). Optional." }
+        details: { type: string, description: "Server-side diagnostic message from the directory, when one was returned. Optional." }
+        userDn:  { type: string, description: "The full DN that was resolved and bound. Populated only on success." }
 
     SslSettings:
       type: object

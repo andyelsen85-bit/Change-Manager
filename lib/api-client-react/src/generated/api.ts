@@ -37,6 +37,7 @@ import type {
   ExportAuditLogParams,
   HealthStatus,
   LdapSettings,
+  LdapTestResult,
   ListAuditLogParams,
   ListCabMeetingsParams,
   ListChangesParams,
@@ -4343,8 +4344,8 @@ export const getTestLdapUrl = () => {
 export const testLdap = async (
   testLdapBody: TestLdapBody,
   options?: RequestInit,
-): Promise<TestResult> => {
-  return customFetch<TestResult>(getTestLdapUrl(), {
+): Promise<LdapTestResult> => {
+  return customFetch<LdapTestResult>(getTestLdapUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },

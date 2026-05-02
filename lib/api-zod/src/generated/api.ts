@@ -1085,8 +1085,35 @@ export const TestLdapBody = zod.object({
 });
 
 export const TestLdapResponse = zod.object({
-  success: zod.boolean(),
-  message: zod.string(),
+  success: zod
+    .boolean()
+    .describe("True if the user-bind succeeded end-to-end."),
+  stage: zod
+    .enum(["config", "connect", "service-bind", "search", "user-bind", "ok"])
+    .describe(
+      "Phase the bind reached. On failure this is the phase that broke.",
+    ),
+  message: zod
+    .string()
+    .describe("Human-readable summary suitable for showing to the admin."),
+  code: zod
+    .string()
+    .optional()
+    .describe(
+      "LDAP result-code name (e.g. InvalidCredentialsError) or socket error code (e.g. ECONNREFUSED). Optional.",
+    ),
+  details: zod
+    .string()
+    .optional()
+    .describe(
+      "Server-side diagnostic message from the directory, when one was returned. Optional.",
+    ),
+  userDn: zod
+    .string()
+    .optional()
+    .describe(
+      "The full DN that was resolved and bound. Populated only on success.",
+    ),
 });
 
 export const GetSslSettingsResponse = zod.object({
