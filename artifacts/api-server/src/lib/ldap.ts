@@ -93,24 +93,47 @@ function maskName(s: string): string {
 // for case-insensitive lookups.
 function parseLdapEntry(e: unknown): Record<string, string> {
   const out: Record<string, string> = {};
-  const ee = e as { pojo?: Record<string, unknown>; object?: Record<string, unknown>; attributes?: Array<{ type?: string; values?: unknown[]; vals?: unknown[] }> };
-  const obj = ee.pojo ?? ee.object;
-  if (obj && typeof obj === "object") {
-    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      if (k === "type" || k === "controls" || k === "objectName" || k === "dn") continue;
+  type AttrItem = { type?: string; values?: unknown[]; vals?: unknown[] } | [string, unknown[]];
+  type EntryShape = {
+    pojo?: { attributes?: AttrItem[] } & Record<string, unknown>;
+    object?: Record<string, unknown>;
+    attributes?: AttrItem[];
+  };
+  const ee = e as EntryShape;
+
+  // Modern ldapjs (v3+): the canonical shape is `entry.pojo.attributes` —
+  // an array of `{type, values}` objects (NOT a flat key/value map). Every
+  // entry also exposes `entry.attributes` directly with the same shape.
+  const pojoAttrs = ee.pojo?.attributes;
+  const rawAttrs = ee.attributes;
+  const attrLists: AttrItem[][] = [];
+  if (Array.isArray(pojoAttrs)) attrLists.push(pojoAttrs);
+  if (Array.isArray(rawAttrs)) attrLists.push(rawAttrs);
+  for (const list of attrLists) {
+    for (const a of list) {
+      let key: string | undefined;
+      let vals: unknown[] | undefined;
+      if (Array.isArray(a)) { key = a[0]; vals = a[1]; }
+      else { key = a?.type; vals = (a?.values ?? a?.vals) as unknown[] | undefined; }
+      if (!key) continue;
+      if (Array.isArray(vals) && vals.length && out[key] == null) {
+        const first = vals[0];
+        out[key] = typeof first === "string" ? first : String(first ?? "");
+      }
+    }
+  }
+
+  // Legacy ldapjs (v2 and earlier): `entry.object` is a flat key/value map
+  // where each value is either a string or an array of strings. We use this
+  // as a fallback so a downgraded ldapjs still works.
+  const flat = ee.object;
+  if (flat && typeof flat === "object") {
+    for (const [k, v] of Object.entries(flat as Record<string, unknown>)) {
+      if (k === "controls" || k === "objectName" || k === "dn" || k === "type") continue;
+      if (out[k] != null) continue;
       if (Array.isArray(v)) { if (v.length) out[k] = String(v[0] ?? ""); }
       else if (typeof v === "string") out[k] = v;
       else if (v != null) out[k] = String(v);
-    }
-  }
-  if (Array.isArray(ee.attributes)) {
-    for (const a of ee.attributes) {
-      const key = a?.type;
-      if (!key) continue;
-      const vals = (a.values ?? a.vals) as unknown[] | undefined;
-      if (Array.isArray(vals) && vals.length && out[key] == null) {
-        out[key] = String(vals[0] ?? "");
-      }
     }
   }
   return out;
@@ -225,10 +248,15 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
             });
           }
           const e = entry as Record<string, string>;
-          // Diagnostic: log every attribute we got back so admins can see what
-          // their directory actually returned vs. what we mapped onto fullName.
+          // Diagnostic: log every attribute we got back AND a redacted preview
+          // of each value so admins can see what their directory actually
+          // returned vs. what we mapped onto fullName / email.
+          const preview: Record<string, string> = {};
+          for (const [k, v] of Object.entries(e)) {
+            preview[k] = typeof v === "string" && v.length > 40 ? v.slice(0, 37) + "…" : String(v);
+          }
           logger.info(
-            { usernameMasked: maskName(username), entryDn, attrs: Object.keys(e), nameAttr: cfg.nameAttr, emailAttr: cfg.emailAttr },
+            { usernameMasked: maskName(username), entryDn, attrs: preview, nameAttr: cfg.nameAttr, emailAttr: cfg.emailAttr },
             "LDAP lookup entry attributes"
           );
           // Case-insensitive lookup with sensible AD fallbacks. Some servers
