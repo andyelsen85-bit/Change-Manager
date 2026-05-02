@@ -6,6 +6,7 @@ export type SessionUser = {
   source: "local" | "ldap";
   isAdmin: boolean;
   roles: string[];
+  mustChangePassword: boolean;
 };
 
 export type Role = {

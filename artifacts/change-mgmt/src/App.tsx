@@ -50,6 +50,12 @@ function ProtectedRoutes() {
     return <LoginPage />;
   }
   if (location === "/login") return <Redirect to="/" />;
+  // Force users who must change their password (e.g. the seeded admin on
+  // first login) onto the Profile page until they rotate. The Profile
+  // page knows how to surface a banner when `mustChangePassword` is true.
+  if (user.mustChangePassword && location !== "/profile") {
+    return <Redirect to="/profile" />;
+  }
   return (
     <AppShell>
       <Switch>

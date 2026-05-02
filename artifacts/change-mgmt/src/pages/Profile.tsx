@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Save } from "lucide-react";
+import { AlertTriangle, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,11 +29,14 @@ export function ProfilePage() {
 
   const changePassword = useMutation({
     mutationFn: () => api.post("/auth/change-password", { currentPassword, newPassword }),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Password changed");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      // Refresh the session so `mustChangePassword` flips to false and the
+      // user is unblocked from the rest of the app.
+      await refresh();
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Password change failed"),
   });
@@ -45,6 +49,17 @@ export function ProfilePage() {
         <h2 className="text-2xl font-semibold tracking-tight">My profile</h2>
         <p className="text-sm text-muted-foreground">Manage your personal information and password.</p>
       </div>
+
+      {user.mustChangePassword && (
+        <Alert variant="destructive" data-testid="alert-must-change-password">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Password change required</AlertTitle>
+          <AlertDescription>
+            You are using the default or initial credential. Please choose a new password before continuing.
+            The rest of the app is locked until you rotate it.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card>
         <CardHeader>

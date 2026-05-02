@@ -176,6 +176,31 @@ async function maybeAuditExpired(req: Request): Promise<void> {
   }
 }
 
+// Returns true when the user identified by `uid` is currently flagged as
+// needing to rotate their password (e.g. seeded admin on first login). Used
+// by the auth middlewares to gate all protected API routes — see
+// `enforcePasswordRotated`. The auth/login, auth/me, auth/logout and
+// auth/change-password endpoints intentionally do NOT use `requireAuth`, so
+// they bypass this gate and remain reachable while the flag is set.
+async function userMustChangePassword(uid: number): Promise<boolean> {
+  const [u] = await db
+    .select({ mustChangePassword: usersTable.mustChangePassword })
+    .from(usersTable)
+    .where(eq(usersTable.id, uid));
+  return !!u?.mustChangePassword;
+}
+
+async function enforcePasswordRotated(uid: number, res: Response): Promise<boolean> {
+  if (await userMustChangePassword(uid)) {
+    res.status(403).json({
+      error: "Password rotation required",
+      code: "must_change_password",
+    });
+    return false;
+  }
+  return true;
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const session = readSessionCookie(req);
   if (!session) {
@@ -183,6 +208,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
+  if (!(await enforcePasswordRotated(session.uid, res))) return;
   req.session = session;
   next();
 }
@@ -198,6 +224,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     res.status(403).json({ error: "Admin only" });
     return;
   }
+  if (!(await enforcePasswordRotated(session.uid, res))) return;
   req.session = session;
   next();
 }
@@ -222,6 +249,7 @@ export function requireRole(roles: string[]) {
       res.status(401).json({ error: "Not authenticated" });
       return;
     }
+    if (!(await enforcePasswordRotated(session.uid, res))) return;
     if (session.isAdmin) {
       req.session = session;
       next();
