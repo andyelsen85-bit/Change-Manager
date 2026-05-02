@@ -1,4 +1,4 @@
-import { pgTable, serial, text, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, integer } from "drizzle-orm/pg-core";
 
 export const standardTemplatesTable = pgTable("standard_templates", {
   id: serial("id").primaryKey(),
@@ -13,6 +13,7 @@ export const standardTemplatesTable = pgTable("standard_templates", {
   prefilledPlanning: text("prefilled_planning"),
   prefilledTestPlan: text("prefilled_test_plan"),
   isActive: boolean("is_active").notNull().default(true),
+  usageCount: integer("usage_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

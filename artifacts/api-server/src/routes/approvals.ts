@@ -52,6 +52,11 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     res.status(400).json({ error: "Invalid decision" });
     return;
   }
+  // ITIL: a rejection must always include the rejection reason for audit and PIR.
+  if (decision === "rejected" && (typeof comment !== "string" || comment.trim().length < 3)) {
+    res.status(400).json({ error: "A rejection comment (at least 3 characters) is required." });
+    return;
+  }
   const [ap] = await db.select().from(approvalsTable).where(eq(approvalsTable.id, id));
   if (!ap) {
     res.status(404).json({ error: "Approval not found" });

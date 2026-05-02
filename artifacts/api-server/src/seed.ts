@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -11,6 +12,23 @@ import {
 } from "@workspace/db";
 import { hashPassword } from "./lib/auth";
 import { logger } from "./lib/logger";
+
+// In production we never seed a known default password. If INITIAL_ADMIN_PASSWORD is
+// supplied we use it (and force rotation on first login); otherwise we generate a
+// cryptographically random one and log it once at boot. In development we still default
+// to "admin" for convenience but flag must_change_password so the user is forced to set
+// a real one before doing anything sensitive.
+function provisionInitialAdminPassword(): { password: string; mustChange: boolean; source: string } {
+  const fromEnv = process.env["INITIAL_ADMIN_PASSWORD"];
+  if (fromEnv && fromEnv.length >= 8) {
+    return { password: fromEnv, mustChange: true, source: "env:INITIAL_ADMIN_PASSWORD" };
+  }
+  if ((process.env["NODE_ENV"] ?? "development") === "production") {
+    const generated = crypto.randomBytes(18).toString("base64url");
+    return { password: generated, mustChange: true, source: "generated" };
+  }
+  return { password: "admin", mustChange: true, source: "dev-default" };
+}
 
 const ROLES = [
   { key: "change_manager", name: "Change Manager", description: "Owns the change management process end-to-end." },
@@ -144,10 +162,12 @@ export async function runSeed(): Promise<void> {
       .onConflictDoNothing();
   }
 
-  // Admin user
+  // Admin user — bootstrap an initial admin only if no admin exists yet. We never
+  // overwrite an existing admin's password.
   const [adminExisting] = await db.select().from(usersTable).where(eq(usersTable.username, "admin"));
   if (!adminExisting) {
-    const passwordHash = await hashPassword("admin");
+    const { password, mustChange, source } = provisionInitialAdminPassword();
+    const passwordHash = await hashPassword(password);
     await db.insert(usersTable).values({
       username: "admin",
       email: "admin@change-mgmt.local",
@@ -156,8 +176,16 @@ export async function runSeed(): Promise<void> {
       source: "local",
       isAdmin: true,
       isActive: true,
+      mustChangePassword: mustChange,
     });
-    logger.info("Seeded admin user (admin/admin)");
+    if (source === "generated") {
+      logger.warn(
+        { adminPassword: password, source },
+        "INITIAL ADMIN PASSWORD (record now — shown only once). Set INITIAL_ADMIN_PASSWORD next time to control this.",
+      );
+    } else {
+      logger.info({ source }, "Seeded admin user; password rotation is required at first login.");
+    }
   }
 
   // Templates

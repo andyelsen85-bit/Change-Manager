@@ -11,6 +11,7 @@ export const usersTable = pgTable(
     source: text("source").notNull().default("local"),
     isActive: boolean("is_active").notNull().default(true),
     isAdmin: boolean("is_admin").notNull().default(false),
+    mustChangePassword: boolean("must_change_password").notNull().default(false),
     deputyUserId: integer("deputy_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })

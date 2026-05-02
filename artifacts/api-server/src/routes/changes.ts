@@ -27,8 +27,13 @@ import {
 
 const router: IRouter = Router();
 
+// Approver roles required per track. Per policy, Normal changes are signed off by the
+// Change Manager only after the CAB meeting; their deputy can vote in their absence
+// (handled at vote time via roleAssignmentsTable.isDeputy). Technical and business sign-off
+// is captured in the planning + CAB-meeting records, not as separate approval votes.
+// Emergency changes still require an eCAB member alongside the Change Manager.
 const APPROVER_ROLES_BY_TRACK: Record<string, string[]> = {
-  normal: ["change_manager", "technical_reviewer", "business_owner"],
+  normal: ["change_manager"],
   emergency: ["change_manager", "ecab_member"],
   standard: [],
 };
