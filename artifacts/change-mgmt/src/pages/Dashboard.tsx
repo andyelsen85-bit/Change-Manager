@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
-  Activity,
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
@@ -11,10 +10,10 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { ActivityItem, CabMeeting, DashboardSummary, DashboardTask } from "@/lib/types";
+import type { CabMeeting, DashboardSummary, DashboardTask } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fmtAgo, fmtDateTime } from "@/lib/format";
+import { fmtDateTime } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Bar,
@@ -33,7 +32,6 @@ const PIE_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--cha
 
 export function DashboardPage() {
   const summaryQ = useQuery({ queryKey: ["dashboard.summary"], queryFn: () => api.get<DashboardSummary>("/dashboard/summary") });
-  const activityQ = useQuery({ queryKey: ["dashboard.activity"], queryFn: () => api.get<ActivityItem[]>("/dashboard/activity") });
   const cabQ = useQuery({ queryKey: ["dashboard.upcoming-cab"], queryFn: () => api.get<CabMeeting[]>("/dashboard/upcoming-cab") });
   const tasksQ = useQuery({ queryKey: ["dashboard.my-tasks"], queryFn: () => api.get<DashboardTask[]>("/dashboard/my-tasks") });
 
@@ -234,36 +232,6 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent activity</CardTitle>
-          <CardDescription>Operational events from the audit trail.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {activityQ.isLoading ? (
-            <Skeleton className="h-32 w-full" />
-          ) : (activityQ.data ?? []).length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No recent activity yet.</p>
-          ) : (
-            <ul className="divide-y divide-border" data-testid="list-activity">
-              {activityQ.data!.map((a) => (
-                <li key={a.id} className="flex items-start gap-3 py-3 text-sm">
-                  <Activity className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{a.actorName}</span>
-                      <span className="text-xs text-muted-foreground">{a.action}</span>
-                    </div>
-                    <div className="truncate text-muted-foreground">{a.summary}</div>
-                  </div>
-                  <div className="shrink-0 text-xs text-muted-foreground">{fmtAgo(a.timestamp)}</div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
