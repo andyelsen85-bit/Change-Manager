@@ -4,11 +4,12 @@ import {
   db,
   approvalsTable,
   changeRequestsTable,
+  cabMeetingsTable,
   rolesTable,
   usersTable,
   roleAssignmentsTable,
 } from "@workspace/db";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify, getUserEmail } from "../lib/email";
 
@@ -18,6 +19,15 @@ router.get("/changes/:id/approvals", requireAuth, async (req, res): Promise<void
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!chg) {
+    res.status(404).json({ error: "Change not found" });
+    return;
+  }
+  if (!(await getChangeAccess(req.session!, chg))) {
+    res.status(403).json({ error: "Forbidden" });
     return;
   }
   const rows = await db
@@ -61,6 +71,32 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
   if (!ap) {
     res.status(404).json({ error: "Approval not found" });
     return;
+  }
+  // Post-CAB sign-off gate: for Normal and Emergency tracks the approval vote must be
+  // recorded *after* the linked CAB / eCAB meeting has concluded. We allow either
+  // (a) the change to already be in `awaiting_approval` status (meaning the state
+  //     machine has explicitly moved it past the CAB step), or
+  // (b) the linked cab meeting status to be `completed`.
+  // Standard-track changes never carry approval rows, so this never fires for them.
+  const [chgForGate] = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(eq(changeRequestsTable.id, ap.changeId));
+  if (chgForGate && (chgForGate.track === "normal" || chgForGate.track === "emergency")) {
+    let postCab = chgForGate.status === "awaiting_approval";
+    if (!postCab && chgForGate.cabMeetingId != null) {
+      const [meeting] = await db
+        .select()
+        .from(cabMeetingsTable)
+        .where(eq(cabMeetingsTable.id, chgForGate.cabMeetingId));
+      if (meeting?.status === "completed") postCab = true;
+    }
+    if (!postCab) {
+      res.status(409).json({
+        error: "Approval can only be recorded after the CAB / eCAB meeting has concluded.",
+      });
+      return;
+    }
   }
   // Verify the user is in this role (or its deputy)
   const assignments = await db

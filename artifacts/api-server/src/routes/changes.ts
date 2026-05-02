@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import {
   db,
   changeRequestsTable,
@@ -122,28 +122,38 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Missing required fields" });
     return;
   }
-  const ref = await nextRef(b.track);
+  // Standard-track classification: only allowed when an active, existing template is
+  // referenced. Submissions that claim 'standard' without a valid active template are
+  // automatically reclassified to 'normal' so they go through the full approval pipeline.
+  let track = b.track;
   let templateId: number | null = null;
   let initialStatus = "draft";
   let bypassCab = false;
   let autoApprove = false;
-  if (b.track === "standard" && b.templateId) {
-    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, b.templateId));
-    if (t) {
-      templateId = t.id;
-      bypassCab = t.bypassCab;
-      autoApprove = t.autoApprove;
-      if (autoApprove) initialStatus = "approved";
-      if (bypassCab) initialStatus = autoApprove ? "scheduled" : "awaiting_implementation";
+  if (track === "standard") {
+    if (!b.templateId) {
+      res.status(400).json({ error: "Standard changes require a templateId." });
+      return;
     }
+    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, b.templateId));
+    if (!t || !t.isActive) {
+      res.status(400).json({ error: "Selected template is unknown or inactive." });
+      return;
+    }
+    templateId = t.id;
+    bypassCab = t.bypassCab;
+    autoApprove = t.autoApprove;
+    if (autoApprove) initialStatus = "approved";
+    if (bypassCab) initialStatus = autoApprove ? "scheduled" : "awaiting_implementation";
   }
+  const ref = await nextRef(track);
   const [created] = await db
     .insert(changeRequestsTable)
     .values({
       ref,
       title: b.title,
       description: b.description,
-      track: b.track,
+      track,
       status: initialStatus,
       risk: b.risk,
       impact: b.impact,
@@ -158,9 +168,14 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
     .returning();
   // Always create an empty planning record
   await db.insert(planningRecordsTable).values({ changeId: created.id }).onConflictDoNothing();
-  // Pre-fill planning from template
+  // Pre-fill planning from template + bump the template's usage counter so admins can
+  // see which templates are most relied on.
   if (templateId) {
     const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, templateId));
+    await db
+      .update(standardTemplatesTable)
+      .set({ usageCount: sql`${standardTemplatesTable.usageCount} + 1` })
+      .where(eq(standardTemplatesTable.id, templateId));
     if (t?.prefilledPlanning) {
       await db
         .update(planningRecordsTable)
@@ -174,8 +189,8 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
         .onConflictDoNothing();
     }
   }
-  if (b.track !== "standard") {
-    await createApprovalsForChange(created.id, b.track);
+  if (track !== "standard") {
+    await createApprovalsForChange(created.id, track);
   }
   await audit(req, {
     action: "change.created",

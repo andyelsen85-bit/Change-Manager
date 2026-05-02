@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -8,19 +8,41 @@ import {
   changeRequestsTable,
   type TestCase,
 } from "@workspace/db";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify, getUserEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
-// PLANNING
-router.get("/changes/:id/planning", requireAuth, async (req, res): Promise<void> => {
+// Ownership/role gate shared by every phase endpoint. Returns the change row when the
+// caller is allowed to read it, otherwise writes 403/404 and returns null.
+async function loadChangeForCaller(
+  req: Request,
+  res: Response,
+): Promise<typeof changeRequestsTable.$inferSelect | null> {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
-    return;
+    return null;
   }
+  const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!c) {
+    res.status(404).json({ error: "Change not found" });
+    return null;
+  }
+  const access = await getChangeAccess(req.session!, c);
+  if (!access) {
+    res.status(403).json({ error: "Forbidden" });
+    return null;
+  }
+  return c;
+}
+
+// PLANNING
+router.get("/changes/:id/planning", requireAuth, async (req, res): Promise<void> => {
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const id = c.id;
   const [row] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
   res.json(
     row ?? {
@@ -41,10 +63,18 @@ router.get("/changes/:id/planning", requireAuth, async (req, res): Promise<void>
 });
 
 router.put("/changes/:id/planning", requireAuth, async (req, res): Promise<void> => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const id = c.id;
+  // Once planning has been signed off it is locked; only an admin/change_manager can
+  // overwrite (e.g. to clear sign-off) and the caller must explicitly do so.
+  const [existing] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
+  if (existing?.signedOff) {
+    const access = await getChangeAccess(req.session!, c);
+    if (access !== "admin" && access !== "change_manager") {
+      res.status(409).json({ error: "Planning is signed off and locked. Ask a Change Manager to reopen it." });
+      return;
+    }
   }
   const b = req.body ?? {};
   const values = {
@@ -77,11 +107,9 @@ router.put("/changes/:id/planning", requireAuth, async (req, res): Promise<void>
 
 // TESTING
 router.get("/changes/:id/testing", requireAuth, async (req, res): Promise<void> => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const id = c.id;
   const [row] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, id));
   res.json(
     row ?? {
@@ -99,11 +127,9 @@ router.get("/changes/:id/testing", requireAuth, async (req, res): Promise<void> 
 });
 
 router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const id = c.id;
   const b = req.body ?? {};
   const cases: TestCase[] = Array.isArray(b.cases)
     ? b.cases.map((c: TestCase) => ({
@@ -138,8 +164,7 @@ router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> 
     after: row,
   });
   if (overallResult === "passed" || overallResult === "failed") {
-    const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-    if (c) {
+    {
       const owner = await getUserEmail(c.ownerId);
       if (owner) {
         await notify({
@@ -156,11 +181,9 @@ router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> 
 
 // PIR
 router.get("/changes/:id/pir", requireAuth, async (req, res): Promise<void> => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const id = c.id;
   const [row] = await db.select().from(pirRecordsTable).where(eq(pirRecordsTable.changeId, id));
   res.json(
     row ?? {
@@ -178,11 +201,9 @@ router.get("/changes/:id/pir", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.put("/changes/:id/pir", requireAuth, async (req, res): Promise<void> => {
-  const id = Number(req.params["id"]);
-  if (!Number.isFinite(id)) {
-    res.status(400).json({ error: "Invalid id" });
-    return;
-  }
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const id = c.id;
   const b = req.body ?? {};
   const completed = !!b.completed;
   const values = {

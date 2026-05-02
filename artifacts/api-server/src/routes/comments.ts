@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db, commentsTable, usersTable, changeRequestsTable } from "@workspace/db";
-import { requireAuth } from "../lib/auth";
+import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify, getUserEmail } from "../lib/email";
 
@@ -11,6 +11,15 @@ router.get("/changes/:id/comments", requireAuth, async (req, res): Promise<void>
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!c) {
+    res.status(404).json({ error: "Change not found" });
+    return;
+  }
+  if (!(await getChangeAccess(req.session!, c))) {
+    res.status(403).json({ error: "Forbidden" });
     return;
   }
   const rows = await db
@@ -41,6 +50,15 @@ router.post("/changes/:id/comments", requireAuth, async (req, res): Promise<void
     return;
   }
   const session = req.session!;
+  const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!chg) {
+    res.status(404).json({ error: "Change not found" });
+    return;
+  }
+  if (!(await getChangeAccess(session, chg))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
   const [created] = await db
     .insert(commentsTable)
     .values({ changeId: id, authorId: session.uid, body: body.trim() })
