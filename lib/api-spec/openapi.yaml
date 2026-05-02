@@ -133,6 +133,10 @@ paths:
       parameters:
         - { in: query, name: search, schema: { type: string } }
         - { in: query, name: role, schema: { type: string } }
+        - in: query
+          name: primary
+          description: When combined with `role`, restrict to non-deputy assignments.
+          schema: { type: string, enum: ["1", "true"] }
       responses:
         "200":
           description: Users

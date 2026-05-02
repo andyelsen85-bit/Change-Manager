@@ -888,7 +888,19 @@ export interface AuditEntry {
 export type ListUsersParams = {
   search?: string;
   role?: string;
+  /**
+   * When combined with `role`, restrict to non-deputy assignments.
+   */
+  primary?: ListUsersPrimary;
 };
+
+export type ListUsersPrimary =
+  (typeof ListUsersPrimary)[keyof typeof ListUsersPrimary];
+
+export const ListUsersPrimary = {
+  NUMBER_1: "1",
+  true: "true",
+} as const;
 
 export type ListChangesParams = {
   status?: string;

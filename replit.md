@@ -17,7 +17,9 @@ A pnpm workspace monorepo (TypeScript) that ships:
 - **Change tracks**: Normal, Standard, Emergency. Each has Planning + Testing + PIR phases.
 - **Standard templates**: 15 seeded templates that auto-approve and bypass CAB.
 - **Approvals**: role-based per track — Normal needs only Change Manager (post-CAB sign-off); Emergency needs Change Manager + eCAB member; Standard auto-approves. The Change Manager's deputy can vote in their absence.
-- **CAB / eCAB**: calendar of meetings, attendee management, ICS invite download + email send.
+- **Roles**: Change Manager, Technical Reviewer, Business Owner, **CAB Member**, eCAB Member, Implementer, Tester, Service Owner, Security Reviewer. Every role supports a deputy.
+- **CAB / eCAB**: calendar of meetings, attendee management, ICS invite download + email send. The "New meeting" dialog defaults the attendee list to all primary CAB Members for a standard CAB and to all primary eCAB Members for an eCAB; switching the meeting kind reapplies the corresponding default. Backed by `GET /api/users?role=<key>&primary=1` (filters to non-deputy assignments).
+- **Change progress timeline**: the Change detail page shows a per-track horizontal timeline (green ✓ for completed steps, highlighted current step, muted future steps; cancelled / rejected / rolled-back rendered as a red stop-tile) so it's obvious at a glance where the change is in its lifecycle.
 - **Deputies / replacements** for every governance role (incl. Change Manager) so approvals never block.
 - **Notifications**: per-user granular email + in-app preferences keyed by event.
 - **Auth**: local users (bcrypt) + LDAP. JWT cookie session (`cm_session`). CSRF protection via double-submit cookie (`cm_csrf` non-HttpOnly cookie + `X-CSRF-Token` header) — required on every POST/PATCH/PUT/DELETE under `/api` except `/api/auth/login`. Token issued on login, cleared on logout, healed by `/api/auth/me`. The frontend `api` client in `artifacts/change-mgmt/src/lib/api.ts` reads the cookie and attaches the header automatically.

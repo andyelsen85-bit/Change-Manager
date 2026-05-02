@@ -1,17 +1,19 @@
 import { useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, MessageSquare, Send } from "lucide-react";
+import { ArrowLeft, Check, Loader2, MessageSquare, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type {
-  Approval,
-  ChangeDetail as ChangeDetailT,
-  ChangeStatus,
-  Comment,
-  PirRecord,
-  PlanningRecord,
-  TestRecord,
+import {
+  STATUS_LABELS,
+  type Approval,
+  type ChangeDetail as ChangeDetailT,
+  type ChangeStatus,
+  type ChangeTrack,
+  type Comment,
+  type PirRecord,
+  type PlanningRecord,
+  type TestRecord,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +26,67 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth-context";
+import { cn } from "@/lib/utils";
+
+// Lifecycle steps shown on the visual progress timeline. Mirrors the
+// allowed-status graph in api-server/src/lib/state-machine.ts but flattened
+// into a linear "happy path" for the user. A step may be a single
+// `ChangeStatus` or an array of equivalent alternative statuses occupying
+// the same slot — used for the Standard track where `awaiting_implementation`
+// and `scheduled` are interchangeable optional waiting states (a Standard
+// change can transition `draft -> scheduled` directly OR
+// `draft -> awaiting_implementation -> in_progress`, skipping the other).
+// Terminal failure states (cancelled / rejected / rolled_back) are rendered
+// separately as a red stop-tile after the in-progress steps.
+type TimelineStep = ChangeStatus | ChangeStatus[];
+const TIMELINE_BY_TRACK: Record<ChangeTrack, TimelineStep[]> = {
+  normal: [
+    "draft",
+    "submitted",
+    "in_review",
+    "awaiting_approval",
+    "approved",
+    "scheduled",
+    "in_progress",
+    "implemented",
+    "in_testing",
+    "awaiting_pir",
+    "completed",
+  ],
+  standard: [
+    "draft",
+    ["scheduled", "awaiting_implementation"],
+    "in_progress",
+    "implemented",
+    "completed",
+  ],
+  emergency: [
+    "draft",
+    "awaiting_approval",
+    "approved",
+    "in_progress",
+    "implemented",
+    "awaiting_pir",
+    "completed",
+  ],
+};
+
+const TERMINAL_FAILURE: ChangeStatus[] = ["cancelled", "rejected", "rolled_back"];
+
+function stepIncludes(step: TimelineStep, status: ChangeStatus): boolean {
+  return Array.isArray(step) ? step.includes(status) : step === status;
+}
+
+// Resolve which status to display in a step's label. For a single-status
+// step it's the status itself. For an alternative-group step we show the
+// current status if the change is in one of them, otherwise the first
+// (canonical) alternative — that way completed/pending tiles display a
+// stable, generic label and the current tile reflects what actually happened.
+function stepLabelStatus(step: TimelineStep, currentStatus: ChangeStatus): ChangeStatus {
+  if (!Array.isArray(step)) return step;
+  if (step.includes(currentStatus)) return currentStatus;
+  return step[0];
+}
 
 const TRANSITIONS: Record<ChangeStatus, ChangeStatus[]> = {
   draft: ["submitted", "cancelled"],
@@ -42,6 +105,66 @@ const TRANSITIONS: Record<ChangeStatus, ChangeStatus[]> = {
   rolled_back: [],
   cancelled: [],
 };
+
+function StatusTimeline({ track, status }: { track: ChangeTrack; status: ChangeStatus }) {
+  const steps = TIMELINE_BY_TRACK[track] ?? TIMELINE_BY_TRACK.normal;
+  const isFailure = TERMINAL_FAILURE.includes(status);
+  const currentIndex = isFailure ? -1 : steps.findIndex((s) => stepIncludes(s, status));
+  return (
+    <ol className="flex flex-wrap items-center gap-y-2" data-testid="status-timeline">
+      {steps.map((s, i) => {
+        const done = !isFailure && i < currentIndex;
+        const current = !isFailure && i === currentIndex;
+        const pending = !done && !current;
+        const labelStatus = stepLabelStatus(s, status);
+        return (
+          <li key={Array.isArray(s) ? s.join("|") : s} className="flex items-center" data-testid={`timeline-step-${labelStatus}`}>
+            <div
+              className={cn(
+                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors",
+                done && "border-success/40 bg-success/10 text-success",
+                current && "border-info/50 bg-info/15 text-info font-semibold ring-1 ring-info/30",
+                pending && !isFailure && "border-border bg-muted/40 text-muted-foreground",
+                isFailure && "border-border bg-muted/30 text-muted-foreground opacity-70",
+              )}
+              data-state={done ? "done" : current ? "current" : "pending"}
+            >
+              <span
+                className={cn(
+                  "flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold",
+                  done
+                    ? "bg-success text-success-foreground"
+                    : current
+                      ? "bg-info text-info-foreground"
+                      : "bg-muted-foreground/25 text-foreground/70",
+                )}
+              >
+                {done ? <Check className="h-3 w-3" /> : i + 1}
+              </span>
+              <span>{STATUS_LABELS[labelStatus]}</span>
+            </div>
+            {i < steps.length - 1 && (
+              <div
+                className={cn(
+                  "mx-1 h-0.5 w-3 sm:w-5",
+                  done ? "bg-success" : "bg-border",
+                )}
+                aria-hidden="true"
+              />
+            )}
+          </li>
+        );
+      })}
+      {isFailure && (
+        <li className="ml-2 flex items-center" data-testid={`timeline-terminal-${status}`}>
+          <div className="flex items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs font-semibold text-destructive">
+            <X className="h-3 w-3" /> {STATUS_LABELS[status]}
+          </div>
+        </li>
+      )}
+    </ol>
+  );
+}
 
 export function ChangeDetailPage() {
   const [, params] = useRoute("/changes/:id");
@@ -96,6 +219,9 @@ export function ChangeDetailPage() {
                 <div className="text-xs text-muted-foreground">Assignee: {c.assigneeName ?? "Unassigned"}</div>
                 <div className="text-xs text-muted-foreground">Updated {fmtAgo(c.updatedAt)}</div>
               </div>
+            </div>
+            <div className="mt-5">
+              <StatusTimeline track={c.track} status={c.status} />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               {TRANSITIONS[c.status].map((next) => (
