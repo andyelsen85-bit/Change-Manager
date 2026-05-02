@@ -440,6 +440,16 @@ export interface TransitionBody {
   note?: string | null;
 }
 
+export interface RevertBody {
+  /** Target earlier status to revert to. */
+  toStatus: string;
+  /**
+   * Required justification, captured in the audit log.
+   * @minLength 5
+   */
+  reason: string;
+}
+
 export type StandardTemplateRisk =
   (typeof StandardTemplateRisk)[keyof typeof StandardTemplateRisk];
 

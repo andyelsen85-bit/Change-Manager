@@ -334,6 +334,22 @@ paths:
           description: Transitioned
           content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
         "400": { description: Invalid transition, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /changes/{id}/revert:
+    post:
+      operationId: revertChange
+      tags: [changes]
+      summary: Walk a change back to an earlier status (Change Manager / Admin only).
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/RevertBody" } } }
+      responses:
+        "200":
+          description: Reverted
+          content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
+        "400": { description: Invalid revert target, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "403": { description: Forbidden, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   # ---------- TEMPLATES ----------
   /templates:
@@ -1004,6 +1020,13 @@ components:
         toStatus: { type: string }
         note: { type: ["string", "null"] }
       required: [toStatus]
+
+    RevertBody:
+      type: object
+      properties:
+        toStatus: { type: string, description: "Target earlier status to revert to." }
+        reason: { type: string, minLength: 5, description: "Required justification, captured in the audit log." }
+      required: [toStatus, reason]
 
     StandardTemplate:
       type: object

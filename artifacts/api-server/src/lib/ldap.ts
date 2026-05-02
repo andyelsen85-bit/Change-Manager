@@ -106,15 +106,18 @@ export async function authenticateLdap(username: string, password: string): Prom
   }
 
   return new Promise<LdapAuthResult>((resolve) => {
-    // ldapTlsRejectUnauthorized in cfg overrides default (true). Only set false when admin explicitly opts in.
-    const rejectUnauthorized =
-      (cfg as unknown as { ldapTlsRejectUnauthorized?: boolean }).ldapTlsRejectUnauthorized !== false;
+    // tlsRejectUnauthorized=false makes the TLS handshake accept any server
+    // certificate (self-signed, expired, name mismatch). Default is true (verify).
+    // Honoured for both ldaps:// (URL-driven TLS) and ldap:// + StartTLS.
+    const rejectUnauthorized = cfg.tlsRejectUnauthorized !== false;
+    const isLdaps = cfg.url.toLowerCase().startsWith("ldaps:");
+    const tlsOptions = (isLdaps || cfg.tls) ? { rejectUnauthorized } : undefined;
 
     let client: import("ldapjs").Client;
     try {
       client = ldap.createClient({
         url: cfg.url,
-        tlsOptions: cfg.tls ? { rejectUnauthorized } : undefined,
+        tlsOptions,
         timeout: 5000,
         connectTimeout: 5000,
       });
@@ -252,7 +255,10 @@ export async function authenticateLdap(username: string, password: string): Prom
           stage = "user-bind";
           const userClient = ldap.createClient({
             url: cfg.url,
-            tlsOptions: cfg.tls ? { rejectUnauthorized } : undefined,
+            // Mirror the same TLS options as the service-bind client so an
+            // ldaps:// URL with the StartTLS toggle off still applies the
+            // verify-cert policy on the user-bind handshake.
+            tlsOptions,
             timeout: 5000,
             connectTimeout: 5000,
           });
