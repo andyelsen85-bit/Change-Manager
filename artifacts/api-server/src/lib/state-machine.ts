@@ -251,19 +251,13 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
       return "Standard change requires the planning record to be signed off.";
     }
   }
-  // Normal track: cannot enter awaiting_pir without testing passed AND every individual
-  // test case marked passed (no failed/blocked/pending allowed). This prevents an admin
-  // from flipping the overall flag to passed while individual cases are still failing.
+  // Normal track: cannot enter awaiting_pir without the overall testing record
+  // marked PASSED. The Tester explicitly takes responsibility for that flag —
+  // we no longer require every individual case row to be marked passed (some
+  // teams use the case grid for evidence/notes rather than as a strict gate).
   if (p.track === "normal" && p.toStatus === "awaiting_pir") {
     if (!p.testing || p.testing.overallResult !== "passed") {
       return "Testing must be marked PASSED before requesting PIR.";
-    }
-    if (p.testing.cases.length === 0) {
-      return "Testing must include at least one test case before requesting PIR.";
-    }
-    const bad = p.testing.cases.filter((c) => c.status !== "passed");
-    if (bad.length > 0) {
-      return `All test cases must be PASSED before requesting PIR (${bad.length} case(s) are pending/failed/blocked).`;
     }
   }
   // Cannot mark completed without PIR completion.
