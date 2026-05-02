@@ -20,8 +20,8 @@ export type RoleAssignment = {
   userId: number;
   roleKey: string;
   isDeputy: boolean;
-  username?: string;
-  fullName?: string;
+  primaryAssignmentId: number | null;
+  userName: string;
   roleName?: string;
 };
 
