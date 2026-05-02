@@ -2,7 +2,11 @@
 # Multi-stage build for the IT Change Management app.
 # Produces two runtime images via build targets: `api` (Node) and `web` (Nginx).
 
-ARG NODE_VERSION=24-alpine
+# Use a glibc-based image (debian-slim) instead of alpine/musl. The pnpm
+# lockfile is generated on glibc hosts and pins `@rollup/rollup-linux-x64-gnu`;
+# building on alpine fails with "Cannot find module @rollup/rollup-linux-x64-musl"
+# because pnpm --frozen-lockfile won't fetch the musl optional binary.
+ARG NODE_VERSION=24-bookworm-slim
 
 # --- base: install pnpm + workspace deps -------------------------------------
 FROM node:${NODE_VERSION} AS base

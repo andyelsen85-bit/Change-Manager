@@ -1,0 +1,155 @@
+=> ERROR [migrate builder 3/3] RUN pnpm --filter @workspace/change-mgmt run build                                                                                                                         1.2s
+------
+ > [migrate builder 3/3] RUN pnpm --filter @workspace/change-mgmt run build:
+0.829 
+0.829 > @workspace/change-mgmt@0.0.0 build /repo/artifacts/change-mgmt
+0.829 > vite build
+0.829 
+1.042 /repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:115
+1.042           throw new Error(
+1.042                 ^
+1.042 
+1.042 Error: Cannot find module @rollup/rollup-linux-x64-musl. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.
+1.042     at requireWithFriendlyError (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:115:9)
+1.042     at Object.<anonymous> (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:124:76)
+1.042     at Module._compile (node:internal/modules/cjs/loader:1830:14)
+1.042     at Object..js (node:internal/modules/cjs/loader:1961:10)
+1.042     at Module.load (node:internal/modules/cjs/loader:1553:32)
+1.042     at Module._load (node:internal/modules/cjs/loader:1355:12)
+1.042     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+1.042     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:326:3)
+1.042     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:231:7)
+1.042     at ModuleJob.run (node:internal/modules/esm/module_job:437:25) {
+1.042   [cause]: Error: Cannot find module '@rollup/rollup-linux-x64-musl'
+1.042   Require stack:
+1.042   - /repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js
+1.042       at Module._resolveFilename (node:internal/modules/cjs/loader:1476:15)
+1.042       at wrapResolveFilename (node:internal/modules/cjs/loader:1049:27)
+1.042       at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1073:10)
+1.042       at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1094:12)
+1.042       at Module._load (node:internal/modules/cjs/loader:1262:25)
+1.042       at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+1.042       at Module.require (node:internal/modules/cjs/loader:1576:12)
+1.042       at require (node:internal/modules/helpers:153:16)
+1.042       at requireWithFriendlyError (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:97:10)
+1.042       at Object.<anonymous> (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:124:76) {
+1.042     code: 'MODULE_NOT_FOUND',
+1.042     requireStack: [
+1.042       '/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js'
+1.042     ]
+1.042   }
+1.042 }
+1.042 
+1.042 Node.js v24.15.0
+1.076 /repo/artifacts/change-mgmt:
+1.076  ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @workspace/change-mgmt@0.0.0 build: `vite build`
+1.076 Exit status 1
+------
+[+] build 0/3
+ ⠙ Image change-manager-web     Building                                                                                                                                                                   38.3s
+ ⠙ Image change-manager-migrate Building                                                                                                                                                                   38.3s
+ ⠙ Image change-manager-api     Building                                                                                                                                                                   38.3s
+target migrate: failed to solve: process "/bin/sh -c pnpm --filter @workspace/change-mgmt run build" did not complete successfully: exit code: 1
+
+Starte Docker Container neu...
+[+] up 13/13
+ ✔ Image postgres:16-alpine Pulled                                                                                                                                                                          8.8s
+[+] Building 2.5s (34/58)                                                                                                                                                                                       
+ => [internal] load local bake definitions                                                                                                                                                                 0.0s
+ => => reading from stdin 1.43kB                                                                                                                                                                           0.0s
+ => [web internal] load build definition from Dockerfile                                                                                                                                                   0.0s
+ => => transferring dockerfile: 2.42kB                                                                                                                                                                     0.0s
+ => [web] resolve image config for docker-image://docker.io/docker/dockerfile:1.7                                                                                                                          0.4s
+ => CACHED [api] docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e                                                                    0.0s
+ => => resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e                                                                                     0.0s
+ => [api internal] load build definition from Dockerfile                                                                                                                                                   0.0s
+ => => transferring dockerfile: 2.42kB                                                                                                                                                                     0.0s
+ => [migrate internal] load build definition from Dockerfile                                                                                                                                               0.0s
+ => => transferring dockerfile: 2.42kB                                                                                                                                                                     0.0s
+ => [web internal] load build definition from Dockerfile                                                                                                                                                   0.0s
+ => => transferring dockerfile: 2.42kB                                                                                                                                                                     0.0s
+ => [api internal] load metadata for docker.io/library/node:24-alpine                                                                                                                                      0.4s
+ => [web internal] load metadata for docker.io/library/nginx:1.27-alpine                                                                                                                                   0.4s
+ => [migrate internal] load .dockerignore                                                                                                                                                                  0.0s
+ => => transferring context: 2B                                                                                                                                                                            0.0s
+ => [web internal] load .dockerignore                                                                                                                                                                      0.0s
+ => => transferring context: 2B                                                                                                                                                                            0.0s
+ => [api internal] load .dockerignore                                                                                                                                                                      0.0s
+ => => transferring context: 2B                                                                                                                                                                            0.0s
+ => [api base  1/10] FROM docker.io/library/node:24-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f                                                                         0.0s
+ => => resolve docker.io/library/node:24-alpine@sha256:d1b3b4da11eefd5941e7f0b9cf17783fc99d9c6fc34884a665f40a06dbdfc94f                                                                                    0.0s
+ => [migrate internal] load build context                                                                                                                                                                  0.1s
+ => => transferring context: 28.98kB                                                                                                                                                                       0.1s
+ => [api internal] load build context                                                                                                                                                                      0.1s
+ => => transferring context: 28.98kB                                                                                                                                                                       0.0s
+ => [web internal] load build context                                                                                                                                                                      0.1s
+ => => transferring context: 28.98kB                                                                                                                                                                       0.0s
+ => [web web 1/6] FROM docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10                                                                         0.0s
+ => => resolve docker.io/library/nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10                                                                                 0.0s
+ => CACHED [api api 2/5] WORKDIR /app                                                                                                                                                                      0.0s
+ => CACHED [web web 2/6] RUN apk add --no-cache openssl                                                                                                                                                    0.0s
+ => CACHED [web web 3/6] COPY docker/nginx.conf /etc/nginx/nginx.conf                                                                                                                                      0.0s
+ => CACHED [web web 4/6] COPY docker/entrypoint-web.sh /entrypoint-web.sh                                                                                                                                  0.0s
+ => CACHED [web web 5/6] RUN chmod +x /entrypoint-web.sh                                                                                                                                                   0.0s
+ => CACHED [api base  2/10] RUN corepack enable && corepack prepare pnpm@10.26.1 --activate                                                                                                                0.0s
+ => CACHED [api base  3/10] WORKDIR /repo                                                                                                                                                                  0.0s
+ => CACHED [api base  4/10] COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc* ./                                                                                                                0.0s
+ => CACHED [api base  5/10] COPY artifacts/api-server/package.json artifacts/api-server/package.json                                                                                                       0.0s
+ => CACHED [api base  6/10] COPY artifacts/change-mgmt/package.json artifacts/change-mgmt/package.json                                                                                                     0.0s
+ => CACHED [api base  7/10] COPY lib/db/package.json lib/db/package.json                                                                                                                                   0.0s
+ => CACHED [api base  8/10] COPY lib/api-zod/package.json lib/api-zod/package.json                                                                                                                         0.0s
+ => CACHED [api base  9/10] COPY lib/api-spec/package.json lib/api-spec/package.json                                                                                                                       0.0s
+ => CACHED [api base 10/10] RUN --mount=type=cache,id=pnpm,target=/pnpm/store     pnpm install --frozen-lockfile --ignore-scripts                                                                          0.0s
+ => CACHED [api builder 1/3] COPY . .                                                                                                                                                                      0.0s
+ => CACHED [web builder 2/3] RUN pnpm --filter @workspace/api-server run build                                                                                                                             0.0s
+ => ERROR [migrate builder 3/3] RUN pnpm --filter @workspace/change-mgmt run build                                                                                                                         1.1s
+------                                                                                                                                                                                                          
+ > [migrate builder 3/3] RUN pnpm --filter @workspace/change-mgmt run build:                                                                                                                                    
+0.822                                                                                                                                                                                                           
+0.822 > @workspace/change-mgmt@0.0.0 build /repo/artifacts/change-mgmt                                                                                                                                          
+0.822 > vite build                                                                                                                                                                                              
+0.822                                                                                                                                                                                                           
+1.032 /repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:115
+1.032           throw new Error(
+1.032                 ^
+1.032 
+1.032 Error: Cannot find module @rollup/rollup-linux-x64-musl. npm has a bug related to optional dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i` again after removing both package-lock.json and node_modules directory.
+1.032     at requireWithFriendlyError (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:115:9)
+1.032     at Object.<anonymous> (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:124:76)
+1.032     at Module._compile (node:internal/modules/cjs/loader:1830:14)
+1.032     at Object..js (node:internal/modules/cjs/loader:1961:10)
+1.032     at Module.load (node:internal/modules/cjs/loader:1553:32)
+1.032     at Module._load (node:internal/modules/cjs/loader:1355:12)
+1.032     at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+1.032     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:326:3)
+1.032     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:231:7)
+1.032     at ModuleJob.run (node:internal/modules/esm/module_job:437:25) {
+1.032   [cause]: Error: Cannot find module '@rollup/rollup-linux-x64-musl'
+1.032   Require stack:
+1.032   - /repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js
+1.032       at Module._resolveFilename (node:internal/modules/cjs/loader:1476:15)
+1.032       at wrapResolveFilename (node:internal/modules/cjs/loader:1049:27)
+1.032       at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1073:10)
+1.032       at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1094:12)
+1.032       at Module._load (node:internal/modules/cjs/loader:1262:25)
+1.032       at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+1.032       at Module.require (node:internal/modules/cjs/loader:1576:12)
+1.032       at require (node:internal/modules/helpers:153:16)
+1.032       at requireWithFriendlyError (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:97:10)
+1.032       at Object.<anonymous> (/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js:124:76) {
+1.032     code: 'MODULE_NOT_FOUND',
+1.032     requireStack: [
+1.032       '/repo/node_modules/.pnpm/rollup@4.59.0/node_modules/rollup/dist/native.js'
+1.032     ]
+1.032   }
+1.032 }
+1.032 
+1.032 Node.js v24.15.0
+1.063 /repo/artifacts/change-mgmt:
+1.063  ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @workspace/change-mgmt@0.0.0 build: `vite build`
+[+] up 13/16tatus 1
+ ✔ Image postgres:16-alpine     Pulled                                                                                                                                                                      8.8s
+ ⠙ Image change-manager-web     Building                                                                                                                                                                    2.6s
+ ⠙ Image change-manager-migrate Building                                                                                                                                                                    2.6s
+ ⠙ Image change-manager-api     Building                                                                                                                                                                    2.6s
+target migrate: failed to solve: process "/bin/sh -c pnpm --filter @workspace/change-mgmt run build" did not complete successfully: exit code: 1
