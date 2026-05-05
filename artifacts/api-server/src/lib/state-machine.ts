@@ -11,6 +11,7 @@ export type ChangeStatus =
   | "in_review"
   | "awaiting_approval"
   | "approved"
+  | "in_preprod_testing"
   | "rejected"
   | "scheduled"
   | "awaiting_implementation"
@@ -29,7 +30,11 @@ const NORMAL: Record<ChangeStatus, ChangeStatus[]> = {
   submitted: ["in_review", "cancelled"],
   in_review: ["awaiting_approval", "rejected", "cancelled"],
   awaiting_approval: ["approved", "rejected", "cancelled"],
-  approved: ["scheduled", "cancelled"],
+  // Optional pre-prod testing phase. The Implementer drives `in_preprod_testing`
+  // and exits to `scheduled` once dry-run validation in the pre-prod env is
+  // complete. Teams without a pre-prod env skip directly to `scheduled`.
+  approved: ["in_preprod_testing", "scheduled", "cancelled"],
+  in_preprod_testing: ["scheduled", "approved", "cancelled"],
   scheduled: ["in_progress", "cancelled"],
   in_progress: ["implemented", "rolled_back"],
   // Testing is optional — teams can either record a Testing pass first
@@ -63,6 +68,7 @@ const STANDARD: Record<ChangeStatus, ChangeStatus[]> = {
   rejected: [],
   in_testing: [],
   awaiting_pir: [],
+  in_preprod_testing: [],
 };
 
 // Emergency: collapsed flow but eCAB approval is mandatory before implementation.
@@ -88,6 +94,7 @@ const EMERGENCY: Record<ChangeStatus, ChangeStatus[]> = {
   scheduled: [],
   awaiting_implementation: [],
   in_testing: [],
+  in_preprod_testing: [],
 };
 
 const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus[]>> = {
@@ -126,6 +133,7 @@ const REVERSE_NORMAL: Record<ChangeStatus, ChangeStatus[]> = {
   rejected: ["draft", "in_review"], // reopen a rejected change
   rolled_back: [], // truly terminal
   awaiting_implementation: [],
+  in_preprod_testing: ["approved", "awaiting_approval"],
 };
 
 const REVERSE_STANDARD: Record<ChangeStatus, ChangeStatus[]> = {
@@ -145,6 +153,7 @@ const REVERSE_STANDARD: Record<ChangeStatus, ChangeStatus[]> = {
   rejected: [],
   in_testing: [],
   awaiting_pir: [],
+  in_preprod_testing: [],
 };
 
 const REVERSE_EMERGENCY: Record<ChangeStatus, ChangeStatus[]> = {
@@ -164,6 +173,7 @@ const REVERSE_EMERGENCY: Record<ChangeStatus, ChangeStatus[]> = {
   scheduled: [],
   awaiting_implementation: [],
   in_testing: [],
+  in_preprod_testing: [],
 };
 
 const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus[]>> = {
@@ -187,7 +197,7 @@ export function isTransitionAllowed(track: ChangeTrack, from: ChangeStatus, to: 
     if (isTerminalNow) return false;
     if (to === "rolled_back") {
       // rolled_back only from execution/post-execution states
-      return ["in_progress", "implemented", "in_testing", "awaiting_pir", "completed"].includes(from);
+      return ["in_progress", "implemented", "in_testing", "in_preprod_testing", "awaiting_pir", "completed"].includes(from);
     }
     return true;
   }

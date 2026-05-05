@@ -11,6 +11,13 @@ export const smtpSettingsTable = pgTable("smtp_settings", {
   fromAddress: text("from_address").notNull().default(""),
   fromName: text("from_name").notNull().default("Change Management"),
   enabled: boolean("enabled").notNull().default(false),
+  // When false, skip TLS certificate validation when sending mail. Useful
+  // for internal/legacy SMTP relays with self-signed certificates.
+  // Default true (verify). Surfaced in the admin UI with a warning.
+  tlsRejectUnauthorized: boolean("tls_reject_unauthorized").notNull().default(true),
+  // Optional PEM-encoded CA certificate appended to Node's trust store for
+  // the SMTP TLS handshake — lets you keep verification ON with an internal CA.
+  caCertPem: text("ca_cert_pem"),
 });
 
 export const ldapSettingsTable = pgTable("ldap_settings", {
@@ -31,6 +38,11 @@ export const ldapSettingsTable = pgTable("ldap_settings", {
   // surfaced in the admin UI with a warning. Honoured by both
   // ldaps:// and StartTLS code paths in lib/ldap.ts.
   tlsRejectUnauthorized: boolean("tls_reject_unauthorized").notNull().default(true),
+  // Optional PEM-encoded CA certificate(s) appended to Node's trust store for
+  // the LDAPS / StartTLS handshake. Use this to anchor an internal AD CA.
+  caCertPem: text("ca_cert_pem"),
+  // Optional PEM-encoded issuer (intermediate) certificate completing the chain.
+  issuerCertPem: text("issuer_cert_pem"),
 });
 
 export const sslSettingsTable = pgTable("ssl_settings", {

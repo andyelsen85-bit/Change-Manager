@@ -21,7 +21,30 @@ A pnpm workspace monorepo (TypeScript) that ships:
 - **CAB / eCAB**: calendar of meetings, attendee management, ICS invite download (members add it to their calendar themselves), and a "Send agenda" action that emails every member the full agenda — meeting metadata plus, for every change on the docket, its ref/title, track, status, risk, impact, planned start/end, and full description — so members can review before the meeting starts. The "New meeting" dialog defaults the attendee list to all primary CAB Members for a standard CAB and to all primary eCAB Members for an eCAB; switching the meeting kind reapplies the corresponding default. Backed by `GET /api/users?role=<key>&primary=1` (filters to non-deputy assignments) and `POST /api/cab-meetings/:id/send-agenda`.
 - **Change progress timeline**: the Change detail page shows a per-track horizontal timeline (green ✓ for completed steps, highlighted current step, muted future steps; cancelled / rejected / rolled-back rendered as a red stop-tile) so it's obvious at a glance where the change is in its lifecycle.
 - **Deputies / replacements** for every governance role (incl. Change Manager) so approvals never block.
-- **Notifications**: per-user granular email + in-app preferences keyed by event.
+- **Notifications**: per-user granular email preferences keyed by event, with an
+  account-wide admin master-switch (`users.notifications_enabled`) that
+  short-circuits all delivery for a user when off. In-app notifications were
+  removed in backup format v2; PUT routes still accept and discard `inApp`
+  for backwards compatibility with v1 backup payloads.
+  Per-change assignees (Tech Reviewer / Implementer / Tester) override the
+  global role pool when routing approval + status emails — the role pool is
+  used as a fallback when no per-change override exists. Events added in v2:
+  `change.submitted`, `change.scheduled`, `change.completed`,
+  `change.assignee_changed`.
+- **Categories**: `change_categories` is a small admin-managed lookup table
+  feeding the Category dropdown on every change form. Managed under
+  Settings → Categories. Deleting an in-use category soft-deactivates.
+- **Pre-prod testing (Normal track)**: optional `in_preprod_testing` status
+  inserted between `approved` and `scheduled` when a change is created with
+  `hasPreprodEnv=true`. Timeline tile is hidden on changes that don't
+  require it.
+- **Meeting-gated approvals (Normal track)**: CAB approvals can only be cast
+  while the parent meeting is `in_progress` (started via Process Meeting) or
+  `completed`. CabDetail page exposes Process / Complete buttons and an
+  embedded per-change approval panel.
+- **CA-cert anchors**: SMTP and LDAP both accept an optional PEM CA chain
+  appended to Node's trust store at runtime; SMTP additionally has a
+  `tlsRejectUnauthorized` toggle for legacy relays.
 - **Auth**: local users (bcrypt) + LDAP. JWT cookie session (`cm_session`). CSRF protection via double-submit cookie (`cm_csrf` non-HttpOnly cookie + `X-CSRF-Token` header) — required on every POST/PATCH/PUT/DELETE under `/api` except `/api/auth/login`. Token issued on login, cleared on logout, healed by `/api/auth/me`. The frontend `api` client in `artifacts/change-mgmt/src/lib/api.ts` reads the cookie and attaches the header automatically.
 - **Settings (admin)**: SMTP, LDAP, SSL/TLS upload + in-app CSR generation (POST /api/settings/ssl/csr — RSA 2048/3072/4096, DNS+IP SANs, key usage / extKeyUsage server-auth, private key persisted server-side until the signed cert is uploaded), session/lockout timeouts. Sensitive values returned as `*Set` booleans on GET.
 - **LDAP diagnostics**: `authenticateLdap` and `POST /api/settings/ldap/test` return a structured `{ success, stage, message, code?, details?, userDn? }` (`LdapTestResult`). `stage` is one of `config | connect | service-bind | search | user-bind | ok` so admins can tell exactly where a failed bind broke. The Settings → LDAP panel renders this as a persistent diagnostic card and includes one-click presets: **OpenLDAP** `(uid={{username}})`, **Active Directory (sAMAccountName)** `(&(objectClass=user)(sAMAccountName={{username}}))`, and **Active Directory (UPN)** `(&(objectClass=user)(userPrincipalName={{username}}))`. Server-side, every stage is logged via pino with `{ url, baseDn, usernameMasked, stage, code }` (the username is reduced to a fingerprint, never the password) so the host operator can correlate UI test results with `docker compose logs api`. The panel also exposes a **Verify TLS certificate** toggle (`tlsRejectUnauthorized` column on `ldap_settings`) — defaults ON; OFF lets the bind succeed against self-signed certs, internal CAs Node doesn't trust, or hostname mismatches (e.g. connecting by IP). Honoured for both `ldaps://` (URL-driven TLS) and `ldap://` + StartTLS via `tlsOptions.rejectUnauthorized` in `lib/ldap.ts`.

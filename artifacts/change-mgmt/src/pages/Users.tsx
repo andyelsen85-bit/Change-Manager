@@ -23,6 +23,7 @@ type EditUser = {
   source: "local" | "ldap";
   isAdmin: boolean;
   isActive: boolean;
+  notificationsEnabled: boolean;
   password: string;
 };
 
@@ -34,6 +35,7 @@ const NEW: EditUser = {
   source: "local",
   isAdmin: false,
   isActive: true,
+  notificationsEnabled: true,
   password: "",
 };
 
@@ -53,6 +55,7 @@ export function UsersPage() {
         source: u.source,
         isAdmin: u.isAdmin,
         isActive: u.isActive,
+        notificationsEnabled: u.notificationsEnabled,
       };
       if (!isNewLdap) {
         body["email"] = u.email;
@@ -125,7 +128,7 @@ export function UsersPage() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{u.lastLoginAt ? fmtAgo(u.lastLoginAt) : "Never"}</TableCell>
                     <TableCell className="text-right space-x-1">
-                      <Button size="icon" variant="ghost" onClick={() => setEditing({ id: u.id, username: u.username, email: u.email, fullName: u.fullName, source: u.source, isAdmin: u.isAdmin, isActive: u.isActive, password: "" })} data-testid={`button-edit-user-${u.id}`}>
+                      <Button size="icon" variant="ghost" onClick={() => setEditing({ id: u.id, username: u.username, email: u.email, fullName: u.fullName, source: u.source, isAdmin: u.isAdmin, isActive: u.isActive, notificationsEnabled: u.notificationsEnabled, password: "" })} data-testid={`button-edit-user-${u.id}`}>
                         <Pencil className="h-4 w-4" />
                       </Button>
                       {u.isActive && (
@@ -208,6 +211,19 @@ export function UsersPage() {
                 <div className="flex items-center justify-between rounded-md border border-border p-3">
                   <Label>Active</Label>
                   <Switch checked={editing.isActive} onCheckedChange={(v) => setEditing({ ...editing, isActive: v })} />
+                </div>
+                <div className="flex items-start justify-between gap-3 rounded-md border border-border p-3">
+                  <div>
+                    <Label>Receives email notifications</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Master switch — when off, this user is excluded from every change-management email regardless of per-event preferences.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={editing.notificationsEnabled}
+                    onCheckedChange={(v) => setEditing({ ...editing, notificationsEnabled: v })}
+                    data-testid="switch-user-notifications-enabled"
+                  />
                 </div>
               </div>
               <DialogFooter>

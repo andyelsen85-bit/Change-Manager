@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
 
 export const changeRequestsTable = pgTable("change_requests", {
   id: serial("id").primaryKey(),
@@ -11,6 +11,11 @@ export const changeRequestsTable = pgTable("change_requests", {
   impact: text("impact").notNull().default("low"),
   priority: text("priority").notNull().default("medium"),
   category: text("category").notNull().default("general"),
+  // Optional pre-prod testing flag (Normal track). When true the workflow
+  // includes an `in_preprod_testing` step before `scheduled` which the
+  // Implementer drives.
+  hasPreprodEnv: boolean("has_preprod_env").notNull().default(false),
+  preprodEnvUrl: text("preprod_env_url"),
   ownerId: integer("owner_id").notNull(),
   assigneeId: integer("assignee_id"),
   templateId: integer("template_id"),

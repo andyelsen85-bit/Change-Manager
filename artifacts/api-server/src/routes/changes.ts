@@ -17,7 +17,8 @@ import {
 import { requireAuth, getChangeAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
-import { notify, getUserEmail } from "../lib/email";
+import { notify, getUserEmail, getUserEmails } from "../lib/email";
+import { getAssignedUserIds } from "./assignees";
 import {
   isTransitionAllowed,
   listAllowedTransitions,
@@ -38,6 +39,7 @@ const ACTIVE_STATUSES: ChangeStatus[] = [
   "in_review",
   "awaiting_approval",
   "approved",
+  "in_preprod_testing",
   "scheduled",
   "awaiting_implementation",
   "in_progress",
@@ -89,17 +91,29 @@ async function createApprovalsForChange(changeId: number, track: string) {
   }
 }
 
+// Notification routing: per-change assignees are preferred over the global
+// role pool. When no per-change assignment exists for a given role, we fall
+// back to the role_assignments table so legacy changes (no assignees yet)
+// still notify someone. Owners/implementers/testers are added to the
+// recipient list for status flips so they always know what's happening.
+async function resolveRoleTargets(changeId: number, roleKey: string) {
+  const perChange = await getAssignedUserIds(
+    changeId,
+    roleKey as "technical_reviewer" | "implementer" | "tester",
+  ).catch(() => [] as number[]);
+  if (perChange.length > 0) return getUserEmails(perChange);
+  const fallback = await db
+    .select({ userId: roleAssignmentsTable.userId })
+    .from(roleAssignmentsTable)
+    .where(eq(roleAssignmentsTable.roleKey, roleKey));
+  return getUserEmails(fallback.map((a) => a.userId));
+}
+
 async function notifyApprovers(changeId: number, change: typeof changeRequestsTable.$inferSelect) {
   const approvals = await db.select().from(approvalsTable).where(eq(approvalsTable.changeId, changeId));
   for (const ap of approvals) {
     if (ap.decision !== "pending") continue;
-    const assignees = await db
-      .select({ userId: roleAssignmentsTable.userId })
-      .from(roleAssignmentsTable)
-      .where(eq(roleAssignmentsTable.roleKey, ap.roleKey));
-    const targets = (
-      await Promise.all(assignees.map((a) => getUserEmail(a.userId)))
-    ).filter((t): t is { userId: number; email: string; name: string } => !!t);
+    const targets = await resolveRoleTargets(changeId, ap.roleKey);
     if (targets.length === 0) continue;
     await notify({
       eventKey: "approval.requested",
@@ -108,6 +122,32 @@ async function notifyApprovers(changeId: number, change: typeof changeRequestsTa
       text: `Your approval is required for change ${change.ref} (${change.track}).\n\n${change.description}\n\nRisk: ${change.risk}, Impact: ${change.impact}, Priority: ${change.priority}.`,
     });
   }
+}
+
+// Broadcast change.completed to the owner + all per-change assignees.
+async function notifyChangeCompleted(change: typeof changeRequestsTable.$inferSelect) {
+  const ids = new Set<number>([change.ownerId]);
+  if (change.assigneeId) ids.add(change.assigneeId);
+  for (const r of ["technical_reviewer", "implementer", "tester"] as const) {
+    const perChange = await getAssignedUserIds(change.id, r);
+    if (perChange.length > 0) {
+      for (const u of perChange) ids.add(u);
+    } else {
+      const pool = await db
+        .select({ userId: roleAssignmentsTable.userId })
+        .from(roleAssignmentsTable)
+        .where(eq(roleAssignmentsTable.roleKey, r));
+      for (const u of pool) ids.add(u.userId);
+    }
+  }
+  const targets = await getUserEmails(Array.from(ids));
+  if (targets.length === 0) return;
+  await notify({
+    eventKey: "change.completed",
+    to: targets,
+    subject: `[CHG ${change.ref}] Completed: ${change.title}`,
+    text: `Change ${change.ref} (${change.track}) is now Completed.\n\n${change.description}`,
+  });
 }
 
 router.get("/changes", requireAuth, async (req, res): Promise<void> => {
@@ -150,6 +190,19 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Missing required fields" });
     return;
   }
+  // Enforce category from the managed lookup table — anything outside the
+  // active categories list is rejected so we never store free-text labels.
+  {
+    const { changeCategoriesTable } = await import("@workspace/db");
+    const [cat] = await db
+      .select()
+      .from(changeCategoriesTable)
+      .where(eq(changeCategoriesTable.key, b.category));
+    if (!cat || !cat.isActive) {
+      res.status(400).json({ error: "Unknown or inactive category." });
+      return;
+    }
+  }
   // Standard-track classification: only allowed when an active, existing template is
   // referenced. Submissions that claim 'standard' without a valid + active template are
   // rejected with HTTP 400 so callers cannot smuggle changes around the approval
@@ -191,6 +244,8 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
       ownerId: session.uid,
       assigneeId: b.assigneeId ?? null,
       templateId,
+      hasPreprodEnv: !!b.hasPreprodEnv,
+      preprodEnvUrl: typeof b.preprodEnvUrl === "string" ? b.preprodEnvUrl : null,
       plannedStart: b.plannedStart ? new Date(b.plannedStart) : null,
       plannedEnd: b.plannedEnd ? new Date(b.plannedEnd) : null,
     })
@@ -315,9 +370,10 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   }
   const b = req.body ?? {};
   const updates: Partial<typeof changeRequestsTable.$inferInsert> = {};
-  for (const k of ["title", "description", "risk", "impact", "priority", "category"] as const) {
+  for (const k of ["title", "description", "risk", "impact", "priority", "category", "preprodEnvUrl"] as const) {
     if (typeof b[k] === "string") (updates as Record<string, unknown>)[k] = b[k];
   }
+  if (typeof b.hasPreprodEnv === "boolean") updates.hasPreprodEnv = b.hasPreprodEnv;
   if (b.assigneeId === null) updates.assigneeId = null;
   else if (typeof b.assigneeId === "number") updates.assigneeId = b.assigneeId;
   if (b.cabMeetingId === null) updates.cabMeetingId = null;
@@ -435,11 +491,11 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
           .select()
           .from(cabMeetingsTable)
           .where(eq(cabMeetingsTable.id, before.cabMeetingId));
-        if (meeting?.status === "completed") postCab = true;
+        if (meeting?.status === "in_progress" || meeting?.status === "completed") postCab = true;
       }
       if (!postCab) {
         res.status(409).json({
-          error: "The CAB meeting must be marked completed before approval can begin.",
+          error: "The CAB meeting must be in progress or completed before approval can begin.",
         });
         return;
       }
@@ -467,6 +523,13 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   });
   if (gateError) {
     res.status(400).json({ error: gateError });
+    return;
+  }
+  // Pre-prod gate: only allow approved → in_preprod_testing when the change
+  // was created with a pre-prod environment. Teams without one skip the
+  // status entirely (approved → scheduled).
+  if (toStatus === "in_preprod_testing" && !before.hasPreprodEnv) {
+    res.status(400).json({ error: "Pre-prod testing requires hasPreprodEnv=true on the change." });
     return;
   }
   const updates: Partial<typeof changeRequestsTable.$inferInsert> = { status: toStatus };
@@ -500,6 +563,37 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
       subject: `[CHG ${before.ref}] Status: ${toStatus}`,
       text: `${before.ref} ${before.title}\n\n${before.status} → ${toStatus}${note ? "\n\nNote: " + note : ""}`,
     });
+  }
+  // Per-status broadcasts: scheduled / completed reach the full assignee
+  // list, not just owner+assignee, so all stakeholders are looped in.
+  if (toStatus === "scheduled") {
+    const ids = new Set<number>([before.ownerId]);
+    if (before.assigneeId) ids.add(before.assigneeId);
+    for (const r of ["technical_reviewer", "implementer", "tester"] as const) {
+      const perChange = await getAssignedUserIds(id, r);
+      if (perChange.length > 0) {
+        for (const u of perChange) ids.add(u);
+      } else {
+        // Fallback to the global role pool when no per-change assignee is set.
+        const pool = await db
+          .select({ userId: roleAssignmentsTable.userId })
+          .from(roleAssignmentsTable)
+          .where(eq(roleAssignmentsTable.roleKey, r));
+        for (const u of pool) ids.add(u.userId);
+      }
+    }
+    const sched = await getUserEmails(Array.from(ids));
+    if (sched.length > 0) {
+      await notify({
+        eventKey: "change.scheduled",
+        to: sched,
+        subject: `[CHG ${before.ref}] Scheduled: ${before.title}`,
+        text: `${before.ref} is now scheduled.\n\n${before.description ?? ""}`,
+      });
+    }
+  }
+  if (toStatus === "completed") {
+    await notifyChangeCompleted(updated);
   }
   res.json(await expandChangeRow(updated));
 });

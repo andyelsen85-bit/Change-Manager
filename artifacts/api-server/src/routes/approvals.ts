@@ -96,11 +96,11 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
           .select()
           .from(cabMeetingsTable)
           .where(eq(cabMeetingsTable.id, chgForGate.cabMeetingId));
-        if (meeting?.status === "completed") cabCompleted = true;
+        if (meeting?.status === "in_progress" || meeting?.status === "completed") cabCompleted = true;
       }
       if (!cabCompleted) {
         res.status(409).json({
-          error: "Approval can only be recorded after the CAB meeting has concluded.",
+          error: "Approval can only be recorded after the CAB meeting has started or concluded.",
         });
         return;
       }
