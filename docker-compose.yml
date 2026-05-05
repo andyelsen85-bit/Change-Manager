@@ -72,6 +72,10 @@ services:
       DISABLE_TLS: ${DISABLE_TLS:-false}
       TLS_HOSTNAME: ${TLS_HOSTNAME:-change-mgmt.local}
       TLS_SELFSIGNED_DAYS: ${TLS_SELFSIGNED_DAYS:-365}
+      # Lets the web entrypoint pull the user-uploaded TLS cert/key from
+      # ssl_settings on every container start, so re-uploading via the
+      # SSL Settings UI takes effect after a simple restart.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD:-change_mgmt_internal_only}@db:5432/${POSTGRES_DB:-change_mgmt}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"

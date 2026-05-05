@@ -7,7 +7,27 @@ KEY_FILE="${CERT_DIR}/server.key"
 
 mkdir -p "$CERT_DIR" /var/www/acme /etc/nginx/conf.d
 
-# Generate a self-signed cert on first run if none exists.
+# 1. Try to pull a user-uploaded cert + private key from the database
+#    (Settings → SSL writes to ssl_settings where key='global'). If both
+#    PEMs are present they overwrite whatever is on disk so re-uploading
+#    via the UI + restarting the container is enough to roll the cert.
+if [ "${DISABLE_TLS:-false}" != "true" ] && [ -n "${DATABASE_URL:-}" ]; then
+  echo "[entrypoint-web] Checking ssl_settings for user-uploaded TLS cert"
+  DB_CERT=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 \
+    -c "SELECT certificate_pem FROM ssl_settings WHERE key='global'" 2>/dev/null || true)
+  DB_KEY=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 \
+    -c "SELECT private_key_pem FROM ssl_settings WHERE key='global'" 2>/dev/null || true)
+  if [ -n "$DB_CERT" ] && [ -n "$DB_KEY" ]; then
+    echo "[entrypoint-web] Installing TLS cert from ssl_settings"
+    printf '%s\n' "$DB_CERT" > "$CERT_FILE"
+    printf '%s\n' "$DB_KEY"  > "$KEY_FILE"
+    chmod 600 "$KEY_FILE"
+  else
+    echo "[entrypoint-web] No cert in ssl_settings — keeping existing/self-signed"
+  fi
+fi
+
+# 2. Generate a self-signed cert on first run if nothing else is available.
 if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
   echo "[entrypoint-web] No TLS cert found at $CERT_DIR — generating self-signed cert"
   openssl req -x509 -nodes -newkey rsa:2048 \

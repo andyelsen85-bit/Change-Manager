@@ -57,7 +57,7 @@ ENTRYPOINT ["/entrypoint-api.sh"]
 
 # --- web runtime (Nginx serving static frontend + TLS + reverse proxy) ------
 FROM nginx:1.27-alpine AS web
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl postgresql16-client
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/entrypoint-web.sh /entrypoint-web.sh
 RUN chmod +x /entrypoint-web.sh
