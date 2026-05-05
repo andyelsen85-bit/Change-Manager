@@ -11,19 +11,29 @@ mkdir -p "$CERT_DIR" /var/www/acme /etc/nginx/conf.d
 #    (Settings → SSL writes to ssl_settings where key='global'). If both
 #    PEMs are present they overwrite whatever is on disk so re-uploading
 #    via the UI + restarting the container is enough to roll the cert.
-if [ "${DISABLE_TLS:-false}" != "true" ] && [ -n "${DATABASE_URL:-}" ]; then
+if [ "${DISABLE_TLS:-false}" = "true" ]; then
+  echo "[entrypoint-web] DISABLE_TLS=true — skipping DB cert lookup"
+elif [ -z "${DATABASE_URL:-}" ]; then
+  echo "[entrypoint-web] DATABASE_URL not set — cannot read ssl_settings; using existing/self-signed cert"
+else
   echo "[entrypoint-web] Checking ssl_settings for user-uploaded TLS cert"
   DB_CERT=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 \
-    -c "SELECT certificate_pem FROM ssl_settings WHERE key='global'" 2>/dev/null || true)
+    -c "SELECT certificate_pem FROM ssl_settings WHERE key='global'" 2>&1) || {
+      echo "[entrypoint-web] psql query for certificate_pem failed: $DB_CERT"
+      DB_CERT=""
+    }
   DB_KEY=$(psql "$DATABASE_URL" -At -v ON_ERROR_STOP=1 \
-    -c "SELECT private_key_pem FROM ssl_settings WHERE key='global'" 2>/dev/null || true)
+    -c "SELECT private_key_pem FROM ssl_settings WHERE key='global'" 2>&1) || {
+      echo "[entrypoint-web] psql query for private_key_pem failed: $DB_KEY"
+      DB_KEY=""
+    }
   if [ -n "$DB_CERT" ] && [ -n "$DB_KEY" ]; then
-    echo "[entrypoint-web] Installing TLS cert from ssl_settings"
+    echo "[entrypoint-web] Installing TLS cert from ssl_settings (cert ${#DB_CERT} bytes, key ${#DB_KEY} bytes)"
     printf '%s\n' "$DB_CERT" > "$CERT_FILE"
     printf '%s\n' "$DB_KEY"  > "$KEY_FILE"
     chmod 600 "$KEY_FILE"
   else
-    echo "[entrypoint-web] No cert in ssl_settings — keeping existing/self-signed"
+    echo "[entrypoint-web] ssl_settings has no usable cert/key — keeping existing/self-signed"
   fi
 fi
 
