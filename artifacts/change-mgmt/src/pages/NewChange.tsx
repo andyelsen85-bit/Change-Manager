@@ -80,6 +80,22 @@ export function NewChangePage() {
       toast.error("Standard track requires a template");
       return;
     }
+    if (!description.trim()) {
+      toast.error("Description is required");
+      return;
+    }
+    if (!plannedStart || !plannedEnd) {
+      toast.error("Planned start and end are required");
+      return;
+    }
+    if (!category) {
+      toast.error("Category is required");
+      return;
+    }
+    if (assigneeId === "none") {
+      toast.error("Change Owner is required");
+      return;
+    }
     create.mutate();
   };
 
@@ -126,7 +142,7 @@ export function NewChangePage() {
       {track === "standard" && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Pre-approved template</CardTitle>
+            <CardTitle className="text-base">Pre-approved template <span className="text-destructive">*</span></CardTitle>
             <CardDescription>Standard changes must use a pre-approved template.</CardDescription>
           </CardHeader>
           <CardContent>
@@ -173,7 +189,7 @@ export function NewChangePage() {
 
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2">
-              <Label>Risk</Label>
+              <Label>Risk <span className="text-destructive">*</span></Label>
               <Select value={risk} onValueChange={(v) => setRisk(v as typeof risk)}>
                 <SelectTrigger data-testid="select-risk"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -184,7 +200,7 @@ export function NewChangePage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Impact</Label>
+              <Label>Impact <span className="text-destructive">*</span></Label>
               <Select value={impact} onValueChange={(v) => setImpact(v as typeof impact)}>
                 <SelectTrigger data-testid="select-impact"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -195,7 +211,7 @@ export function NewChangePage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Priority</Label>
+              <Label>Priority <span className="text-destructive">*</span></Label>
               <Select value={priority} onValueChange={(v) => setPriority(v as typeof priority)}>
                 <SelectTrigger data-testid="select-priority"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -210,17 +226,17 @@ export function NewChangePage() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="planned-start">Planned start</Label>
-              <Input id="planned-start" type="datetime-local" value={plannedStart} onChange={(e) => setPlannedStart(e.target.value)} data-testid="input-planned-start" />
+              <Label htmlFor="planned-start">Planned start <span className="text-destructive">*</span></Label>
+              <Input id="planned-start" type="datetime-local" required value={plannedStart} onChange={(e) => setPlannedStart(e.target.value)} data-testid="input-planned-start" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="planned-end">Planned end</Label>
-              <Input id="planned-end" type="datetime-local" value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} data-testid="input-planned-end" />
+              <Label htmlFor="planned-end">Planned end <span className="text-destructive">*</span></Label>
+              <Input id="planned-end" type="datetime-local" required value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} data-testid="input-planned-end" />
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label>Category</Label>
+            <Label>Category <span className="text-destructive">*</span></Label>
             <Select value={category} onValueChange={setCategory}>
               <SelectTrigger data-testid="select-category"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -253,7 +269,7 @@ export function NewChangePage() {
           )}
 
           <div className="space-y-2">
-            <Label>Change Owner</Label>
+            <Label>Change Owner <span className="text-destructive">*</span></Label>
             <Select value={assigneeId} onValueChange={setAssigneeId}>
               <SelectTrigger data-testid="select-assignee"><SelectValue placeholder="Unassigned" /></SelectTrigger>
               <SelectContent>
