@@ -31,7 +31,7 @@ async function loadSslFromDb(): Promise<{ cert: string; key: string } | null> {
     const [row] = await db
       .select()
       .from(sslSettingsTable)
-      .where(eq(sslSettingsTable.key, "primary"));
+      .where(eq(sslSettingsTable.key, "global"));
     if (row?.certificatePem && row?.privateKeyPem) {
       return { cert: row.certificatePem, key: row.privateKeyPem };
     }
