@@ -167,8 +167,8 @@ export function NewChangePage() {
             <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} required data-testid="input-title" />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <Textarea id="description" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} data-testid="input-description" />
+            <Label htmlFor="description">Description <span className="text-destructive">*</span></Label>
+            <Textarea id="description" rows={4} required value={description} onChange={(e) => setDescription(e.target.value)} data-testid="input-description" />
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">

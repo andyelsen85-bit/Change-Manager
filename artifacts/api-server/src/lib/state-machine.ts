@@ -215,6 +215,7 @@ export function listAllowedTransitions(track: ChangeTrack, from: ChangeStatus): 
 // means "block with this 400 reason".
 export type PhaseGateInputs = {
   track: ChangeTrack;
+  fromStatus?: ChangeStatus;
   toStatus: ChangeStatus;
   hasPreprodEnv?: boolean;
   planning: { signedOff: boolean } | null;
@@ -282,9 +283,15 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
   if (p.track === "normal" && p.toStatus === "awaiting_pir") {
     // Sign-off semantics: a Testing record only counts as "signed off" once
     // overallResult is PASSED *and* testedAt is populated (which the PUT route
-    // sets the moment a non-pending result is recorded). Both conditions must
-    // hold before PIR can begin.
-    if (p.testing && (p.testing.overallResult !== "passed" || !p.testing.testedAt)) {
+    // sets the moment a non-pending result is recorded). When the change has
+    // entered the in_testing phase the team has explicitly opted into a
+    // testing pass and we require a signed-off PASS before PIR — a missing
+    // record does not qualify.
+    if (p.fromStatus === "in_testing") {
+      if (!p.testing || p.testing.overallResult !== "passed" || !p.testing.testedAt) {
+        return "Testing must be signed off as PASSED before requesting PIR.";
+      }
+    } else if (p.testing && (p.testing.overallResult !== "passed" || !p.testing.testedAt)) {
       return "Testing must be signed off as PASSED before requesting PIR.";
     }
   }

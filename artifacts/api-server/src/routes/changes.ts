@@ -495,6 +495,7 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     allApprovals.length === 0 || allApprovals.every((a) => a.decision === "approved");
   const gateError = checkPhaseGates({
     track,
+    fromStatus,
     toStatus: targetStatus,
     hasPreprodEnv: !!before.hasPreprodEnv,
     planning: planning ? { signedOff: planning.signedOff } : null,
