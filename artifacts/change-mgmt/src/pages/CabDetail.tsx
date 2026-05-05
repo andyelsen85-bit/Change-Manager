@@ -27,7 +27,14 @@ export function CabDetailPage() {
     enabled: Number.isFinite(id),
   });
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
-  const changesQ = useQuery({ queryKey: ["changes"], queryFn: () => api.get<ChangeRequest[]>("/changes") });
+  // Only changes that are in `awaiting_approval` are eligible for docketing —
+  // they're the ones waiting on a CAB review. Already-docketed changes on
+  // this meeting are merged in below so they remain visible even if their
+  // status has since moved on.
+  const changesQ = useQuery({
+    queryKey: ["changes", "awaiting_approval"],
+    queryFn: () => api.get<ChangeRequest[]>("/changes?status=awaiting_approval"),
+  });
 
   const [form, setForm] = useState<{
     title: string;
@@ -260,7 +267,22 @@ export function CabDetailPage() {
           <CardHeader><CardTitle className="text-base">Changes on agenda ({form.changeIds.length})</CardTitle></CardHeader>
           <CardContent>
             <div className="max-h-72 overflow-y-auto rounded-md border border-border p-2 text-sm">
-              {(changesQ.data ?? []).map((c) => (
+              {(() => {
+                // Merge eligible (awaiting_approval) changes with any
+                // already-docketed changes on this meeting so existing
+                // selections remain visible even after they leave the
+                // awaiting_approval state.
+                const eligible = changesQ.data ?? [];
+                const docketed = m.changes ?? [];
+                const seen = new Set<number>();
+                const merged: ChangeRequest[] = [];
+                for (const c of [...eligible, ...docketed]) {
+                  if (seen.has(c.id)) continue;
+                  seen.add(c.id);
+                  merged.push(c as ChangeRequest);
+                }
+                return merged;
+              })().map((c) => (
                 <label key={c.id} className="flex items-center gap-2 py-1">
                   <input
                     type="checkbox"
