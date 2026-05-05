@@ -12,7 +12,6 @@ import {
   commentsTable,
   rolesTable,
   roleAssignmentsTable,
-  cabMeetingsTable,
 } from "@workspace/db";
 import { requireAuth, getChangeAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
@@ -463,42 +462,18 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     });
     return;
   }
-  // Governance gates on the transition itself.
-  // 1) Moving INTO the post-CAB approval state (`awaiting_approval`) for Normal /
-  //    Emergency tracks requires that the linked CAB / eCAB meeting has actually
-  //    concluded. This complements the per-vote gate so a status flip itself cannot
-  //    be used to fast-track around CAB.
-  // 2) Only an admin or governance role holder (change_manager / eCAB / CAB chair)
-  //    may put a change into `awaiting_approval` — owners/assignees should not be
-  //    able to self-flip into the approval state.
+  // Governance gate: only an admin or governance role holder
+  // (change_manager / eCAB / CAB chair) may put a change into
+  // `awaiting_approval` — owners/assignees should not self-flip into the
+  // approval state. The CAB-meeting-in-progress requirement is enforced
+  // per-vote in /api/approvals (so a change can wait in `awaiting_approval`
+  // until its docketed meeting actually starts, which is when votes are cast).
   if (targetStatus === "awaiting_approval" && (track === "normal" || track === "emergency")) {
     if (!isPrivilegedAccess(access)) {
       res
         .status(403)
         .json({ error: "Only an admin or governance role holder can move a change into approval." });
       return;
-    }
-    // Normal track: a CAB meeting must have been held & marked completed
-    // before approval voting begins — that's where the change is reviewed.
-    // Emergency track: the eCAB votes directly in the Approvals tab without
-    // a scheduled meeting (the whole point of the emergency flow), so we
-    // skip the meeting gate. The per-vote approval gate still enforces that
-    // every required approver has explicitly approved before in_progress.
-    if (track === "normal") {
-      let postCab = false;
-      if (before.cabMeetingId != null) {
-        const [meeting] = await db
-          .select()
-          .from(cabMeetingsTable)
-          .where(eq(cabMeetingsTable.id, before.cabMeetingId));
-        if (meeting?.status === "in_progress" || meeting?.status === "completed") postCab = true;
-      }
-      if (!postCab) {
-        res.status(409).json({
-          error: "The CAB meeting must be in progress or completed before approval can begin.",
-        });
-        return;
-      }
     }
   }
   // Phase gates (planning sign-off, testing passed, PIR completed, approvals)
