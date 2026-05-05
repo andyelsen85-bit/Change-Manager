@@ -305,7 +305,10 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   }
   const dto = await expandChangeRow(row);
   const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
-  const [testing] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, id));
+  const [testing] = await db
+    .select()
+    .from(testRecordsTable)
+    .where(and(eq(testRecordsTable.changeId, id), eq(testRecordsTable.kind, "production")));
   const [pir] = await db.select().from(pirRecordsTable).where(eq(pirRecordsTable.changeId, id));
   const approvals = await db
     .select({
@@ -478,7 +481,14 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   }
   // Phase gates (planning sign-off, testing passed, PIR completed, approvals)
   const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
-  const [testing] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, id));
+  const [testing] = await db
+    .select()
+    .from(testRecordsTable)
+    .where(and(eq(testRecordsTable.changeId, id), eq(testRecordsTable.kind, "production")));
+  const [preprodTesting] = await db
+    .select()
+    .from(testRecordsTable)
+    .where(and(eq(testRecordsTable.changeId, id), eq(testRecordsTable.kind, "preprod")));
   const [pir] = await db.select().from(pirRecordsTable).where(eq(pirRecordsTable.changeId, id));
   const allApprovals = await db.select().from(approvalsTable).where(eq(approvalsTable.changeId, id));
   const approvalsAllApproved =
@@ -486,11 +496,19 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   const gateError = checkPhaseGates({
     track,
     toStatus: targetStatus,
+    hasPreprodEnv: !!before.hasPreprodEnv,
     planning: planning ? { signedOff: planning.signedOff } : null,
     testing: testing
       ? {
           overallResult: testing.overallResult,
+          testedAt: testing.testedAt ?? null,
           cases: (testing.cases ?? []).map((c) => ({ status: c.status })),
+        }
+      : null,
+    preprodTesting: preprodTesting
+      ? {
+          overallResult: preprodTesting.overallResult,
+          testedAt: preprodTesting.testedAt ?? null,
         }
       : null,
     pir: pir ? { completedAt: pir.completedAt ?? null } : null,

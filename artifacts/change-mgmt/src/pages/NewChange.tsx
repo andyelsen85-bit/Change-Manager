@@ -249,24 +249,11 @@ export function NewChangePage() {
                   data-testid="switch-has-preprod"
                 />
               </div>
-              {hasPreprodEnv && (
-                <div className="space-y-2">
-                  <Label htmlFor="preprod-url">Pre-prod environment URL (optional)</Label>
-                  <Input
-                    id="preprod-url"
-                    type="url"
-                    placeholder="https://staging.example.com"
-                    value={preprodEnvUrl}
-                    onChange={(e) => setPreprodEnvUrl(e.target.value)}
-                    data-testid="input-preprod-url"
-                  />
-                </div>
-              )}
             </div>
           )}
 
           <div className="space-y-2">
-            <Label>Assignee (implementer)</Label>
+            <Label>Change Owner</Label>
             <Select value={assigneeId} onValueChange={setAssigneeId}>
               <SelectTrigger data-testid="select-assignee"><SelectValue placeholder="Unassigned" /></SelectTrigger>
               <SelectContent>
