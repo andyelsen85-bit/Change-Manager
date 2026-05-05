@@ -183,19 +183,23 @@ export function TemplatesPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="flex items-center justify-between rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between rounded-md border border-border p-3 opacity-75">
                     <div>
                       <Label>Auto-approve</Label>
-                      <p className="text-xs text-muted-foreground">Skip approvals for this template.</p>
+                      <p className="text-xs text-muted-foreground">
+                        Always on for standard templates — they skip approvals by definition.
+                      </p>
                     </div>
-                    <Switch checked={editing.autoApprove} onCheckedChange={(v) => setEditing({ ...editing, autoApprove: v })} />
+                    <Switch checked={true} disabled />
                   </div>
-                  <div className="flex items-center justify-between rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between rounded-md border border-border p-3 opacity-75">
                     <div>
                       <Label>Bypass CAB</Label>
-                      <p className="text-xs text-muted-foreground">No CAB review required.</p>
+                      <p className="text-xs text-muted-foreground">
+                        Always on for standard templates — they bypass CAB by definition.
+                      </p>
                     </div>
-                    <Switch checked={editing.bypassCab} onCheckedChange={(v) => setEditing({ ...editing, bypassCab: v })} />
+                    <Switch checked={true} disabled />
                   </div>
                 </div>
                 <div className="space-y-2">

@@ -3,12 +3,15 @@ import {
   db,
   usersTable,
   rolesTable,
+  roleAssignmentsTable,
   standardTemplatesTable,
   smtpSettingsTable,
   ldapSettingsTable,
   sslSettingsTable,
   workflowTimeoutsTable,
+  changeCategoriesTable,
 } from "@workspace/db";
+import { inArray } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
 import { logger } from "./lib/logger";
 
@@ -44,8 +47,23 @@ const ROLES = [
   { key: "ecab_member", name: "eCAB Member", description: "Emergency CAB member, expedited approval authority." },
   { key: "implementer", name: "Implementer", description: "Carries out the change in production." },
   { key: "tester", name: "Tester", description: "Validates change in pre-prod / prod." },
-  { key: "service_owner", name: "Service Owner", description: "Owns the impacted service." },
-  { key: "security_reviewer", name: "Security Reviewer", description: "Reviews security implications." },
+];
+
+// Roles that were removed from this version and must be cleaned out of any
+// pre-existing database. We delete role_assignments first then the roles.
+const REMOVED_ROLE_KEYS = ["service_owner", "security_reviewer"] as const;
+
+// Default category catalogue. Admins can add / edit / disable in the
+// Settings → Categories panel.
+const DEFAULT_CATEGORIES = [
+  { key: "network", name: "Network", sortOrder: 10 },
+  { key: "hardware", name: "Hardware", sortOrder: 20 },
+  { key: "software", name: "Software", sortOrder: 30 },
+  { key: "database", name: "Database", sortOrder: 40 },
+  { key: "security", name: "Security", sortOrder: 50 },
+  { key: "application", name: "Application", sortOrder: 60 },
+  { key: "infrastructure", name: "Infrastructure", sortOrder: 70 },
+  { key: "other", name: "Other", sortOrder: 999 },
 ];
 
 const TEMPLATES = [
@@ -167,6 +185,22 @@ export async function runSeed(): Promise<void> {
       .insert(rolesTable)
       .values({ key: r.key, name: r.name, description: r.description, allowsDeputy: true })
       .onConflictDoNothing();
+  }
+
+  // Remove deprecated roles + their assignments (idempotent — safe on a fresh DB).
+  await db
+    .delete(roleAssignmentsTable)
+    .where(inArray(roleAssignmentsTable.roleKey, REMOVED_ROLE_KEYS as unknown as string[]));
+  await db.delete(rolesTable).where(inArray(rolesTable.key, REMOVED_ROLE_KEYS as unknown as string[]));
+
+  // Default change categories — only seeded if the table is empty so an
+  // admin's edits aren't reverted on every boot.
+  const existingCats = await db.select().from(changeCategoriesTable);
+  if (existingCats.length === 0) {
+    for (const c of DEFAULT_CATEGORIES) {
+      await db.insert(changeCategoriesTable).values(c);
+    }
+    logger.info({ count: DEFAULT_CATEGORIES.length }, "Seeded change categories");
   }
 
   // Admin user. On first startup we create the row in either:

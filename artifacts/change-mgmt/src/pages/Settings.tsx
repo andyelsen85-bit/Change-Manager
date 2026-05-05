@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Save, Upload, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { LdapSettings, LdapTestResult, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
+import type { CategoryItem, LdapSettings, LdapTestResult, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -59,12 +59,14 @@ export function SettingsPage() {
           <TabsTrigger value="ldap" data-testid="tab-ldap">LDAP</TabsTrigger>
           <TabsTrigger value="ssl" data-testid="tab-ssl">SSL/TLS</TabsTrigger>
           <TabsTrigger value="timeouts" data-testid="tab-timeouts">Workflow timeouts</TabsTrigger>
+          <TabsTrigger value="categories" data-testid="tab-categories">Categories</TabsTrigger>
           <TabsTrigger value="backup" data-testid="tab-backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="smtp"><SmtpPanel /></TabsContent>
         <TabsContent value="ldap"><LdapPanel /></TabsContent>
         <TabsContent value="ssl"><SslPanel /></TabsContent>
         <TabsContent value="timeouts"><TimeoutsPanel /></TabsContent>
+        <TabsContent value="categories"><CategoriesPanel /></TabsContent>
         <TabsContent value="backup"><BackupPanel /></TabsContent>
       </Tabs>
     </div>
@@ -74,15 +76,15 @@ export function SettingsPage() {
 function SmtpPanel() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["settings.smtp"], queryFn: () => api.get<SmtpSettings>("/settings/smtp") });
-  const [form, setForm] = useState<(SmtpSettings & { password: string }) | null>(null);
+  const [form, setForm] = useState<(SmtpSettings & { password: string; caCertPem?: string }) | null>(null);
   useEffect(() => {
-    if (q.data && !form) setForm({ ...q.data, password: "" });
+    if (q.data && !form) setForm({ ...q.data, password: "", caCertPem: "" });
   }, [q.data, form]);
   const save = useMutation({
     mutationFn: () => api.put<SmtpSettings>("/settings/smtp", form),
     onSuccess: (row) => {
       toast.success("SMTP settings saved");
-      setForm({ ...row, password: "" });
+      setForm({ ...row, password: "", caCertPem: "" });
       qc.invalidateQueries({ queryKey: ["settings.smtp"] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
@@ -140,6 +142,33 @@ function SmtpPanel() {
             <Label>Enabled</Label>
             <Switch checked={form.enabled} onCheckedChange={(v) => setForm({ ...form, enabled: v })} data-testid="switch-smtp-enabled" />
           </div>
+        </div>
+        <div className="space-y-2 rounded-md border border-border p-3">
+          <div className="flex items-center justify-between">
+            <Label>Verify TLS certificate</Label>
+            <Switch
+              checked={form.tlsRejectUnauthorized}
+              onCheckedChange={(v) => setForm({ ...form, tlsRejectUnauthorized: v })}
+              data-testid="switch-smtp-tls-verify"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            On (recommended) the server certificate must be valid. Turn OFF only for self-signed
+            mail relays you control — encryption is preserved but the server is no longer authenticated.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label>Custom CA certificate (PEM){form.caCertInstalled && <span className="ml-2 text-xs text-success">Installed</span>}</Label>
+          <Textarea
+            rows={4}
+            value={form.caCertPem ?? ""}
+            onChange={(e) => setForm({ ...form, caCertPem: e.target.value })}
+            placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+            data-testid="textarea-smtp-ca"
+          />
+          <p className="text-xs text-muted-foreground">
+            Paste a PEM CA chain to trust internal mail relays without disabling verification.
+          </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
           <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-smtp">
@@ -216,15 +245,17 @@ const STAGE_LABEL: Record<LdapTestResult["stage"], string> = {
 function LdapPanel() {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["settings.ldap"], queryFn: () => api.get<LdapSettings>("/settings/ldap") });
-  const [form, setForm] = useState<(LdapSettings & { bindPassword: string }) | null>(null);
+  const [form, setForm] = useState<
+    (LdapSettings & { bindPassword: string; caCertPem?: string; issuerCertPem?: string }) | null
+  >(null);
   useEffect(() => {
-    if (q.data && !form) setForm({ ...q.data, bindPassword: "" });
+    if (q.data && !form) setForm({ ...q.data, bindPassword: "", caCertPem: "", issuerCertPem: "" });
   }, [q.data, form]);
   const save = useMutation({
     mutationFn: () => api.put<LdapSettings>("/settings/ldap", form),
     onSuccess: (row) => {
       toast.success("LDAP settings saved");
-      setForm({ ...row, bindPassword: "" });
+      setForm({ ...row, bindPassword: "", caCertPem: "", issuerCertPem: "" });
       qc.invalidateQueries({ queryKey: ["settings.ldap"] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
@@ -386,6 +417,32 @@ function LdapPanel() {
               directory can impersonate it.
             </p>
           </div>
+        </div>
+        <div className="space-y-3 rounded-md border border-border p-3">
+          <div className="space-y-2">
+            <Label>Trusted CA certificate (PEM){form.caCertInstalled && <span className="ml-2 text-xs text-success">Installed</span>}</Label>
+            <Textarea
+              rows={4}
+              value={form.caCertPem ?? ""}
+              onChange={(e) => setForm({ ...form, caCertPem: e.target.value })}
+              placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+              data-testid="textarea-ldap-ca"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Intermediate / issuer certificate (PEM, optional){form.issuerCertInstalled && <span className="ml-2 text-xs text-success">Installed</span>}</Label>
+            <Textarea
+              rows={4}
+              value={form.issuerCertPem ?? ""}
+              onChange={(e) => setForm({ ...form, issuerCertPem: e.target.value })}
+              placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+              data-testid="textarea-ldap-issuer"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Paste your enterprise root CA (and optionally the issuer chain) to trust internal AD/OpenLDAP
+            certificates without turning off TLS verification.
+          </p>
         </div>
         <div className="flex justify-end gap-2 border-t border-border pt-4">
           <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-ldap">
@@ -990,5 +1047,133 @@ function BackupPanel() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// Manage the lookup table that backs the Category dropdown on every change form.
+// Admins can add new buckets, rename them, reorder via sortOrder, or deactivate
+// entries. Deactivation hides a category from the dropdown but keeps it on
+// historical changes; deleting an in-use category soft-deactivates server-side.
+function CategoriesPanel() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["categories"], queryFn: () => api.get<CategoryItem[]>("/categories") });
+  const [editing, setEditing] = useState<Partial<CategoryItem> | null>(null);
+
+  const save = useMutation({
+    mutationFn: async (c: Partial<CategoryItem>) => {
+      if (c.id) return api.patch<CategoryItem>(`/categories/${c.id}`, { name: c.name, sortOrder: c.sortOrder, isActive: c.isActive });
+      return api.post<CategoryItem>("/categories", { name: c.name, sortOrder: c.sortOrder ?? 100, isActive: c.isActive ?? true });
+    },
+    onSuccess: () => {
+      toast.success("Category saved");
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      setEditing(null);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
+  });
+
+  const del = useMutation({
+    mutationFn: (id: number) => api.delete(`/categories/${id}`),
+    onSuccess: () => {
+      toast.success("Category removed");
+      qc.invalidateQueries({ queryKey: ["categories"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Delete failed"),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Change categories</CardTitle>
+            <CardDescription>Buckets used to classify each change request — surfaced in the New change form and in dashboards.</CardDescription>
+          </div>
+          <Button onClick={() => setEditing({ name: "", sortOrder: 100, isActive: true })} data-testid="button-new-category">
+            New category
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {q.isLoading ? (
+          <Skeleton className="h-32" />
+        ) : (
+          <div className="divide-y divide-border rounded-md border border-border">
+            {(q.data ?? []).length === 0 && (
+              <p className="p-4 text-sm text-muted-foreground">No categories defined yet.</p>
+            )}
+            {(q.data ?? []).map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2" data-testid={`row-category-${c.id}`}>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-xs text-muted-foreground">{c.key}</span>
+                  <span className="text-sm">{c.name}</span>
+                  <span className="text-xs text-muted-foreground">order {c.sortOrder}</span>
+                  {!c.isActive && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">inactive</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing({ ...c })} data-testid={`button-edit-category-${c.id}`}>Edit</Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { if (confirm(`Remove "${c.name}"? In-use categories will be deactivated.`)) del.mutate(c.id); }}
+                    data-testid={`button-delete-category-${c.id}`}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+      <Dialog open={editing != null} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          {editing && (
+            <>
+              <DialogHeader><DialogTitle>{editing.id ? "Edit category" : "New category"}</DialogTitle></DialogHeader>
+              <div className="grid gap-3 py-2">
+                <div className="space-y-2">
+                  <Label>Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    value={editing.name ?? ""}
+                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    data-testid="input-category-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Sort order</Label>
+                  <Input
+                    type="number"
+                    value={editing.sortOrder ?? 100}
+                    onChange={(e) => setEditing({ ...editing, sortOrder: Number(e.target.value) })}
+                    data-testid="input-category-sort"
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-md border border-border p-3">
+                  <Label>Active</Label>
+                  <Switch
+                    checked={editing.isActive ?? true}
+                    onCheckedChange={(v) => setEditing({ ...editing, isActive: v })}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+                <Button
+                  onClick={() => {
+                    if (!editing.name?.trim()) { toast.error("Name is required"); return; }
+                    save.mutate(editing);
+                  }}
+                  disabled={save.isPending}
+                  data-testid="button-save-category"
+                >
+                  {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }

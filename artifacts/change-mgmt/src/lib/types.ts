@@ -34,6 +34,7 @@ export type User = {
   source: "local" | "ldap";
   isAdmin: boolean;
   isActive: boolean;
+  notificationsEnabled: boolean;
   createdAt: string;
   lastLoginAt: string | null;
   roles?: string[];
@@ -61,6 +62,7 @@ export type ChangeStatus =
   | "in_review"
   | "awaiting_approval"
   | "approved"
+  | "in_preprod_testing"
   | "scheduled"
   | "in_progress"
   | "implemented"
@@ -88,6 +90,8 @@ export type ChangeRequest = {
   assigneeName?: string | null;
   templateId: number | null;
   cabMeetingId: number | null;
+  hasPreprodEnv?: boolean;
+  preprodEnvUrl?: string | null;
   plannedStart: string | null;
   plannedEnd: string | null;
   actualStart: string | null;
@@ -244,7 +248,22 @@ export type AuditEntry = {
 export type NotificationPreference = {
   eventKey: string;
   email: boolean;
-  inApp: boolean;
+};
+
+export type CategoryItem = {
+  id: number;
+  key: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export type ChangeAssignee = {
+  id: number;
+  changeId: number;
+  roleKey: "technical_reviewer" | "implementer" | "tester";
+  userId: number;
+  userName: string;
 };
 
 export type SmtpSettings = {
@@ -256,6 +275,8 @@ export type SmtpSettings = {
   fromAddress: string;
   fromName: string;
   enabled: boolean;
+  tlsRejectUnauthorized: boolean;
+  caCertInstalled: boolean;
 };
 
 export type LdapSettings = {
@@ -270,6 +291,8 @@ export type LdapSettings = {
   nameAttr: string;
   tls: boolean;
   tlsRejectUnauthorized: boolean;
+  caCertInstalled: boolean;
+  issuerCertInstalled: boolean;
 };
 
 export type LdapTestResult = {
@@ -300,19 +323,19 @@ export type WorkflowTimeouts = {
 export const NOTIFICATION_EVENTS: { key: string; label: string; group: string }[] = [
   { key: "change.created", label: "Change created", group: "Lifecycle" },
   { key: "change.submitted", label: "Change submitted", group: "Lifecycle" },
-  { key: "change.status_changed", label: "Change status changed", group: "Lifecycle" },
+  { key: "change.transitioned", label: "Change status changed", group: "Lifecycle" },
   { key: "change.scheduled", label: "Change scheduled", group: "Lifecycle" },
   { key: "change.completed", label: "Change completed", group: "Lifecycle" },
+  { key: "change.assignee_changed", label: "Assignee changed", group: "Lifecycle" },
   { key: "approval.requested", label: "Approval requested", group: "Approvals" },
   { key: "approval.granted", label: "Approval granted", group: "Approvals" },
   { key: "approval.rejected", label: "Approval rejected", group: "Approvals" },
   { key: "cab.invited", label: "CAB invitation", group: "CAB" },
   { key: "cab.reminder", label: "CAB reminder", group: "CAB" },
-  { key: "cab.minutes_published", label: "CAB minutes published", group: "CAB" },
+  { key: "cab.minutes", label: "CAB minutes published", group: "CAB" },
   { key: "test.signed_off", label: "Test results signed off", group: "Testing & PIR" },
   { key: "pir.due", label: "PIR due", group: "Testing & PIR" },
   { key: "comment.added", label: "Comment added", group: "Collaboration" },
-  { key: "assignment.changed", label: "Assignment changed", group: "Collaboration" },
 ];
 
 export const TRACK_OPTIONS: { value: ChangeTrack; label: string; description: string }[] = [
@@ -327,6 +350,7 @@ export const STATUS_LABELS: Record<ChangeStatus, string> = {
   in_review: "In Review",
   awaiting_approval: "Awaiting Approval",
   approved: "Approved",
+  in_preprod_testing: "Pre-prod testing",
   scheduled: "Scheduled",
   in_progress: "In Progress",
   implemented: "Implemented",

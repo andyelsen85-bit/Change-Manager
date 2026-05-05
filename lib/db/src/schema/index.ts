@@ -11,3 +11,5 @@ export * from "./comments";
 export * from "./settings";
 export * from "./audit";
 export * from "./sequences";
+export * from "./categories";
+export * from "./change_assignees";

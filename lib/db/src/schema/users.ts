@@ -13,6 +13,9 @@ export const usersTable = pgTable(
     isAdmin: boolean("is_admin").notNull().default(false),
     mustChangePassword: boolean("must_change_password").notNull().default(false),
     deputyUserId: integer("deputy_user_id"),
+    // Admin master switch — when false the notification dispatcher will skip
+    // every email for this user regardless of per-event preferences.
+    notificationsEnabled: boolean("notifications_enabled").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()

@@ -190,7 +190,12 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
   return new Promise<LdapLookupResult>((resolve) => {
     const rejectUnauthorized = cfg.tlsRejectUnauthorized !== false;
     const isLdaps = cfg.url.toLowerCase().startsWith("ldaps:");
-    const tlsOptions = (isLdaps || cfg.tls) ? { rejectUnauthorized } : undefined;
+    const cas: string[] = [];
+    if (cfg.caCertPem && cfg.caCertPem.trim()) cas.push(cfg.caCertPem);
+    if (cfg.issuerCertPem && cfg.issuerCertPem.trim()) cas.push(cfg.issuerCertPem);
+    const tlsOptions = (isLdaps || cfg.tls)
+      ? { rejectUnauthorized, ...(cas.length ? { ca: cas } : {}) }
+      : undefined;
     let client: import("ldapjs").Client;
     try {
       client = ldap.createClient({ url: cfg.url, tlsOptions, timeout: 5000, connectTimeout: 5000 });
@@ -312,7 +317,12 @@ export async function authenticateLdap(username: string, password: string): Prom
     // Honoured for both ldaps:// (URL-driven TLS) and ldap:// + StartTLS.
     const rejectUnauthorized = cfg.tlsRejectUnauthorized !== false;
     const isLdaps = cfg.url.toLowerCase().startsWith("ldaps:");
-    const tlsOptions = (isLdaps || cfg.tls) ? { rejectUnauthorized } : undefined;
+    const cas: string[] = [];
+    if (cfg.caCertPem && cfg.caCertPem.trim()) cas.push(cfg.caCertPem);
+    if (cfg.issuerCertPem && cfg.issuerCertPem.trim()) cas.push(cfg.issuerCertPem);
+    const tlsOptions = (isLdaps || cfg.tls)
+      ? { rejectUnauthorized, ...(cas.length ? { ca: cas } : {}) }
+      : undefined;
 
     let client: import("ldapjs").Client;
     try {

@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import {
   STATUS_LABELS,
   type Approval,
+  type ChangeAssignee,
   type ChangeDetail as ChangeDetailT,
   type ChangeStatus,
   type ChangeTrack,
@@ -22,6 +23,7 @@ import {
   type PirRecord,
   type PlanningRecord,
   type TestRecord,
+  type User,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,6 +56,7 @@ const TIMELINE_BY_TRACK: Record<ChangeTrack, TimelineStep[]> = {
     "in_review",
     "awaiting_approval",
     "approved",
+    "in_preprod_testing",
     "scheduled",
     "in_progress",
     "implemented",
@@ -107,8 +110,9 @@ const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus
     in_review: ["submitted", "draft"],
     awaiting_approval: ["in_review", "submitted", "draft"],
     approved: ["awaiting_approval", "in_review", "draft"],
-    scheduled: ["approved", "awaiting_approval"],
-    in_progress: ["scheduled", "approved"],
+    in_preprod_testing: ["approved"],
+    scheduled: ["in_preprod_testing", "approved", "awaiting_approval"],
+    in_progress: ["scheduled", "in_preprod_testing", "approved"],
     implemented: ["in_progress"],
     in_testing: ["implemented", "in_progress"],
     awaiting_pir: ["in_testing", "implemented"],
@@ -127,7 +131,7 @@ const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus
     completed: ["implemented"],
     cancelled: ["draft"],
     rolled_back: [],
-    submitted: [], in_review: [], awaiting_approval: [], approved: [], rejected: [], in_testing: [], awaiting_pir: [],
+    submitted: [], in_review: [], awaiting_approval: [], approved: [], rejected: [], in_testing: [], awaiting_pir: [], in_preprod_testing: [],
   },
   emergency: {
     draft: [],
@@ -140,7 +144,7 @@ const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus
     cancelled: ["draft"],
     rejected: ["draft", "awaiting_approval"],
     rolled_back: [],
-    submitted: [], in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [],
+    submitted: [], in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [], in_preprod_testing: [],
   },
 };
 
@@ -155,7 +159,8 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
     submitted: ["in_review", "cancelled"],
     in_review: ["awaiting_approval", "rejected", "cancelled"],
     awaiting_approval: ["approved", "rejected", "cancelled"],
-    approved: ["scheduled", "cancelled"],
+    approved: ["in_preprod_testing", "scheduled", "cancelled"],
+    in_preprod_testing: ["scheduled", "cancelled"],
     scheduled: ["in_progress", "cancelled"],
     in_progress: ["implemented", "rolled_back"],
     implemented: ["in_testing", "awaiting_pir"],
@@ -170,7 +175,7 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
     in_progress: ["implemented", "rolled_back"],
     implemented: ["completed", "rolled_back"],
     completed: [], cancelled: [], rolled_back: [],
-    submitted: [], in_review: [], awaiting_approval: [], approved: [], rejected: [], in_testing: [], awaiting_pir: [],
+    submitted: [], in_review: [], awaiting_approval: [], approved: [], rejected: [], in_testing: [], awaiting_pir: [], in_preprod_testing: [],
   },
   emergency: {
     draft: ["awaiting_approval", "cancelled"],
@@ -180,13 +185,20 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
     implemented: ["awaiting_pir", "rolled_back"],
     awaiting_pir: ["completed"],
     completed: [], rejected: [], cancelled: [], rolled_back: [],
-    submitted: [], in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [],
+    submitted: [], in_review: [], scheduled: [], awaiting_implementation: [], in_testing: [], in_preprod_testing: [],
   },
 };
 
-function StatusTimeline({ track, status }: { track: ChangeTrack; status: ChangeStatus }) {
-  const steps = TIMELINE_BY_TRACK[track] ?? TIMELINE_BY_TRACK.normal;
+function StatusTimeline({ track, status, hasPreprodEnv }: { track: ChangeTrack; status: ChangeStatus; hasPreprodEnv?: boolean }) {
+  let steps = TIMELINE_BY_TRACK[track] ?? TIMELINE_BY_TRACK.normal;
+  // The pre-prod testing tile is conditional — only Normal-track changes
+  // that opted into a pre-prod environment ever pass through it. Hide the
+  // tile entirely otherwise so the timeline reads as a clean linear path.
+  if (track === "normal" && !hasPreprodEnv && status !== "in_preprod_testing") {
+    steps = steps.filter((s) => s !== "in_preprod_testing");
+  }
   const isFailure = TERMINAL_FAILURE.includes(status);
+  const isCompleted = status === "completed";
   const currentIndex = isFailure ? -1 : steps.findIndex((s) => stepIncludes(s, status));
   return (
     <ol className="flex flex-wrap items-center gap-y-2" data-testid="status-timeline">
@@ -201,7 +213,8 @@ function StatusTimeline({ track, status }: { track: ChangeTrack; status: ChangeS
               className={cn(
                 "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors",
                 done && "border-success/40 bg-success/10 text-success",
-                current && "border-info/50 bg-info/15 text-info font-semibold ring-1 ring-info/30",
+                current && isCompleted && "border-success/50 bg-success/15 text-success font-semibold ring-1 ring-success/30",
+                current && !isCompleted && "border-info/50 bg-info/15 text-info font-semibold ring-1 ring-info/30",
                 pending && !isFailure && "border-border bg-muted/40 text-muted-foreground",
                 isFailure && "border-border bg-muted/30 text-muted-foreground opacity-70",
               )}
@@ -210,7 +223,7 @@ function StatusTimeline({ track, status }: { track: ChangeTrack; status: ChangeS
               <span
                 className={cn(
                   "flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold",
-                  done
+                  done || (current && isCompleted)
                     ? "bg-success text-success-foreground"
                     : current
                       ? "bg-info text-info-foreground"
@@ -320,7 +333,7 @@ export function ChangeDetailPage() {
               </div>
             </div>
             <div className="mt-5">
-              <StatusTimeline track={c.track} status={c.status} />
+              <StatusTimeline track={c.track} status={c.status} hasPreprodEnv={c.hasPreprodEnv} />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).map((next) => (
@@ -419,6 +432,7 @@ export function ChangeDetailPage() {
           <TabsList className="flex flex-wrap">
             <TabsTrigger value="planning" data-testid="tab-planning">Planning</TabsTrigger>
             <TabsTrigger value="approvals" data-testid="tab-approvals">Approvals</TabsTrigger>
+            <TabsTrigger value="assignees" data-testid="tab-assignees">Assignees</TabsTrigger>
             <TabsTrigger value="schedule" data-testid="tab-schedule">Schedule</TabsTrigger>
             <TabsTrigger value="testing" data-testid="tab-testing">Testing</TabsTrigger>
             <TabsTrigger value="pir" data-testid="tab-pir">PIR</TabsTrigger>
@@ -427,6 +441,7 @@ export function ChangeDetailPage() {
 
           <TabsContent value="planning"><PlanningTab id={id} /></TabsContent>
           <TabsContent value="approvals"><ApprovalsTab id={id} currentUserId={user?.id ?? 0} /></TabsContent>
+          <TabsContent value="assignees"><AssigneesTab id={id} /></TabsContent>
           <TabsContent value="schedule"><ScheduleTab change={c} /></TabsContent>
           <TabsContent value="testing"><TestingTab id={id} /></TabsContent>
           <TabsContent value="pir"><PirTab id={id} /></TabsContent>
@@ -434,6 +449,66 @@ export function ChangeDetailPage() {
         </Tabs>
       )}
     </div>
+  );
+}
+
+// Per-change assignment of the three single-owner roles. The dropdowns are
+// fed from the global users list filtered to active accounts; choosing a
+// user overrides the global role-pool fallback used elsewhere (approvals +
+// notifications). Setting back to "Unassigned" deletes the override and
+// re-enables the role-pool fallback for that role on this change.
+const ASSIGNABLE_ROLE_LABELS: Record<"technical_reviewer" | "implementer" | "tester", string> = {
+  technical_reviewer: "Technical reviewer",
+  implementer: "Implementer",
+  tester: "Tester",
+};
+
+function AssigneesTab({ id }: { id: number }) {
+  const qc = useQueryClient();
+  const aq = useQuery({ queryKey: ["change.assignees", id], queryFn: () => api.get<ChangeAssignee[]>(`/changes/${id}/assignees`) });
+  const uq = useQuery({ queryKey: ["users.active"], queryFn: () => api.get<User[]>("/users") });
+  const save = useMutation({
+    mutationFn: (assignments: Record<string, number | null>) =>
+      api.put<ChangeAssignee[]>(`/changes/${id}/assignees`, { assignments }),
+    onSuccess: () => {
+      toast.success("Assignees updated");
+      qc.invalidateQueries({ queryKey: ["change.assignees", id] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
+  });
+  const current = (role: string): number | null => {
+    const r = (aq.data ?? []).find((x) => x.roleKey === role);
+    return r ? r.userId : null;
+  };
+  const activeUsers = (uq.data ?? []).filter((u) => u.isActive);
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Per-change assignees</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Override the global role pool for this change. If left unassigned, members of the role are notified instead.
+        </p>
+        {(["technical_reviewer", "implementer", "tester"] as const).map((role) => (
+          <div key={role} className="grid items-center gap-2 md:grid-cols-[200px_1fr]">
+            <Label>{ASSIGNABLE_ROLE_LABELS[role]}</Label>
+            <Select
+              value={current(role) ? String(current(role)) : "__none__"}
+              onValueChange={(v) => save.mutate({ [role]: v === "__none__" ? null : Number(v) })}
+            >
+              <SelectTrigger data-testid={`select-assignee-${role}`}>
+                <SelectValue placeholder="Unassigned (use role pool)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Unassigned (use role pool)</SelectItem>
+                {activeUsers.map((u) => (
+                  <SelectItem key={u.id} value={String(u.id)}>{u.fullName} ({u.username})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -170,7 +170,7 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<"cab" | "ecab">("cab");
   const [scheduledStart, setScheduledStart] = useState(toLocalDateTimeInput(startDefault));
   const [scheduledEnd, setScheduledEnd] = useState(toLocalDateTimeInput(endDefault));
-  const [location, setMeetingLocation] = useState("Conference room / video link");
+  const [location, setMeetingLocation] = useState("");
   const [agenda, setAgenda] = useState("");
   const [chairUserId, setChairUserId] = useState<string>("none");
   const [memberIds, setMemberIds] = useState<number[]>([]);
@@ -255,7 +255,11 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
         </div>
         <div className="space-y-2">
           <Label>Location</Label>
-          <Input value={location} onChange={(e) => setMeetingLocation(e.target.value)} />
+          <Input
+            value={location}
+            onChange={(e) => setMeetingLocation(e.target.value)}
+            placeholder="Conference room / video link"
+          />
         </div>
         <div className="space-y-2">
           <Label>Agenda</Label>

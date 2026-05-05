@@ -90,7 +90,7 @@ but not required to reach the Post-Implementation Review phase.
   resets approvals to `pending`; reverting across `in_progress`/`implemented`
   clears `actualStart`/`actualEnd`. `rolled_back` is the only truly terminal
   status.
-- **Notifications** — per-user, per-event email + in-app preferences.
+- **Notifications** — per-user, per-event email preferences with an admin master-switch on each user account; in-app notifications were removed in v2 of the backup format.
 - **Auth** — local users (bcrypt) + LDAP. JWT cookie session with CSRF
   double-submit token. One-time `/setup` wizard for the first admin password.
 - **Admin Settings** — SMTP, LDAP (with diagnostics + presets for OpenLDAP /
@@ -312,7 +312,9 @@ single source of truth for tables and types. The 16 tables are:
 | `cab_members`               | Meeting attendee list                                           |
 | `cab_changes`               | Many-to-many: which changes are on which meeting docket         |
 | `comments`                  | Threaded comments on a change                                   |
-| `notification_preferences`  | Per-user, per-event email + in-app toggles                      |
+| `notification_preferences`  | Per-user, per-event email toggles                               |
+| `change_categories`         | Lookup table for the Category dropdown on every change          |
+| `change_assignees`          | Per-change override of Tech Reviewer / Implementer / Tester     |
 | `standard_templates`        | Pre-approved Standard change templates                          |
 | `ref_counters`              | Per-prefix sequence for ref numbers (e.g. `CHG-0001`)           |
 | `audit_log`                 | Immutable JSONB before/after snapshots (DB-trigger enforced)    |
@@ -391,8 +393,6 @@ audit entry with action `change.reverted`. Side-effects:
 | `business_owner`    | Business sign-off on planning                           |
 | `implementer`       | Move change through implementation phase                |
 | `tester`            | Record test results                                     |
-| `service_owner`     | Receive notifications about their service's changes     |
-| `security_reviewer` | Optional security sign-off                              |
 
 Every role supports a **deputy** (configured via `role_assignments.deputy_user_id` /
 `primary_assignment_id`). The deputy can act on behalf of the primary holder
@@ -501,7 +501,37 @@ mismatches (e.g. connecting by IP).
   configuration end-to-end.
 
 Per-user notification preferences (`/api/users/:id/notification-preferences`)
-let each user opt in/out of every event over both email and in-app.
+let each user opt in/out of every event over email. Admins can additionally
+flip an account-wide **Receives email notifications** master-switch from the
+Users page — when off, the user is excluded from every notification regardless
+of per-event preferences.
+
+**New events introduced in v2:** `change.submitted`, `change.scheduled`,
+`change.completed`, `change.assignee_changed`. Per-change assignees
+(Technical Reviewer / Implementer / Tester) take precedence over the global
+role pool when routing email; if no per-change override is set, the role pool
+is used as a fallback.
+
+**Pre-prod testing phase (Normal track):** when a change is created with
+`hasPreprodEnv=true`, the lifecycle inserts an `in_preprod_testing` step
+between `approved` and `scheduled`. Teams without a pre-prod environment
+skip directly from `approved` to `scheduled` as before.
+
+**Meeting-gated approvals (Normal track):** CAB approvals for Normal-track
+changes can only be cast while the parent meeting is `in_progress` (started
+via the **Process meeting** button on the meeting page) or already
+`completed`. The Process Meeting panel embeds per-change Approve / Decline
+controls so reviewers vote without leaving the meeting page.
+
+**Categories:** managed under Settings → Categories. Each change picks a
+category from this list. Deleting an in-use category soft-deactivates it
+to preserve historical labels.
+
+**SMTP / LDAP CA-cert anchors:** both relay configs accept an optional
+PEM-encoded CA chain (and an LDAP issuer chain) appended to the Node trust
+store at runtime, so internal CAs can be honoured without disabling TLS
+verification. SMTP additionally exposes a **Skip TLS verification** toggle
+for legacy relays.
 
 ---
 

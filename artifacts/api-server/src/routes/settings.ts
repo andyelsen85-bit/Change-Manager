@@ -29,6 +29,8 @@ function maskSmtp(row: typeof smtpSettingsTable.$inferSelect | undefined) {
       fromAddress: "",
       fromName: "Change Management",
       enabled: false,
+      tlsRejectUnauthorized: true,
+      caCertInstalled: false,
     };
   }
   return {
@@ -40,6 +42,8 @@ function maskSmtp(row: typeof smtpSettingsTable.$inferSelect | undefined) {
     fromAddress: row.fromAddress,
     fromName: row.fromName,
     enabled: row.enabled,
+    tlsRejectUnauthorized: row.tlsRejectUnauthorized,
+    caCertInstalled: !!row.caCertPem,
   };
 }
 
@@ -64,6 +68,13 @@ router.put("/settings/smtp", requireAdmin, async (req, res): Promise<void> => {
     fromAddress: b.fromAddress ?? "",
     fromName: b.fromName ?? "Change Management",
     enabled: !!b.enabled,
+    tlsRejectUnauthorized: b.tlsRejectUnauthorized === false ? false : true,
+    caCertPem:
+      typeof b.caCertPem === "string" && b.caCertPem.trim()
+        ? b.caCertPem
+        : b.caCertPem === null
+          ? null
+          : before?.caCertPem ?? null,
   };
   const [row] = await db
     .insert(smtpSettingsTable)
@@ -112,6 +123,8 @@ function maskLdap(row: typeof ldapSettingsTable.$inferSelect | undefined) {
       nameAttr: "cn",
       tls: false,
       tlsRejectUnauthorized: true,
+      caCertInstalled: false,
+      issuerCertInstalled: false,
     };
   }
   return {
@@ -126,6 +139,8 @@ function maskLdap(row: typeof ldapSettingsTable.$inferSelect | undefined) {
     nameAttr: row.nameAttr,
     tls: row.tls,
     tlsRejectUnauthorized: row.tlsRejectUnauthorized,
+    caCertInstalled: !!row.caCertPem,
+    issuerCertInstalled: !!row.issuerCertPem,
   };
 }
 
@@ -155,6 +170,18 @@ router.put("/settings/ldap", requireAdmin, async (req, res): Promise<void> => {
     // Default to TRUE (verify) when the admin hasn't explicitly opted out,
     // even if the body omitted the field — preserves the secure default.
     tlsRejectUnauthorized: b.tlsRejectUnauthorized === false ? false : true,
+    caCertPem:
+      typeof b.caCertPem === "string" && b.caCertPem.trim()
+        ? b.caCertPem
+        : b.caCertPem === null
+          ? null
+          : before?.caCertPem ?? null,
+    issuerCertPem:
+      typeof b.issuerCertPem === "string" && b.issuerCertPem.trim()
+        ? b.issuerCertPem
+        : b.issuerCertPem === null
+          ? null
+          : before?.issuerCertPem ?? null,
   };
   const [row] = await db
     .insert(ldapSettingsTable)

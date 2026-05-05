@@ -370,4 +370,68 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
   res.json(result);
 });
 
+// Mark the CAB meeting as in-progress. This is the gate that authorises the
+// per-change approval votes — once a meeting is in_progress (or later
+// completed), votes can be recorded against the changes on the docket.
+router.post("/cab-meetings/:id/start", requireCabManager, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [before] = await db.select().from(cabMeetingsTable).where(eq(cabMeetingsTable.id, id));
+  if (!before) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (before.status === "completed") {
+    res.status(409).json({ error: "Meeting is already completed" });
+    return;
+  }
+  const [updated] = await db
+    .update(cabMeetingsTable)
+    .set({ status: "in_progress" })
+    .where(eq(cabMeetingsTable.id, id))
+    .returning();
+  await audit(req, {
+    action: "cab.started",
+    entityType: "cab",
+    entityId: id,
+    summary: `Started ${before.kind.toUpperCase()} meeting "${before.title}"`,
+    before: { status: before.status },
+    after: { status: updated.status },
+  });
+  res.json(await expandMeeting(updated));
+});
+
+// Mark the CAB meeting completed. Approvals can still be recorded after
+// completion; this transition is what unblocks the change manager from
+// moving Normal-track changes through the awaiting_approval -> approved flip.
+router.post("/cab-meetings/:id/complete", requireCabManager, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [before] = await db.select().from(cabMeetingsTable).where(eq(cabMeetingsTable.id, id));
+  if (!before) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const [updated] = await db
+    .update(cabMeetingsTable)
+    .set({ status: "completed" })
+    .where(eq(cabMeetingsTable.id, id))
+    .returning();
+  await audit(req, {
+    action: "cab.completed",
+    entityType: "cab",
+    entityId: id,
+    summary: `Completed ${before.kind.toUpperCase()} meeting "${before.title}"`,
+    before: { status: before.status },
+    after: { status: updated.status },
+  });
+  res.json(await expandMeeting(updated));
+});
+
 export default router;

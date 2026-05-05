@@ -34,6 +34,7 @@ async function userToDto(u: typeof usersTable.$inferSelect) {
     isAdmin: u.isAdmin,
     deputyUserId: u.deputyUserId,
     deputyUserName: deputyName,
+    notificationsEnabled: u.notificationsEnabled,
     roles,
     createdAt: u.createdAt,
   };
@@ -231,12 +232,13 @@ router.patch("/users/:id", requireAdmin, async (req, res): Promise<void> => {
     res.status(404).json({ error: "User not found" });
     return;
   }
-  const { email, fullName, isActive, isAdmin, password, deputyUserId, roles } = req.body ?? {};
+  const { email, fullName, isActive, isAdmin, password, deputyUserId, roles, notificationsEnabled } = req.body ?? {};
   const updates: Partial<typeof usersTable.$inferInsert> = {};
   if (typeof email === "string") updates.email = email;
   if (typeof fullName === "string") updates.fullName = fullName;
   if (typeof isActive === "boolean") updates.isActive = isActive;
   if (typeof isAdmin === "boolean") updates.isAdmin = isAdmin;
+  if (typeof notificationsEnabled === "boolean") updates.notificationsEnabled = notificationsEnabled;
   if (deputyUserId === null) updates.deputyUserId = null;
   else if (typeof deputyUserId === "number") updates.deputyUserId = deputyUserId;
   if (typeof password === "string" && password.length >= 8) {
@@ -308,7 +310,6 @@ router.get("/users/:id/notification-preferences", requireAuth, async (req, res):
     return {
       eventKey: e.key,
       emailEnabled: found ? found.emailEnabled : true,
-      inAppEnabled: found ? found.inAppEnabled : true,
     };
   });
   res.json(merged);
@@ -333,11 +334,10 @@ router.put("/users/:id/notification-preferences", requireAuth, async (req, res):
         userId: id,
         eventKey: item.eventKey,
         emailEnabled: item.emailEnabled !== false,
-        inAppEnabled: item.inAppEnabled !== false,
       })
       .onConflictDoUpdate({
         target: [notificationPreferencesTable.userId, notificationPreferencesTable.eventKey],
-        set: { emailEnabled: item.emailEnabled !== false, inAppEnabled: item.inAppEnabled !== false },
+        set: { emailEnabled: item.emailEnabled !== false },
       });
   }
   await audit(req, {
@@ -358,7 +358,6 @@ router.put("/users/:id/notification-preferences", requireAuth, async (req, res):
       return {
         eventKey: e.key,
         emailEnabled: found ? found.emailEnabled : true,
-        inAppEnabled: found ? found.inAppEnabled : true,
       };
     }),
   );

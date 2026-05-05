@@ -13,6 +13,8 @@ import dashboardRouter from "./dashboard";
 import settingsRouter from "./settings";
 import auditRouter from "./audit";
 import backupRouter from "./backup";
+import categoriesRouter from "./categories";
+import assigneesRouter from "./assignees";
 
 const router: IRouter = Router();
 
@@ -30,5 +32,7 @@ router.use(dashboardRouter);
 router.use(settingsRouter);
 router.use(auditRouter);
 router.use(backupRouter);
+router.use(categoriesRouter);
+router.use(assigneesRouter);
 
 export default router;

@@ -4,7 +4,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ChangeRequest, ChangeTrack, StandardTemplate, User } from "@/lib/types";
+import type { CategoryItem, ChangeRequest, ChangeTrack, StandardTemplate, User } from "@/lib/types";
+import { Switch } from "@/components/ui/switch";
 import { TRACK_OPTIONS } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,9 +28,13 @@ export function NewChangePage() {
   const [plannedEnd, setPlannedEnd] = useState("");
   const [assigneeId, setAssigneeId] = useState<string>("none");
   const [templateId, setTemplateId] = useState<string>("none");
+  const [category, setCategory] = useState<string>("general");
+  const [hasPreprodEnv, setHasPreprodEnv] = useState(false);
+  const [preprodEnvUrl, setPreprodEnvUrl] = useState("");
 
   const templatesQ = useQuery({ queryKey: ["templates"], queryFn: () => api.get<StandardTemplate[]>("/templates") });
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
+  const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: () => api.get<CategoryItem[]>("/categories") });
 
   const selectedTemplate = templatesQ.data?.find((t) => String(t.id) === templateId);
   useEffect(() => {
@@ -49,11 +54,13 @@ export function NewChangePage() {
         risk,
         impact,
         priority,
-        category: selectedTemplate?.category ?? "general",
+        category: selectedTemplate?.category ?? category,
         plannedStart: fromLocalDateTimeInput(plannedStart),
         plannedEnd: fromLocalDateTimeInput(plannedEnd),
         assigneeId: assigneeId === "none" ? null : Number(assigneeId),
         templateId: templateId === "none" ? null : Number(templateId),
+        hasPreprodEnv,
+        preprodEnvUrl: hasPreprodEnv ? preprodEnvUrl.trim() || null : null,
       });
     },
     onSuccess: (c) => {
@@ -211,6 +218,52 @@ export function NewChangePage() {
               <Input id="planned-end" type="datetime-local" value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} data-testid="input-planned-end" />
             </div>
           </div>
+
+          <div className="space-y-2">
+            <Label>Category</Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger data-testid="select-category"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(categoriesQ.data ?? []).filter((c) => c.isActive !== false).map((c) => (
+                  <SelectItem key={c.key} value={c.key}>{c.name}</SelectItem>
+                ))}
+                {(!categoriesQ.data || categoriesQ.data.length === 0) && (
+                  <SelectItem value="general">General</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {track === "normal" && (
+            <div className="rounded-md border border-border p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Pre-production testing environment</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Adds a "Pre-prod testing" stage to the lifecycle (between Approved and Scheduled).
+                  </p>
+                </div>
+                <Switch
+                  checked={hasPreprodEnv}
+                  onCheckedChange={setHasPreprodEnv}
+                  data-testid="switch-has-preprod"
+                />
+              </div>
+              {hasPreprodEnv && (
+                <div className="space-y-2">
+                  <Label htmlFor="preprod-url">Pre-prod environment URL (optional)</Label>
+                  <Input
+                    id="preprod-url"
+                    type="url"
+                    placeholder="https://staging.example.com"
+                    value={preprodEnvUrl}
+                    onChange={(e) => setPreprodEnvUrl(e.target.value)}
+                    data-testid="input-preprod-url"
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Assignee (implementer)</Label>

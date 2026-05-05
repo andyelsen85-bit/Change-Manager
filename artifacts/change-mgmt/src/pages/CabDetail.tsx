@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarDays, Loader2, Mail, Trash2 } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, Loader2, Mail, Play, Trash2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { CabMeetingDetail, ChangeRequest, User } from "@/lib/types";
+import type { Approval, CabMeetingDetail, ChangeRequest, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -87,6 +87,24 @@ export function CabDetailPage() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to send agenda"),
   });
 
+  const startMeeting = useMutation({
+    mutationFn: () => api.post<CabMeetingDetail>(`/cab-meetings/${id}/start`),
+    onSuccess: () => {
+      toast.success("Meeting started — approvals are now open");
+      qc.invalidateQueries({ queryKey: ["cab", id] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Could not start meeting"),
+  });
+
+  const completeMeeting = useMutation({
+    mutationFn: () => api.post<CabMeetingDetail>(`/cab-meetings/${id}/complete`),
+    onSuccess: () => {
+      toast.success("Meeting completed");
+      qc.invalidateQueries({ queryKey: ["cab", id] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Could not complete meeting"),
+  });
+
   const del = useMutation({
     mutationFn: () => api.delete(`/cab-meetings/${id}`),
     onSuccess: () => {
@@ -124,6 +142,28 @@ export function CabDetailPage() {
               {sendAgenda.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
               Send agenda
             </Button>
+            {m.status === "scheduled" && (
+              <Button
+                variant="default"
+                onClick={() => startMeeting.mutate()}
+                disabled={startMeeting.isPending}
+                data-testid="button-start-meeting"
+              >
+                {startMeeting.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+                Process meeting
+              </Button>
+            )}
+            {m.status === "in_progress" && (
+              <Button
+                variant="default"
+                onClick={() => completeMeeting.mutate()}
+                disabled={completeMeeting.isPending}
+                data-testid="button-complete-meeting"
+              >
+                {completeMeeting.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                Complete meeting
+              </Button>
+            )}
             <Button
               variant="destructive"
               size="icon"
@@ -237,6 +277,10 @@ export function CabDetailPage() {
         </Card>
       </div>
 
+      {m.status === "in_progress" && form.changeIds.length > 0 && (
+        <MeetingApprovalsPanel meetingId={id} changeIds={form.changeIds} />
+      )}
+
       {form.changeIds.length === 0 && (
         <Alert>
           <AlertDescription>
@@ -246,10 +290,93 @@ export function CabDetailPage() {
       )}
 
       <div className="flex justify-end">
-        <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-cab">
+        <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-cab-changes">
           {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Save changes
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// Per-change approval panel rendered while the meeting is in progress.
+// Lets CAB members vote on each docketed change without leaving the meeting
+// page. Reuses the existing /approvals/:id/vote endpoint so audit + email
+// flows stay identical to the change-detail page.
+function MeetingApprovalsPanel({ meetingId, changeIds }: { meetingId: number; changeIds: number[] }) {
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Process docketed changes</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        {changeIds.map((cid) => (
+          <MeetingChangeRow key={cid} meetingId={meetingId} changeId={cid} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MeetingChangeRow({ meetingId, changeId }: { meetingId: number; changeId: number }) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["change.approvals", changeId],
+    queryFn: () => api.get<Approval[]>(`/changes/${changeId}/approvals`),
+  });
+  const cq = useQuery({
+    queryKey: ["change", changeId],
+    queryFn: () => api.get<ChangeRequest>(`/changes/${changeId}`),
+  });
+  const vote = useMutation({
+    mutationFn: ({ approvalId, decision }: { approvalId: number; decision: "approved" | "rejected" }) =>
+      api.post(`/approvals/${approvalId}/vote`, { decision, comment: `Voted in CAB meeting #${meetingId}` }),
+    onSuccess: (_d, v) => {
+      toast.success(v.decision === "approved" ? "Approved" : "Declined");
+      qc.invalidateQueries({ queryKey: ["change.approvals", changeId] });
+      qc.invalidateQueries({ queryKey: ["change", changeId] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Vote failed"),
+  });
+  return (
+    <div className="rounded-md border border-border p-3">
+      <Link href={`/changes/${changeId}`} className="text-sm font-medium hover:underline">
+        {cq.data?.ref ?? `Change #${changeId}`} — {cq.data?.title ?? ""}
+      </Link>
+      <div className="mt-2 space-y-2">
+        {(q.data ?? []).length === 0 && (
+          <p className="text-xs text-muted-foreground">No approvals required.</p>
+        )}
+        {(q.data ?? []).map((a) => (
+          <div key={a.id} className="flex items-center justify-between gap-2 rounded-md bg-muted/30 p-2 text-xs">
+            <div className="font-mono">{a.roleKey}</div>
+            <div className="flex items-center gap-2">
+              <span className={a.decision === "approved" ? "text-success" : a.decision === "rejected" ? "text-destructive" : "text-muted-foreground"}>
+                {a.decision}
+              </span>
+              {a.decision === "pending" && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={() => vote.mutate({ approvalId: a.id, decision: "approved" })}
+                    disabled={vote.isPending}
+                    data-testid={`button-meeting-approve-${a.id}`}
+                  >
+                    <CheckCircle2 className="mr-1 h-3 w-3" /> Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => vote.mutate({ approvalId: a.id, decision: "rejected" })}
+                    disabled={vote.isPending}
+                    data-testid={`button-meeting-decline-${a.id}`}
+                  >
+                    <XCircle className="mr-1 h-3 w-3" /> Decline
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

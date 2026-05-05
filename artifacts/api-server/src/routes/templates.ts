@@ -26,8 +26,12 @@ router.post("/templates", requireAdmin, async (req, res): Promise<void> => {
       risk: b.risk ?? "low",
       impact: b.impact ?? "low",
       defaultPriority: b.defaultPriority ?? "medium",
-      autoApprove: b.autoApprove !== false,
-      bypassCab: b.bypassCab !== false,
+      // Standard templates always auto-approve and bypass CAB — these flags
+      // are part of the definition of a "standard" change. The UI surfaces
+      // them as read-only switches; we force them to true here regardless of
+      // what the client posted.
+      autoApprove: true,
+      bypassCab: true,
       prefilledPlanning: b.prefilledPlanning ?? null,
       prefilledTestPlan: b.prefilledTestPlan ?? null,
       isActive: true,
@@ -85,6 +89,11 @@ router.patch("/templates/:id", requireAdmin, async (req, res): Promise<void> => 
   ] as const) {
     if (b[k] !== undefined) (updates as Record<string, unknown>)[k] = b[k];
   }
+  // Reinforce the read-only invariant on PATCH as well — even if the client
+  // tries to set autoApprove/bypassCab to false on an existing template,
+  // we keep them true.
+  updates.autoApprove = true;
+  updates.bypassCab = true;
   const [updated] = await db
     .update(standardTemplatesTable)
     .set(updates)
