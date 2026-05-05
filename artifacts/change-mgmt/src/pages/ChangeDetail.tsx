@@ -189,7 +189,62 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
   },
 };
 
-function StatusTimeline({ track, status, hasPreprodEnv }: { track: ChangeTrack; status: ChangeStatus; hasPreprodEnv?: boolean }) {
+// Maps each lifecycle status to the role/person responsible for that step
+// so the timeline can display the assigned user beneath each tile.
+type StepRole = "owner" | "technical_reviewer" | "implementer" | "tester" | "approvers" | null;
+const STATUS_ROLE: Record<ChangeStatus, StepRole> = {
+  draft: "owner",
+  submitted: "owner",
+  in_review: "technical_reviewer",
+  awaiting_approval: "approvers",
+  approved: "approvers",
+  in_preprod_testing: "tester",
+  scheduled: "implementer",
+  awaiting_implementation: "implementer",
+  in_progress: "implementer",
+  implemented: "implementer",
+  in_testing: "tester",
+  awaiting_pir: "owner",
+  completed: "owner",
+  cancelled: null,
+  rejected: null,
+  rolled_back: null,
+};
+
+function resolveStepAssignee(
+  step: TimelineStep,
+  current: ChangeStatus,
+  ownerName: string | undefined,
+  assigneeName: string | null | undefined,
+  assignees: ChangeAssignee[],
+): string | null {
+  const labelStatus = stepLabelStatus(step, current);
+  const role = STATUS_ROLE[labelStatus];
+  if (!role) return null;
+  if (role === "owner") return ownerName ?? null;
+  if (role === "approvers") return "Approvers";
+  const a = assignees.find((x) => x.roleKey === role);
+  if (a) return a.userName;
+  // Implementer step falls back to the change owner / assignee field
+  if (role === "implementer") return assigneeName ?? "Unassigned";
+  return "Unassigned";
+}
+
+function StatusTimeline({
+  track,
+  status,
+  hasPreprodEnv,
+  ownerName,
+  assigneeName,
+  assignees,
+}: {
+  track: ChangeTrack;
+  status: ChangeStatus;
+  hasPreprodEnv?: boolean;
+  ownerName?: string;
+  assigneeName?: string | null;
+  assignees: ChangeAssignee[];
+}) {
   let steps = TIMELINE_BY_TRACK[track] ?? TIMELINE_BY_TRACK.normal;
   // The pre-prod testing tile is conditional — only Normal-track changes
   // that opted into a pre-prod environment ever pass through it. Hide the
@@ -207,41 +262,53 @@ function StatusTimeline({ track, status, hasPreprodEnv }: { track: ChangeTrack; 
         const current = !isFailure && i === currentIndex;
         const pending = !done && !current;
         const labelStatus = stepLabelStatus(s, status);
+        const assignedName = resolveStepAssignee(s, status, ownerName, assigneeName, assignees);
         return (
-          <li key={Array.isArray(s) ? s.join("|") : s} className="flex items-center" data-testid={`timeline-step-${labelStatus}`}>
-            <div
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors",
-                done && "border-success/40 bg-success/10 text-success",
-                current && isCompleted && "border-success/50 bg-success/15 text-success font-semibold ring-1 ring-success/30",
-                current && !isCompleted && "border-info/50 bg-info/15 text-info font-semibold ring-1 ring-info/30",
-                pending && !isFailure && "border-border bg-muted/40 text-muted-foreground",
-                isFailure && "border-border bg-muted/30 text-muted-foreground opacity-70",
-              )}
-              data-state={done ? "done" : current ? "current" : "pending"}
-            >
-              <span
-                className={cn(
-                  "flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold",
-                  done || (current && isCompleted)
-                    ? "bg-success text-success-foreground"
-                    : current
-                      ? "bg-info text-info-foreground"
-                      : "bg-muted-foreground/25 text-foreground/70",
-                )}
-              >
-                {done ? <Check className="h-3 w-3" /> : i + 1}
-              </span>
-              <span>{STATUS_LABELS[labelStatus]}</span>
-            </div>
-            {i < steps.length - 1 && (
+          <li key={Array.isArray(s) ? s.join("|") : s} className="flex flex-col items-center" data-testid={`timeline-step-${labelStatus}`}>
+            <div className="flex items-center">
               <div
                 className={cn(
-                  "mx-1 h-0.5 w-3 sm:w-5",
-                  done ? "bg-success" : "bg-border",
+                  "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors",
+                  done && "border-success/40 bg-success/10 text-success",
+                  current && isCompleted && "border-success/50 bg-success/15 text-success font-semibold ring-1 ring-success/30",
+                  current && !isCompleted && "border-info/50 bg-info/15 text-info font-semibold ring-1 ring-info/30",
+                  pending && !isFailure && "border-border bg-muted/40 text-muted-foreground",
+                  isFailure && "border-border bg-muted/30 text-muted-foreground opacity-70",
                 )}
-                aria-hidden="true"
-              />
+                data-state={done ? "done" : current ? "current" : "pending"}
+              >
+                <span
+                  className={cn(
+                    "flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold",
+                    done || (current && isCompleted)
+                      ? "bg-success text-success-foreground"
+                      : current
+                        ? "bg-info text-info-foreground"
+                        : "bg-muted-foreground/25 text-foreground/70",
+                  )}
+                >
+                  {done ? <Check className="h-3 w-3" /> : i + 1}
+                </span>
+                <span>{STATUS_LABELS[labelStatus]}</span>
+              </div>
+              {i < steps.length - 1 && (
+                <div
+                  className={cn(
+                    "mx-1 h-0.5 w-3 sm:w-5",
+                    done ? "bg-success" : "bg-border",
+                  )}
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+            {assignedName && (
+              <span
+                className="mt-1 max-w-[110px] truncate text-[10px] text-muted-foreground"
+                title={assignedName}
+                data-testid={`timeline-assignee-${labelStatus}`}
+              >
+                {assignedName}
+              </span>
             )}
           </li>
         );
@@ -267,6 +334,11 @@ export function ChangeDetailPage() {
   const changeQ = useQuery({
     queryKey: ["change", id],
     queryFn: () => api.get<ChangeDetailT>(`/changes/${id}`),
+    enabled: Number.isFinite(id),
+  });
+  const assigneesQ = useQuery({
+    queryKey: ["change.assignees", id],
+    queryFn: () => api.get<ChangeAssignee[]>(`/changes/${id}/assignees`),
     enabled: Number.isFinite(id),
   });
 
@@ -333,7 +405,14 @@ export function ChangeDetailPage() {
               </div>
             </div>
             <div className="mt-5">
-              <StatusTimeline track={c.track} status={c.status} hasPreprodEnv={c.hasPreprodEnv} />
+              <StatusTimeline
+                track={c.track}
+                status={c.status}
+                hasPreprodEnv={c.hasPreprodEnv}
+                ownerName={c.ownerName}
+                assigneeName={c.assigneeName}
+                assignees={assigneesQ.data ?? []}
+              />
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
               {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).map((next) => (
