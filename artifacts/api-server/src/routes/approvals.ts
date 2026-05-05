@@ -83,27 +83,51 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     .from(changeRequestsTable)
     .where(eq(changeRequestsTable.id, ap.changeId));
   if (chgForGate && (chgForGate.track === "normal" || chgForGate.track === "emergency")) {
+    // Resolve the linked CAB meeting (if any) up-front. For Normal-track
+    // changes the meeting must be in_progress|completed before votes count.
+    let meetingActive = false;
+    if (chgForGate.cabMeetingId != null) {
+      const [meeting] = await db
+        .select()
+        .from(cabMeetingsTable)
+        .where(eq(cabMeetingsTable.id, chgForGate.cabMeetingId));
+      if (meeting?.status === "in_progress" || meeting?.status === "completed") meetingActive = true;
+    }
+    // When the Change Manager (or deputy) approves a docketed change in the
+    // meeting view, the change should be auto-promoted into `awaiting_approval`
+    // if it isn't there yet. This lets the approval happen "in parallel" with
+    // the meeting workflow without forcing a manual status flip first.
+    const promotable = ["draft", "submitted", "in_review"];
+    if (
+      chgForGate.status !== "awaiting_approval" &&
+      promotable.includes(chgForGate.status) &&
+      ((chgForGate.track === "normal" && meetingActive) || chgForGate.track === "emergency")
+    ) {
+      await db
+        .update(changeRequestsTable)
+        .set({ status: "awaiting_approval" })
+        .where(eq(changeRequestsTable.id, chgForGate.id));
+      chgForGate.status = "awaiting_approval";
+      await audit(req, {
+        action: "change.transitioned",
+        entityType: "change",
+        entityId: chgForGate.id,
+        summary: `${chgForGate.ref}: auto-promoted to awaiting_approval on CAB vote`,
+        before: { status: chgForGate.status },
+        after: { status: "awaiting_approval" },
+      });
+    }
     if (chgForGate.status !== "awaiting_approval") {
       res.status(409).json({
         error: "Approval votes can only be recorded while the change is awaiting approval.",
       });
       return;
     }
-    if (chgForGate.track === "normal") {
-      let cabCompleted = false;
-      if (chgForGate.cabMeetingId != null) {
-        const [meeting] = await db
-          .select()
-          .from(cabMeetingsTable)
-          .where(eq(cabMeetingsTable.id, chgForGate.cabMeetingId));
-        if (meeting?.status === "in_progress" || meeting?.status === "completed") cabCompleted = true;
-      }
-      if (!cabCompleted) {
-        res.status(409).json({
-          error: "Approval can only be recorded after the CAB meeting has started or concluded.",
-        });
-        return;
-      }
+    if (chgForGate.track === "normal" && !meetingActive) {
+      res.status(409).json({
+        error: "Approval can only be recorded after the CAB meeting has started or concluded.",
+      });
+      return;
     }
   }
   // Verify the user is in this role (or its deputy)
