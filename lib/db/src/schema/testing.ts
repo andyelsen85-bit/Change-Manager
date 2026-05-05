@@ -1,4 +1,4 @@
-import { pgTable, integer, text, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, integer, text, timestamp, jsonb, primaryKey } from "drizzle-orm/pg-core";
 
 export type TestCase = {
   name: string;
@@ -8,20 +8,31 @@ export type TestCase = {
   status: "pending" | "passed" | "failed" | "blocked";
 };
 
-export const testRecordsTable = pgTable("test_records", {
-  changeId: integer("change_id").primaryKey(),
-  testPlan: text("test_plan").notNull().default(""),
-  environment: text("environment").notNull().default(""),
-  overallResult: text("overall_result").notNull().default("pending"),
-  notes: text("notes").notNull().default(""),
-  testedBy: text("tested_by"),
-  testedAt: timestamp("tested_at", { withTimezone: true }),
-  cases: jsonb("cases").$type<TestCase[]>().notNull().default([]),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+// `kind` distinguishes the production testing record (executed after the
+// change goes live) from the optional pre-prod testing record (executed
+// in the staging environment before the change is scheduled). Both records
+// share the same shape so the UI can re-use a single component.
+export const testRecordsTable = pgTable(
+  "test_records",
+  {
+    changeId: integer("change_id").notNull(),
+    kind: text("kind").notNull().default("production"),
+    testPlan: text("test_plan").notNull().default(""),
+    environment: text("environment").notNull().default(""),
+    overallResult: text("overall_result").notNull().default("pending"),
+    notes: text("notes").notNull().default(""),
+    testedBy: text("tested_by"),
+    testedAt: timestamp("tested_at", { withTimezone: true }),
+    cases: jsonb("cases").$type<TestCase[]>().notNull().default([]),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.changeId, t.kind] }),
+  }),
+);
 
 export const pirRecordsTable = pgTable("pir_records", {
   changeId: integer("change_id").primaryKey(),

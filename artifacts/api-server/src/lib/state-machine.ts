@@ -216,10 +216,16 @@ export function listAllowedTransitions(track: ChangeTrack, from: ChangeStatus): 
 export type PhaseGateInputs = {
   track: ChangeTrack;
   toStatus: ChangeStatus;
+  hasPreprodEnv?: boolean;
   planning: { signedOff: boolean } | null;
   testing: {
     overallResult: string;
+    testedAt?: Date | null;
     cases: Array<{ status: "pending" | "passed" | "failed" | "blocked" }>;
+  } | null;
+  preprodTesting?: {
+    overallResult: string;
+    testedAt?: Date | null;
   } | null;
   pir: { completedAt: Date | null } | null;
   approvalsAllApproved: boolean;
@@ -274,8 +280,21 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
   // entirely, and we let the change go straight to PIR — the PIR step itself
   // is the closing review for whether the change worked.
   if (p.track === "normal" && p.toStatus === "awaiting_pir") {
-    if (p.testing && p.testing.overallResult !== "passed") {
-      return "Testing must be marked PASSED before requesting PIR.";
+    // Sign-off semantics: a Testing record only counts as "signed off" once
+    // overallResult is PASSED *and* testedAt is populated (which the PUT route
+    // sets the moment a non-pending result is recorded). Both conditions must
+    // hold before PIR can begin.
+    if (p.testing && (p.testing.overallResult !== "passed" || !p.testing.testedAt)) {
+      return "Testing must be signed off as PASSED before requesting PIR.";
+    }
+  }
+  // Pre-prod testing must be signed off as PASSED before the change can be
+  // moved on to scheduling. Only enforced when the change opted into a pre-prod
+  // environment AND a pre-prod test record has actually been opened — teams
+  // that skip the form go straight from in_preprod_testing to scheduled.
+  if (p.track === "normal" && p.toStatus === "scheduled" && p.hasPreprodEnv) {
+    if (p.preprodTesting && (p.preprodTesting.overallResult !== "passed" || !p.preprodTesting.testedAt)) {
+      return "Pre-prod testing must be signed off as PASSED before scheduling.";
     }
   }
   // Cannot mark completed without PIR completion.

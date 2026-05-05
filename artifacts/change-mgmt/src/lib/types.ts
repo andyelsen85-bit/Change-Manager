@@ -129,6 +129,7 @@ export type TestCase = {
 
 export type TestRecord = {
   changeId: number;
+  kind?: "production" | "preprod";
   testPlan: string;
   environment: string;
   overallResult: "pending" | "passed" | "failed";

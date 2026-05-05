@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import {
   db,
   planningRecordsTable,
@@ -106,28 +106,33 @@ router.put("/changes/:id/planning", requireAuth, async (req, res): Promise<void>
   res.json(row);
 });
 
-// TESTING
-router.get("/changes/:id/testing", requireAuth, async (req, res): Promise<void> => {
-  const c = await loadChangeForCaller(req, res);
-  if (!c) return;
-  const id = c.id;
-  const [row] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, id));
-  res.json(
-    row ?? {
-      changeId: id,
-      testPlan: "",
-      environment: "",
-      overallResult: "pending",
-      notes: "",
-      testedBy: null,
-      testedAt: null,
-      cases: [],
-      updatedAt: new Date(),
-    },
-  );
-});
+// TESTING — shared handlers for both production and pre-prod records. The
+// `kind` discriminator on test_records lets us keep both rows side by side
+// without duplicating the table definition or the form component.
+async function getTestingRow(id: number, kind: "production" | "preprod") {
+  const [row] = await db
+    .select()
+    .from(testRecordsTable)
+    .where(and(eq(testRecordsTable.changeId, id), eq(testRecordsTable.kind, kind)));
+  return row;
+}
 
-router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> => {
+function emptyTestRow(id: number, kind: "production" | "preprod") {
+  return {
+    changeId: id,
+    kind,
+    testPlan: "",
+    environment: kind === "preprod" ? "preprod" : "production",
+    overallResult: "pending",
+    notes: "",
+    testedBy: null,
+    testedAt: null,
+    cases: [],
+    updatedAt: new Date(),
+  };
+}
+
+async function putTesting(req: Request, res: Response, kind: "production" | "preprod"): Promise<void> {
   const c = await loadChangeForCaller(req, res);
   if (!c) return;
   const id = c.id;
@@ -144,8 +149,9 @@ router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> 
   const overallResult = b.overallResult ?? "pending";
   const values = {
     changeId: id,
+    kind,
     testPlan: b.testPlan ?? "",
-    environment: b.environment ?? "",
+    environment: kind,
     overallResult,
     notes: b.notes ?? "",
     cases,
@@ -155,29 +161,49 @@ router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> 
   const [row] = await db
     .insert(testRecordsTable)
     .values(values)
-    .onConflictDoUpdate({ target: testRecordsTable.changeId, set: values })
+    .onConflictDoUpdate({ target: [testRecordsTable.changeId, testRecordsTable.kind], set: values })
     .returning();
   await audit(req, {
-    action: "testing.updated",
+    action: kind === "preprod" ? "preprod_testing.updated" : "testing.updated",
     entityType: "change",
     entityId: id,
-    summary: `Testing updated (overall: ${overallResult})`,
+    summary: `${kind === "preprod" ? "Pre-prod testing" : "Testing"} updated (overall: ${overallResult})`,
     after: row,
   });
   if (overallResult === "passed" || overallResult === "failed") {
-    {
-      const owner = await getUserEmail(c.ownerId);
-      if (owner) {
-        await notify({
-          eventKey: "test.signed_off",
-          to: [owner],
-          subject: `[CHG ${c.ref}] Testing ${overallResult}`,
-          text: `Testing for ${c.ref} ${c.title} was ${overallResult}.`,
-        });
-      }
+    const owner = await getUserEmail(c.ownerId);
+    if (owner) {
+      await notify({
+        eventKey: "test.signed_off",
+        to: [owner],
+        subject: `[CHG ${c.ref}] ${kind === "preprod" ? "Pre-prod testing" : "Testing"} ${overallResult}`,
+        text: `${kind === "preprod" ? "Pre-prod testing" : "Testing"} for ${c.ref} ${c.title} was ${overallResult}.`,
+      });
     }
   }
   res.json(row);
+}
+
+router.get("/changes/:id/testing", requireAuth, async (req, res): Promise<void> => {
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const row = await getTestingRow(c.id, "production");
+  res.json(row ?? emptyTestRow(c.id, "production"));
+});
+
+router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> => {
+  await putTesting(req, res, "production");
+});
+
+router.get("/changes/:id/preprod-testing", requireAuth, async (req, res): Promise<void> => {
+  const c = await loadChangeForCaller(req, res);
+  if (!c) return;
+  const row = await getTestingRow(c.id, "preprod");
+  res.json(row ?? emptyTestRow(c.id, "preprod"));
+});
+
+router.put("/changes/:id/preprod-testing", requireAuth, async (req, res): Promise<void> => {
+  await putTesting(req, res, "preprod");
 });
 
 // PIR

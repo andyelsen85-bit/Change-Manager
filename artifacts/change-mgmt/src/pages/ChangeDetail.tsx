@@ -434,6 +434,9 @@ export function ChangeDetailPage() {
             <TabsTrigger value="approvals" data-testid="tab-approvals">Approvals</TabsTrigger>
             <TabsTrigger value="assignees" data-testid="tab-assignees">Assignees</TabsTrigger>
             <TabsTrigger value="schedule" data-testid="tab-schedule">Schedule</TabsTrigger>
+            {c.hasPreprodEnv && (
+              <TabsTrigger value="preprod-testing" data-testid="tab-preprod-testing">PreProdTesting</TabsTrigger>
+            )}
             <TabsTrigger value="testing" data-testid="tab-testing">Testing</TabsTrigger>
             <TabsTrigger value="pir" data-testid="tab-pir">PIR</TabsTrigger>
             <TabsTrigger value="comments" data-testid="tab-comments">Discussion</TabsTrigger>
@@ -443,7 +446,10 @@ export function ChangeDetailPage() {
           <TabsContent value="approvals"><ApprovalsTab id={id} currentUserId={user?.id ?? 0} /></TabsContent>
           <TabsContent value="assignees"><AssigneesTab id={id} /></TabsContent>
           <TabsContent value="schedule"><ScheduleTab change={c} /></TabsContent>
-          <TabsContent value="testing"><TestingTab id={id} /></TabsContent>
+          {c.hasPreprodEnv && (
+            <TabsContent value="preprod-testing"><TestingTab id={id} kind="preprod" /></TabsContent>
+          )}
+          <TabsContent value="testing"><TestingTab id={id} kind="production" /></TabsContent>
           <TabsContent value="pir"><PirTab id={id} /></TabsContent>
           <TabsContent value="comments"><CommentsTab id={id} /></TabsContent>
         </Tabs>
@@ -722,18 +728,24 @@ function ScheduleTab({ change }: { change: ChangeDetailT }) {
   );
 }
 
-function TestingTab({ id }: { id: number }) {
+function TestingTab({ id, kind = "production" }: { id: number; kind?: "production" | "preprod" }) {
   const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["change.testing", id], queryFn: () => api.get<TestRecord>(`/changes/${id}/testing`) });
+  // Same backing component drives both the production Testing tab and the
+  // optional pre-prod Testing tab. The `kind` prop selects the API path and
+  // the cache key so the two records stay isolated.
+  const path = kind === "preprod" ? `/changes/${id}/preprod-testing` : `/changes/${id}/testing`;
+  const cacheKey = kind === "preprod" ? "change.preprod-testing" : "change.testing";
+  const label = kind === "preprod" ? "Pre-prod testing" : "Testing";
+  const q = useQuery({ queryKey: [cacheKey, id], queryFn: () => api.get<TestRecord>(path) });
   const [form, setForm] = useState<TestRecord | null>(null);
   if (q.data && !form) setForm(q.data);
   const save = useMutation({
     mutationFn: (overall: TestRecord["overallResult"]) =>
-      api.put<TestRecord>(`/changes/${id}/testing`, { ...form, overallResult: overall }),
+      api.put<TestRecord>(path, { ...form, overallResult: overall }),
     onSuccess: (row) => {
-      toast.success("Testing saved");
+      toast.success(`${label} saved`);
       setForm(row);
-      qc.invalidateQueries({ queryKey: ["change.testing", id] });
+      qc.invalidateQueries({ queryKey: [cacheKey, id] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
   });
@@ -746,10 +758,6 @@ function TestingTab({ id }: { id: number }) {
           <Textarea rows={4} value={form.testPlan} onChange={(e) => setForm({ ...form, testPlan: e.target.value })} data-testid="textarea-test-plan" />
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Environment</Label>
-            <Input value={form.environment} onChange={(e) => setForm({ ...form, environment: e.target.value })} data-testid="input-environment" />
-          </div>
           <div className="space-y-2">
             <Label>Overall result</Label>
             <Select value={form.overallResult} onValueChange={(v) => setForm({ ...form, overallResult: v as TestRecord["overallResult"] })}>
