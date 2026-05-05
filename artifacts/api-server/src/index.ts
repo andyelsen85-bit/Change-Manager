@@ -19,11 +19,12 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-// HTTPS is opt-in via env so the Replit dev preview proxy (which expects
-// plain HTTP on $PORT) keeps working. Production containers set
-// ENABLE_HTTPS_FROM_DB=1 so the cert + key uploaded through the SSL
-// settings UI are picked up automatically on container restart.
-const httpsEnabled = process.env["ENABLE_HTTPS_FROM_DB"] === "1";
+// HTTPS is on by default in deployment containers; set DISABLE_TLS=true to
+// force plain HTTP (used by the Replit dev preview, whose proxy expects
+// HTTP on $PORT). When TLS is enabled the cert + key uploaded through the
+// SSL settings UI are read from `ssl_settings` on container restart.
+const disableTls = (process.env["DISABLE_TLS"] ?? "false").toLowerCase() === "true";
+const httpsEnabled = !disableTls;
 
 async function loadSslFromDb(): Promise<{ cert: string; key: string } | null> {
   try {
@@ -57,7 +58,7 @@ function startListener() {
           logger.info({ port, protocol: "https" }, "Server listening (HTTPS, cert from DB)");
         } else {
           logger.warn(
-            "ENABLE_HTTPS_FROM_DB=1 but no certificate/private key found in ssl_settings. Falling back to HTTP. Upload a cert in Settings → SSL and restart.",
+            "TLS is enabled (DISABLE_TLS!=true) but no certificate/private key found in ssl_settings. Falling back to HTTP. Upload a cert in Settings → SSL and restart, or set DISABLE_TLS=true.",
           );
           const server = createHttpServer(app);
           server.listen(port, () => onListen());
