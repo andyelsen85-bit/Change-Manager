@@ -6,6 +6,7 @@ import {
   roleAssignmentsTable,
   standardTemplatesTable,
   smtpSettingsTable,
+  ssoSettingsTable,
   ldapSettingsTable,
   sslSettingsTable,
   workflowTimeoutsTable,
@@ -274,5 +275,6 @@ export async function runSeed(): Promise<void> {
   await db.insert(smtpSettingsTable).values({ key: "global" }).onConflictDoNothing();
   await db.insert(ldapSettingsTable).values({ key: "global" }).onConflictDoNothing();
   await db.insert(sslSettingsTable).values({ key: "global" }).onConflictDoNothing();
+  await db.insert(ssoSettingsTable).values({ key: "global" }).onConflictDoNothing();
   await db.insert(workflowTimeoutsTable).values({ key: "global" }).onConflictDoNothing();
 }

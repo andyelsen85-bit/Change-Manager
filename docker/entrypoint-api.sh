@@ -32,4 +32,13 @@ if [ -z "${JWT_SECRET:-}" ]; then
   export JWT_SECRET
 fi
 
+# Kerberos / SPNEGO SSO: the keytab is stored encrypted-at-rest in the
+# `sso_settings` table. The API server materialises the file (decrypted)
+# onto disk lazily on the first SSO request — see `installSecrets` in
+# src/lib/sso.ts — so there is nothing to do at boot. We deliberately do
+# NOT shell-decrypt here because (a) the encryption key derivation
+# (HKDF-SHA256 over APP_ENCRYPTION_KEY) lives in node and we don't want a
+# second implementation to drift, and (b) keeping the secret out of psql
+# logs is one less attack surface.
+
 exec node --enable-source-maps ./dist/index.mjs
