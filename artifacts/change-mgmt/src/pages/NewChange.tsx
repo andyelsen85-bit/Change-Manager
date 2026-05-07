@@ -10,6 +10,7 @@ import { TRACK_OPTIONS } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -291,11 +292,11 @@ export function NewChangePage() {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="planned-start">Planned start <span className="text-destructive">*</span></Label>
-              <Input id="planned-start" type="datetime-local" required value={plannedStart} onChange={(e) => setPlannedStart(e.target.value)} data-testid="input-planned-start" />
+              <DateTimePicker id="planned-start" required value={plannedStart} onChange={setPlannedStart} data-testid="input-planned-start" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="planned-end">Planned end <span className="text-destructive">*</span></Label>
-              <Input id="planned-end" type="datetime-local" required value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} data-testid="input-planned-end" />
+              <DateTimePicker id="planned-end" required value={plannedEnd} onChange={setPlannedEnd} data-testid="input-planned-end" />
             </div>
           </div>
 

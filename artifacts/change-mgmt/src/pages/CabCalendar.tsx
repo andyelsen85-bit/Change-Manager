@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -246,11 +247,11 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Start</Label>
-            <Input type="datetime-local" value={scheduledStart} onChange={(e) => setScheduledStart(e.target.value)} />
+            <DateTimePicker value={scheduledStart} onChange={setScheduledStart} />
           </div>
           <div className="space-y-2">
             <Label>End</Label>
-            <Input type="datetime-local" value={scheduledEnd} onChange={(e) => setScheduledEnd(e.target.value)} />
+            <DateTimePicker value={scheduledEnd} onChange={setScheduledEnd} />
           </div>
         </div>
         <div className="space-y-2">
