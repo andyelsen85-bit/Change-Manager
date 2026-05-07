@@ -8,6 +8,10 @@ type AuthContextValue = {
   // True until both /auth/me and /auth/setup-status have settled.
   needsSetup: boolean;
   login: (username: string, password: string) => Promise<void>;
+  // Triggers the Kerberos / SPNEGO ("Sign in with Windows") handshake
+  // against /auth/sso. The browser handles the WWW-Authenticate negotiation
+  // automatically when the site is in the user's Trusted/Intranet zone.
+  loginSso: () => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   // Performs first-time setup, claiming the seeded admin account with the
@@ -59,6 +63,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Kerberos SSO sign-in. We hit /auth/sso WITHOUT the api wrapper because
+  // we need direct access to the response — a 401 with WWW-Authenticate is
+  // the *expected* first leg of the SPNEGO handshake, not an error. The
+  // browser sees the header, looks up the SPN against its TGT, and
+  // automatically retries the request with `Authorization: Negotiate ...`.
+  // We run the request twice deliberately: the first call primes the
+  // browser's Negotiate state machine; the second is what actually carries
+  // the ticket. Modern browsers complete in one shot, so the second call
+  // is a no-op for them and we end up with the session cookie either way.
+  const loginSso = useCallback(async () => {
+    const url = "/api/auth/sso";
+    const opts: RequestInit = {
+      method: "POST",
+      credentials: "include",
+      headers: { accept: "application/json" },
+    };
+    let res = await fetch(url, opts);
+    if (res.status === 401 && res.headers.get("www-authenticate")?.toLowerCase().includes("negotiate")) {
+      // The browser may already have completed the handshake on the first
+      // call (Chrome/Edge typically do). If it returned 401 anyway, fire
+      // a second request — by this point Chrome has the SPN in its
+      // negotiate cache and will attach the ticket immediately.
+      res = await fetch(url, opts);
+    }
+    let body: unknown = null;
+    try { body = await res.json(); } catch { /* empty body */ }
+    if (!res.ok) {
+      const err =
+        (body && typeof body === "object" && "error" in body && typeof (body as { error: unknown }).error === "string"
+          ? (body as { error: string }).error
+          : null) ?? `Sign-in with Windows failed (HTTP ${res.status})`;
+      throw new ApiError(res.status, err, body);
+    }
+    setUser(body as SessionUser);
+  }, []);
+
   const setup = useCallback(
     async (password: string) => {
       try {
@@ -88,7 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, needsSetup, login, logout, refresh, setup }}>
+    <AuthContext.Provider value={{ user, loading, needsSetup, login, loginSso, logout, refresh, setup }}>
       {children}
     </AuthContext.Provider>
   );

@@ -296,6 +296,20 @@ export type LdapSettings = {
   issuerCertInstalled: boolean;
 };
 
+export type SsoSettings = {
+  enabled: boolean;
+  servicePrincipal: string;
+  keytabInstalled: boolean;
+  krb5Conf: string;
+  stripRealm: boolean;
+  defaultEmailDomain: string;
+  autoCreateUsers: boolean;
+};
+
+export type SsoStatus = {
+  enabled: boolean;
+};
+
 export type LdapTestResult = {
   success: boolean;
   stage: "config" | "connect" | "service-bind" | "search" | "user-bind" | "ok";
