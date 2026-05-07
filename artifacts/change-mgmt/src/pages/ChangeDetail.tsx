@@ -34,6 +34,7 @@ import { RiskBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
 import { fmtAgo, fmtDateTime, toLocalDateTimeInput, fromLocalDateTimeInput } from "@/lib/format";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth-context";
@@ -769,11 +770,11 @@ function ScheduleTab({ change }: { change: ChangeDetailT }) {
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Planned start</Label>
-            <Input type="datetime-local" value={plannedStart} onChange={(e) => setPlannedStart(e.target.value)} data-testid="input-schedule-start" />
+            <DateTimePicker value={plannedStart} onChange={setPlannedStart} data-testid="input-schedule-start" />
           </div>
           <div className="space-y-2">
             <Label>Planned end</Label>
-            <Input type="datetime-local" value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} data-testid="input-schedule-end" />
+            <DateTimePicker value={plannedEnd} onChange={setPlannedEnd} data-testid="input-schedule-end" />
           </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2 text-sm">

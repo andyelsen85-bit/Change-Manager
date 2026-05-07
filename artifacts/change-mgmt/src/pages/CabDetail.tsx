@@ -8,6 +8,7 @@ import type { Approval, CabMeetingDetail, ChangeRequest, User } from "@/lib/type
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -209,11 +210,11 @@ export function CabDetailPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Start</Label>
-              <Input type="datetime-local" value={form.scheduledStart} onChange={(e) => setForm({ ...form, scheduledStart: e.target.value })} />
+              <DateTimePicker value={form.scheduledStart} onChange={(v) => setForm({ ...form, scheduledStart: v })} />
             </div>
             <div className="space-y-2">
               <Label>End</Label>
-              <Input type="datetime-local" value={form.scheduledEnd} onChange={(e) => setForm({ ...form, scheduledEnd: e.target.value })} />
+              <DateTimePicker value={form.scheduledEnd} onChange={(v) => setForm({ ...form, scheduledEnd: v })} />
             </div>
           </div>
           <div className="space-y-2">
