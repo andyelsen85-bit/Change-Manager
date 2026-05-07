@@ -1,7 +1,10 @@
 import { format, formatDistanceToNow, parseISO } from "date-fns";
 import type { ChangeStatus } from "./types";
 
-export function fmtDate(value: string | Date | null | undefined, pattern = "PPpp"): string {
+// All user-facing dates render in dd/MM/yyyy with 24-hour time. The default
+// pattern matches `fmtDateTime` so callers that don't pass an explicit
+// pattern still get the expected European-style format.
+export function fmtDate(value: string | Date | null | undefined, pattern = "dd/MM/yyyy HH:mm"): string {
   if (!value) return "—";
   try {
     const d = typeof value === "string" ? parseISO(value) : value;
@@ -13,15 +16,15 @@ export function fmtDate(value: string | Date | null | undefined, pattern = "PPpp
 }
 
 export function fmtDateShort(value: string | Date | null | undefined): string {
-  return fmtDate(value, "MMM d, yyyy");
+  return fmtDate(value, "dd/MM/yyyy");
 }
 
 export function fmtDateTime(value: string | Date | null | undefined): string {
-  return fmtDate(value, "MMM d, yyyy h:mm a");
+  return fmtDate(value, "dd/MM/yyyy HH:mm");
 }
 
 export function fmtTime(value: string | Date | null | undefined): string {
-  return fmtDate(value, "h:mm a");
+  return fmtDate(value, "HH:mm");
 }
 
 export function fmtAgo(value: string | Date | null | undefined): string {
