@@ -77,43 +77,103 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// Notification subjects produced by the API consistently start with
+// "[CHG <ref>] ..." — see all notify() call-sites in routes/. We parse the
+// ref out and use it to visually group items in the digest so a recipient
+// sees one section per change request instead of an undifferentiated list.
+// Items whose subject doesn't carry a CHG ref (e.g. CAB agendas, future
+// system messages) fall into a single "Other notifications" group at the end.
+function parseChangeRef(subject: string): { ref: string | null; rest: string } {
+  const m = subject.match(/^\[CHG\s+([^\]]+)\]\s*(.*)$/);
+  if (m) return { ref: m[1].trim(), rest: m[2] };
+  return { ref: null, rest: subject };
+}
+
+type DigestItem = { subject: string; bodyHtml: string; bodyText: string; eventKey: string; createdAt: Date };
+
+function groupByChange(items: DigestItem[]): Array<{ ref: string | null; items: Array<DigestItem & { rest: string }> }> {
+  const order: Array<string | null> = [];
+  const map = new Map<string | null, Array<DigestItem & { rest: string }>>();
+  for (const it of items) {
+    const { ref, rest } = parseChangeRef(it.subject);
+    if (!map.has(ref)) {
+      order.push(ref);
+      map.set(ref, []);
+    }
+    map.get(ref)!.push({ ...it, rest });
+  }
+  // Push the "Other" (null-ref) bucket to the end so per-change groups appear first.
+  return order
+    .sort((a, b) => (a === null ? 1 : 0) - (b === null ? 1 : 0))
+    .map((ref) => ({ ref, items: map.get(ref)! }));
+}
+
 // Build the consolidated digest email body for one user. Each row in the
-// queue is an item; the wrapper supplies the brand chrome.
+// queue is an item; the wrapper supplies the brand chrome. Items are
+// visually grouped by change-request reference so a recipient who has
+// multiple events on the same change sees them under one heading.
 function buildDigestHtml(opts: {
   fullName: string;
   fromName: string;
-  items: Array<{ subject: string; bodyHtml: string; bodyText: string; eventKey: string; createdAt: Date }>;
+  items: DigestItem[];
 }): string {
   const heading = opts.items.length === 1
     ? "You have 1 new notification"
     : `You have ${opts.items.length} new notifications`;
 
-  const itemsHtml = opts.items
-    .map((item) => {
-      const eventLabel = EVENT_LABEL[item.eventKey] ?? item.eventKey;
-      const eventDesc = EVENT_DESCRIPTION[item.eventKey];
-      const when = item.createdAt.toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      // If a per-event HTML body was provided, embed it; otherwise render the
-      // plain-text version with line breaks preserved.
-      const inner = item.bodyHtml && item.bodyHtml.trim()
-        ? item.bodyHtml
-        : `<div style="white-space:pre-wrap;color:${BRAND_TEXT};font-size:14px;line-height:1.5;">${escapeHtml(item.bodyText)}</div>`;
-      const descLine = eventDesc
-        ? `<div style="font-size:12px;color:${BRAND_MUTED};font-style:italic;margin-bottom:8px;">${escapeHtml(eventDesc)}</div>`
-        : "";
+  const groups = groupByChange(opts.items);
+
+  const renderItem = (item: DigestItem & { rest: string }): string => {
+    const eventLabel = EVENT_LABEL[item.eventKey] ?? item.eventKey;
+    const eventDesc = EVENT_DESCRIPTION[item.eventKey];
+    const when = item.createdAt.toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const inner = item.bodyHtml && item.bodyHtml.trim()
+      ? item.bodyHtml
+      : `<div style="white-space:pre-wrap;color:${BRAND_TEXT};font-size:14px;line-height:1.5;">${escapeHtml(item.bodyText)}</div>`;
+    const descLine = eventDesc
+      ? `<div style="font-size:12px;color:${BRAND_MUTED};font-style:italic;margin-bottom:8px;">${escapeHtml(eventDesc)}</div>`
+      : "";
+    // Within a change group the change ref is already in the group header,
+    // so we show only the "rest" of the subject (the human-readable part)
+    // to avoid repetition.
+    const itemTitle = item.rest && item.rest.trim() ? item.rest : item.subject;
+    return `
+      <div style="padding:14px 18px;border-top:1px solid #ece7d8;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND_BROWN};font-weight:600;margin-bottom:4px;">${escapeHtml(eventLabel)} &middot; ${escapeHtml(when)}</div>
+        <div style="font-size:15px;font-weight:600;color:${BRAND_GREEN_DARK};margin-bottom:4px;">${escapeHtml(itemTitle)}</div>
+        ${descLine}
+        ${inner}
+      </div>`;
+  };
+
+  const itemsHtml = groups
+    .map((g) => {
+      const groupTitle = g.ref
+        ? `Change ${escapeHtml(g.ref)}`
+        : "Other notifications";
+      const countLabel = g.items.length === 1 ? "1 update" : `${g.items.length} updates`;
       return `
         <tr>
-          <td style="padding:18px 24px;border-top:1px solid #e7e2d6;">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND_BROWN};font-weight:600;margin-bottom:4px;">${escapeHtml(eventLabel)} &middot; ${escapeHtml(when)}</div>
-            <div style="font-size:16px;font-weight:600;color:${BRAND_GREEN_DARK};margin-bottom:4px;">${escapeHtml(item.subject)}</div>
-            ${descLine}
-            ${inner}
+          <td style="padding:8px 24px 0 24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e7e2d6;border-radius:10px;overflow:hidden;background:#fbfaf6;margin:14px 0 4px 0;">
+              <tr>
+                <td style="background:${BRAND_GREEN};padding:10px 18px;color:#ffffff;">
+                  <div style="font-size:14px;font-weight:600;letter-spacing:0.02em;">${groupTitle}</div>
+                  <div style="font-size:11px;opacity:0.85;margin-top:2px;">${countLabel}</div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  ${g.items.map(renderItem).join("")}
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>`;
     })
@@ -165,13 +225,24 @@ function buildDigestHtml(opts: {
 </html>`;
 }
 
-function buildDigestText(items: Array<{ subject: string; bodyText: string; eventKey: string }>): string {
-  return items
-    .map((it, i) => {
-      const label = EVENT_LABEL[it.eventKey] ?? it.eventKey;
-      return `${i + 1}. [${label}] ${it.subject}\n${it.bodyText}\n`;
+function buildDigestText(items: DigestItem[]): string {
+  const groups = groupByChange(items);
+  return groups
+    .map((g) => {
+      const header = g.ref ? `=== Change ${g.ref} ===` : "=== Other notifications ===";
+      const body = g.items
+        .map((it, i) => {
+          const label = EVENT_LABEL[it.eventKey] ?? it.eventKey;
+          const title = it.rest && it.rest.trim() ? it.rest : it.subject;
+          return `  ${i + 1}. [${label}] ${title}\n${it.bodyText
+            .split("\n")
+            .map((l) => "     " + l)
+            .join("\n")}`;
+        })
+        .join("\n\n");
+      return `${header}\n${body}`;
     })
-    .join("\n----------\n\n");
+    .join("\n\n----------\n\n");
 }
 
 // In-process mutex. The API runs as a single Node process so a module-level
