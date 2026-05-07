@@ -35,6 +35,30 @@ CREATE TRIGGER audit_log_no_truncate
 const SCHEMA_UPGRADE_SQL = `
 ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS usage_count integer NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
+
+-- Notification batching: queue + per-install configuration. Created here so a
+-- fresh boot after pulling the new schema does not require running drizzle-kit
+-- push manually. All statements are idempotent.
+CREATE TABLE IF NOT EXISTS notification_queue (
+  id           serial PRIMARY KEY,
+  user_id      integer NOT NULL,
+  event_key    text NOT NULL,
+  subject      text NOT NULL,
+  body_text    text NOT NULL DEFAULT '',
+  body_html    text NOT NULL DEFAULT '',
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  sent_at      timestamptz
+);
+CREATE INDEX IF NOT EXISTS notification_queue_pending_idx
+  ON notification_queue (sent_at, user_id);
+
+CREATE TABLE IF NOT EXISTS notification_settings (
+  key                      text PRIMARY KEY DEFAULT 'global',
+  batch_interval_minutes   integer NOT NULL DEFAULT 15,
+  last_run_at              timestamptz
+);
+INSERT INTO notification_settings (key) VALUES ('global')
+  ON CONFLICT (key) DO NOTHING;
 `;
 
 // Cleanup: per policy update, Technical Reviewer and Business Owner are no longer

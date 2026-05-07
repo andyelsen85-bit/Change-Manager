@@ -1,0 +1,338 @@
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import {
+  db,
+  notificationQueueTable,
+  notificationSettingsTable,
+  usersTable,
+} from "@workspace/db";
+import { logger } from "./logger";
+import { buildTransporter, getSmtp } from "./email";
+import { NOTIFICATION_EVENTS } from "./events";
+
+const KEY = "global";
+
+// CHdN palette (kept in sync with apps/change-mgmt tailwind theme).
+const BRAND_GREEN = "#00543f";
+const BRAND_GREEN_DARK = "#003d2e";
+const BRAND_BROWN = "#7a5a3a";
+const BRAND_TEXT = "#1f2933";
+const BRAND_MUTED = "#5a6677";
+const BRAND_BG = "#f6f4ee";
+
+const EVENT_LABEL: Record<string, string> = Object.fromEntries(
+  NOTIFICATION_EVENTS.map((e) => [e.key, e.label]),
+);
+
+export async function getNotificationSettings(): Promise<{
+  batchIntervalMinutes: number;
+  lastRunAt: Date | null;
+}> {
+  const [row] = await db
+    .select()
+    .from(notificationSettingsTable)
+    .where(eq(notificationSettingsTable.key, KEY));
+  if (!row) {
+    await db
+      .insert(notificationSettingsTable)
+      .values({ key: KEY })
+      .onConflictDoNothing();
+    return { batchIntervalMinutes: 15, lastRunAt: null };
+  }
+  return {
+    batchIntervalMinutes: row.batchIntervalMinutes,
+    lastRunAt: row.lastRunAt ?? null,
+  };
+}
+
+export async function setNotificationSettings(batchIntervalMinutes: number): Promise<void> {
+  // Clamp: at least 1 minute, at most 24 hours, to keep the worker honest.
+  const clamped = Math.max(1, Math.min(60 * 24, Math.floor(batchIntervalMinutes)));
+  await db
+    .insert(notificationSettingsTable)
+    .values({ key: KEY, batchIntervalMinutes: clamped })
+    .onConflictDoUpdate({
+      target: notificationSettingsTable.key,
+      set: { batchIntervalMinutes: clamped },
+    });
+}
+
+export async function getQueueDepth(): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(notificationQueueTable)
+    .where(isNull(notificationQueueTable.sentAt));
+  return Number(row?.n ?? 0);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Build the consolidated digest email body for one user. Each row in the
+// queue is an item; the wrapper supplies the brand chrome.
+function buildDigestHtml(opts: {
+  fullName: string;
+  fromName: string;
+  items: Array<{ subject: string; bodyHtml: string; bodyText: string; eventKey: string; createdAt: Date }>;
+}): string {
+  const heading = opts.items.length === 1
+    ? "You have 1 new notification"
+    : `You have ${opts.items.length} new notifications`;
+
+  const itemsHtml = opts.items
+    .map((item) => {
+      const eventLabel = EVENT_LABEL[item.eventKey] ?? item.eventKey;
+      const when = item.createdAt.toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      // If a per-event HTML body was provided, embed it; otherwise render the
+      // plain-text version with line breaks preserved.
+      const inner = item.bodyHtml && item.bodyHtml.trim()
+        ? item.bodyHtml
+        : `<div style="white-space:pre-wrap;color:${BRAND_TEXT};font-size:14px;line-height:1.5;">${escapeHtml(item.bodyText)}</div>`;
+      return `
+        <tr>
+          <td style="padding:18px 24px;border-top:1px solid #e7e2d6;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND_BROWN};font-weight:600;margin-bottom:4px;">${escapeHtml(eventLabel)} &middot; ${escapeHtml(when)}</div>
+            <div style="font-size:16px;font-weight:600;color:${BRAND_GREEN_DARK};margin-bottom:8px;">${escapeHtml(item.subject)}</div>
+            ${inner}
+          </td>
+        </tr>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>${escapeHtml(opts.fromName)}</title>
+  </head>
+  <body style="margin:0;padding:0;background:${BRAND_BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:${BRAND_TEXT};">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND_BG};padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+            <tr>
+              <td style="background:${BRAND_GREEN};padding:24px 28px;color:#ffffff;">
+                <div style="font-size:13px;letter-spacing:0.1em;text-transform:uppercase;opacity:0.85;">${escapeHtml(opts.fromName)}</div>
+                <div style="font-size:22px;font-weight:600;margin-top:4px;">${escapeHtml(heading)}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="height:6px;background:linear-gradient(90deg, ${BRAND_BROWN} 0%, ${BRAND_GREEN} 100%);"></td>
+            </tr>
+            <tr>
+              <td style="padding:24px 24px 8px 24px;">
+                <p style="margin:0;font-size:14px;color:${BRAND_TEXT};">Hello ${escapeHtml(opts.fullName)},</p>
+                <p style="margin:8px 0 0 0;font-size:14px;color:${BRAND_MUTED};">Here is a summary of activity that concerns you since the last digest.</p>
+              </td>
+            </tr>
+            ${itemsHtml}
+            <tr>
+              <td style="padding:18px 24px 24px 24px;border-top:1px solid #e7e2d6;font-size:12px;color:${BRAND_MUTED};">
+                You can adjust which notifications you receive, or pause them entirely, from your profile in the application.
+              </td>
+            </tr>
+            <tr>
+              <td style="background:${BRAND_GREEN_DARK};padding:14px 24px;text-align:center;font-size:11px;color:#cfdcd6;letter-spacing:0.04em;">
+                ${escapeHtml(opts.fromName)} &middot; Change Management
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function buildDigestText(items: Array<{ subject: string; bodyText: string; eventKey: string }>): string {
+  return items
+    .map((it, i) => {
+      const label = EVENT_LABEL[it.eventKey] ?? it.eventKey;
+      return `${i + 1}. [${label}] ${it.subject}\n${it.bodyText}\n`;
+    })
+    .join("\n----------\n\n");
+}
+
+// Postgres advisory lock key. Arbitrary 64-bit constant — only meaningful in
+// that the worker tick and the manual `/settings/notifications/flush` route
+// agree on it. Prevents overlapping flushes from reading the same unsent
+// rows and sending duplicate digests before either marks `sent_at`.
+const FLUSH_ADVISORY_LOCK_KEY = 7426891345210n;
+
+// Drain the queue: load all unsent rows, group by user, build one email per
+// user and send it. Marks rows sent on success. Returns counts for logging.
+//
+// Concurrency: protected by a session-scoped pg_try_advisory_lock so the
+// background tick and a manual admin "Send digest now" cannot interleave.
+// If the lock is already held, the second caller no-ops cleanly.
+export async function flushNotificationQueue(): Promise<{
+  usersNotified: number;
+  itemsSent: number;
+  errors: number;
+}> {
+  const lockRes = await db.execute<{ locked: boolean }>(
+    sql`SELECT pg_try_advisory_lock(${FLUSH_ADVISORY_LOCK_KEY}) AS locked`,
+  );
+  // drizzle returns either {rows: [...]} or an array depending on driver; normalise.
+  const locked = Array.isArray(lockRes)
+    ? (lockRes[0] as { locked?: boolean } | undefined)?.locked === true
+    : (lockRes as { rows?: Array<{ locked?: boolean }> }).rows?.[0]?.locked === true;
+  if (!locked) {
+    logger.info("Notification flush already in progress; skipping this run");
+    return { usersNotified: 0, itemsSent: 0, errors: 0 };
+  }
+  try {
+    return await runFlush();
+  } finally {
+    await db
+      .execute(sql`SELECT pg_advisory_unlock(${FLUSH_ADVISORY_LOCK_KEY})`)
+      .catch((err) => logger.error({ err }, "Failed to release notification flush lock"));
+  }
+}
+
+async function runFlush(): Promise<{ usersNotified: number; itemsSent: number; errors: number }> {
+  const transporter = await buildTransporter();
+  const cfg = await getSmtp();
+  if (!transporter || !cfg) {
+    // No SMTP configured — leave rows in the queue. They'll be attempted on
+    // the next tick once the admin configures SMTP.
+    return { usersNotified: 0, itemsSent: 0, errors: 0 };
+  }
+
+  const pending = await db
+    .select({
+      id: notificationQueueTable.id,
+      userId: notificationQueueTable.userId,
+      eventKey: notificationQueueTable.eventKey,
+      subject: notificationQueueTable.subject,
+      bodyText: notificationQueueTable.bodyText,
+      bodyHtml: notificationQueueTable.bodyHtml,
+      createdAt: notificationQueueTable.createdAt,
+    })
+    .from(notificationQueueTable)
+    .where(isNull(notificationQueueTable.sentAt))
+    .orderBy(asc(notificationQueueTable.createdAt));
+
+  if (pending.length === 0) {
+    await db
+      .update(notificationSettingsTable)
+      .set({ lastRunAt: new Date() })
+      .where(eq(notificationSettingsTable.key, KEY));
+    return { usersNotified: 0, itemsSent: 0, errors: 0 };
+  }
+
+  // Per-user grouping = privacy guarantee: each generated email contains
+  // ONLY the rows whose user_id matches the recipient.
+  const byUser = new Map<number, typeof pending>();
+  for (const r of pending) {
+    const arr = byUser.get(r.userId) ?? [];
+    arr.push(r);
+    byUser.set(r.userId, arr);
+  }
+
+  let usersNotified = 0;
+  let itemsSent = 0;
+  let errors = 0;
+
+  for (const [userId, items] of byUser.entries()) {
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+    if (!user || !user.isActive || user.notificationsEnabled === false) {
+      // User was deactivated or opted out after enqueue — silently mark
+      // rows sent so we don't keep retrying. The audit trail still has them.
+      const ids = items.map((i) => i.id);
+      await db
+        .update(notificationQueueTable)
+        .set({ sentAt: new Date() })
+        .where(and(isNull(notificationQueueTable.sentAt), sql`id = ANY(${ids})`));
+      continue;
+    }
+    const html = buildDigestHtml({
+      fullName: user.fullName,
+      fromName: cfg.fromName,
+      items: items.map((i) => ({
+        subject: i.subject,
+        bodyHtml: i.bodyHtml,
+        bodyText: i.bodyText,
+        eventKey: i.eventKey,
+        createdAt: i.createdAt,
+      })),
+    });
+    const text = buildDigestText(items);
+    const subject = items.length === 1
+      ? items[0].subject
+      : `${cfg.fromName}: ${items.length} new notifications`;
+    try {
+      await transporter.sendMail({
+        from: `"${cfg.fromName}" <${cfg.fromAddress}>`,
+        to: `"${user.fullName}" <${user.email}>`,
+        subject,
+        text,
+        html,
+      });
+      const ids = items.map((i) => i.id);
+      await db
+        .update(notificationQueueTable)
+        .set({ sentAt: new Date() })
+        .where(and(isNull(notificationQueueTable.sentAt), sql`id = ANY(${ids})`));
+      usersNotified++;
+      itemsSent += items.length;
+    } catch (err) {
+      logger.error({ err, userId, count: items.length }, "Notification digest send failed; will retry next tick");
+      errors++;
+    }
+  }
+
+  await db
+    .update(notificationSettingsTable)
+    .set({ lastRunAt: new Date() })
+    .where(eq(notificationSettingsTable.key, KEY));
+
+  return { usersNotified, itemsSent, errors };
+}
+
+let timer: NodeJS.Timeout | null = null;
+let running = false;
+
+// Started once from index.ts after app.listen. Wakes every 30s and decides
+// whether enough time has elapsed since the last run to flush the queue.
+// A short tick interval (vs. interval-equals-window) keeps the "next send in N
+// minutes" countdown accurate even when the admin shortens the window.
+export function startNotificationWorker(): void {
+  if (timer) return;
+  const tick = async (): Promise<void> => {
+    if (running) return;
+    running = true;
+    try {
+      const { batchIntervalMinutes, lastRunAt } = await getNotificationSettings();
+      const intervalMs = batchIntervalMinutes * 60_000;
+      const elapsed = lastRunAt ? Date.now() - lastRunAt.getTime() : Infinity;
+      if (elapsed >= intervalMs) {
+        const r = await flushNotificationQueue();
+        if (r.usersNotified > 0 || r.errors > 0) {
+          logger.info(r, "Notification digest run complete");
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, "Notification worker tick failed");
+    } finally {
+      running = false;
+    }
+  };
+  // Kick off on boot so a freshly-started server doesn't sit idle for 30s.
+  void tick();
+  timer = setInterval(() => void tick(), 30_000);
+  // Allow the process to exit without waiting for the timer.
+  if (typeof timer.unref === "function") timer.unref();
+}
