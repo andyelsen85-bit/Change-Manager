@@ -63,6 +63,10 @@ const DEFAULT_CATEGORIES = [
   { key: "security", name: "Security", sortOrder: 50 },
   { key: "application", name: "Application", sortOrder: 60 },
   { key: "infrastructure", name: "Infrastructure", sortOrder: 70 },
+  { key: "patching", name: "Patching", sortOrder: 80 },
+  { key: "identity", name: "Identity & Access", sortOrder: 90 },
+  { key: "operations", name: "Operations", sortOrder: 100 },
+  { key: "deploy", name: "Deploy / Release", sortOrder: 110 },
   { key: "other", name: "Other", sortOrder: 999 },
 ];
 
@@ -193,14 +197,11 @@ export async function runSeed(): Promise<void> {
     .where(inArray(roleAssignmentsTable.roleKey, REMOVED_ROLE_KEYS as unknown as string[]));
   await db.delete(rolesTable).where(inArray(rolesTable.key, REMOVED_ROLE_KEYS as unknown as string[]));
 
-  // Default change categories — only seeded if the table is empty so an
-  // admin's edits aren't reverted on every boot.
-  const existingCats = await db.select().from(changeCategoriesTable);
-  if (existingCats.length === 0) {
-    for (const c of DEFAULT_CATEGORIES) {
-      await db.insert(changeCategoriesTable).values(c);
-    }
-    logger.info({ count: DEFAULT_CATEGORIES.length }, "Seeded change categories");
+  // Default change categories — insert any missing keys (idempotent via
+  // ON CONFLICT) so newly-added defaults appear on existing deployments
+  // without clobbering admin edits to existing rows.
+  for (const c of DEFAULT_CATEGORIES) {
+    await db.insert(changeCategoriesTable).values(c).onConflictDoNothing();
   }
 
   // Admin user. On first startup we create the row in either:
