@@ -107,16 +107,18 @@
   --ring: 74 67% 42%;
   --radius: 0.5rem;
 
-  /* Dark, warm sidebar so the white-stroke logo reads well, with the
-     brand green as the highlight color for the active item. */
-  --sidebar: 30 30% 12%;
-  --sidebar-foreground: 35 25% 92%;
-  --sidebar-border: 30 20% 20%;
-  --sidebar-accent: 30 25% 18%;
+  /* Sidebar uses the actual CHdN brand brown (#966E3C, 30° 43 41) so the
+     two signature colors — green primary, brown rail — read together
+     across the whole app. The brand green is the active-item highlight,
+     mirroring the wave inside the logo. */
+  --sidebar: 30 43% 22%;                    /* darker brown, easier on eyes */
+  --sidebar-foreground: 35 35% 95%;
+  --sidebar-border: 30 35% 30%;
+  --sidebar-accent: 30 40% 30%;
   --sidebar-accent-foreground: 60 30% 98%;
-  --sidebar-primary: 74 67% 50%;
-  --sidebar-primary-foreground: 30 30% 12%;
-  --sidebar-ring: 74 67% 50%;
+  --sidebar-primary: 74 67% 55%;
+  --sidebar-primary-foreground: 30 43% 18%;
+  --sidebar-ring: 74 67% 55%;
 
   /* Charts span the brand palette in order — green, lime, ochre, brown,
      sand — so analytics screens stay on-brand without re-mapping. */
@@ -160,13 +162,13 @@
   --input: 30 18% 20%;
   --ring: 74 67% 50%;
 
-  --sidebar: 30 30% 8%;
-  --sidebar-foreground: 35 25% 92%;
-  --sidebar-border: 30 20% 16%;
-  --sidebar-accent: 30 25% 14%;
+  --sidebar: 30 43% 14%;
+  --sidebar-foreground: 35 35% 95%;
+  --sidebar-border: 30 35% 22%;
+  --sidebar-accent: 30 40% 22%;
   --sidebar-accent-foreground: 60 30% 98%;
   --sidebar-primary: 74 67% 55%;
-  --sidebar-primary-foreground: 30 30% 8%;
+  --sidebar-primary-foreground: 30 43% 14%;
   --sidebar-ring: 74 67% 55%;
 
   --chart-1: 74 67% 50%;

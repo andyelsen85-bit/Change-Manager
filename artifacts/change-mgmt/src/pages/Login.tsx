@@ -53,7 +53,7 @@ export function LoginPage() {
             form below. Mirrors the visual language of the logo itself. */}
         <div
           className="flex flex-col items-center gap-2 px-6 pt-8 pb-6 text-center"
-          style={{ background: "hsl(30 30% 12%)" }}
+          style={{ background: "hsl(30 43% 22%)" }}
         >
           <img
             src={chdnLogo}
