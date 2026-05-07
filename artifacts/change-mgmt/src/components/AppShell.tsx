@@ -77,20 +77,22 @@ export function AppShell({ children }: { children: ReactNode }) {
           mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex h-20 items-center justify-between border-b border-sidebar-border px-5">
+        <div className="flex h-20 items-center justify-between gap-3 border-b border-sidebar-border px-3">
           <Link href="/" className="flex items-center gap-3">
             {/*
-             * The full CHdN logo includes the "Centre Hospitalier du Nord"
-             * tagline + wave; we crop visually with object-position to show
-             * just the wordmark + wave when the rail is collapsed. At the
-             * default 64px width the tagline reads cleanly enough to keep.
+             * Logo sits inside a white pill so the dark letters and the
+             * green/brown wave inside the mark stay legible against the
+             * brown sidebar — the brand brief calls for the logo on a
+             * white field.
              */}
-            <img
-              src={chdnLogo}
-              alt="CHdN — Centre Hospitalier du Nord"
-              className="h-12 w-auto select-none"
-              draggable={false}
-            />
+            <div className="flex h-14 items-center justify-center rounded-md bg-white px-3 shadow-sm">
+              <img
+                src={chdnLogo}
+                alt="CHdN — Centre Hospitalier du Nord"
+                className="h-10 w-auto select-none"
+                draggable={false}
+              />
+            </div>
             <div className="flex flex-col leading-tight">
               <span className="text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
                 Change
