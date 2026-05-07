@@ -37,7 +37,11 @@ export function NewChangePage() {
   const [plannedEnd, setPlannedEnd] = useState("");
   const [assigneeId, setAssigneeId] = useState<string>("none");
   const [templateId, setTemplateId] = useState<string>("none");
-  const [category, setCategory] = useState<string>("general");
+  // Start empty so the dropdown shows a placeholder. The effect below snaps
+  // it to the first active category once they load. The previous default of
+  // "general" matched no seeded category and produced "Unknown or inactive
+  // category." on submit unless the user manually picked one.
+  const [category, setCategory] = useState<string>("");
   const [hasPreprodEnv, setHasPreprodEnv] = useState(false);
   const [preprodEnvUrl, setPreprodEnvUrl] = useState("");
   const [emergencyConfirmOpen, setEmergencyConfirmOpen] = useState(false);
@@ -54,6 +58,18 @@ export function NewChangePage() {
       setPriority(selectedTemplate.defaultPriority);
     }
   }, [selectedTemplate]);
+
+  // Keep the selected category valid against the live list. If the current
+  // value isn't in the active set (initial empty state, or an admin just
+  // deactivated/removed it), snap to the first active category so the form
+  // is always submittable without the user having to re-pick.
+  useEffect(() => {
+    const active = (categoriesQ.data ?? []).filter((c) => c.isActive !== false);
+    if (active.length === 0) return;
+    if (!active.some((c) => c.key === category)) {
+      setCategory(active[0].key);
+    }
+  }, [categoriesQ.data, category]);
 
   const create = useMutation({
     mutationFn: async () => {
@@ -286,14 +302,11 @@ export function NewChangePage() {
           <div className="space-y-2">
             <Label>Category <span className="text-destructive">*</span></Label>
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger data-testid="select-category"><SelectValue /></SelectTrigger>
+              <SelectTrigger data-testid="select-category"><SelectValue placeholder="Select a category…" /></SelectTrigger>
               <SelectContent>
                 {(categoriesQ.data ?? []).filter((c) => c.isActive !== false).map((c) => (
                   <SelectItem key={c.key} value={c.key}>{c.name}</SelectItem>
                 ))}
-                {(!categoriesQ.data || categoriesQ.data.length === 0) && (
-                  <SelectItem value="general">General</SelectItem>
-                )}
               </SelectContent>
             </Select>
           </div>
