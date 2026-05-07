@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 // (advisory lock removed — see flushNotificationQueue() comment.)
 import {
   db,
@@ -256,7 +256,7 @@ async function runFlush(): Promise<{ usersNotified: number; itemsSent: number; e
       await db
         .update(notificationQueueTable)
         .set({ sentAt: new Date() })
-        .where(and(isNull(notificationQueueTable.sentAt), sql`id = ANY(${ids})`));
+        .where(and(isNull(notificationQueueTable.sentAt), inArray(notificationQueueTable.id, ids)));
       continue;
     }
     const html = buildDigestHtml({
@@ -283,10 +283,24 @@ async function runFlush(): Promise<{ usersNotified: number; itemsSent: number; e
         html,
       });
       const ids = items.map((i) => i.id);
-      await db
+      // CRITICAL: mark sent immediately after a successful send. If this
+      // UPDATE fails or matches 0 rows the next worker tick will re-send
+      // the same items — that's the "I keep getting the same mail every
+      // X minutes" symptom. Using drizzle's inArray() guarantees correct
+      // parameter binding (a previous version used raw `id = ANY(${ids})`
+      // which is fragile across drivers); we also log rowCount so any
+      // future regression is loud rather than silent.
+      const upd = await db
         .update(notificationQueueTable)
         .set({ sentAt: new Date() })
-        .where(and(isNull(notificationQueueTable.sentAt), sql`id = ANY(${ids})`));
+        .where(and(isNull(notificationQueueTable.sentAt), inArray(notificationQueueTable.id, ids)))
+        .returning({ id: notificationQueueTable.id });
+      if (upd.length !== ids.length) {
+        logger.error(
+          { userId, expected: ids.length, marked: upd.length, ids },
+          "Notification queue mark-sent UPDATE matched fewer rows than expected; duplicates may be sent on next tick",
+        );
+      }
       usersNotified++;
       itemsSent += items.length;
     } catch (err) {
