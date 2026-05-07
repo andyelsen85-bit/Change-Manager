@@ -50,12 +50,6 @@ const CSRF_EXEMPT_POST_PATHS = new Set([
   "/auth/login/",
   "/auth/setup",
   "/auth/setup/",
-  // SPNEGO handshake — the user has no session (and therefore no CSRF
-  // cookie) yet, and the body is empty so there is nothing to forge.
-  // Authentication is established by the Kerberos ticket in the
-  // Authorization header, not by anything in the request body.
-  "/auth/sso",
-  "/auth/sso/",
 ]);
 const csrfGate: RequestHandler = (req, res, next) => {
   if (req.method === "POST" && CSRF_EXEMPT_POST_PATHS.has(req.path)) {

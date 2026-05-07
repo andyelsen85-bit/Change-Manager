@@ -34,7 +34,6 @@ const TABLES = [
   "ref_counters",
   "smtp_settings",
   "ldap_settings",
-  "sso_settings",
   "ssl_settings",
   "workflow_timeouts",
   "audit_log",
@@ -42,7 +41,7 @@ const TABLES = [
 
 // Tables that are new in the current backup version. Older backups (v1)
 // don't include these — that's fine, we leave them empty after restore.
-const TABLES_OPTIONAL = new Set<string>(["change_categories", "change_assignees", "sso_settings"]);
+const TABLES_OPTIONAL = new Set<string>(["change_categories", "change_assignees"]);
 
 export type BackupPayload = {
   version: number;
