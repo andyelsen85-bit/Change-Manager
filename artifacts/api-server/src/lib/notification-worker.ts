@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
+// (advisory lock removed — see flushNotificationQueue() comment.)
 import {
   db,
   notificationQueueTable,
@@ -21,6 +22,9 @@ const BRAND_BG = "#f6f4ee";
 
 const EVENT_LABEL: Record<string, string> = Object.fromEntries(
   NOTIFICATION_EVENTS.map((e) => [e.key, e.label]),
+);
+const EVENT_DESCRIPTION: Record<string, string> = Object.fromEntries(
+  NOTIFICATION_EVENTS.map((e) => [e.key, e.description]),
 );
 
 export async function getNotificationSettings(): Promise<{
@@ -87,6 +91,7 @@ function buildDigestHtml(opts: {
   const itemsHtml = opts.items
     .map((item) => {
       const eventLabel = EVENT_LABEL[item.eventKey] ?? item.eventKey;
+      const eventDesc = EVENT_DESCRIPTION[item.eventKey];
       const when = item.createdAt.toLocaleString("en-GB", {
         day: "2-digit",
         month: "2-digit",
@@ -99,11 +104,15 @@ function buildDigestHtml(opts: {
       const inner = item.bodyHtml && item.bodyHtml.trim()
         ? item.bodyHtml
         : `<div style="white-space:pre-wrap;color:${BRAND_TEXT};font-size:14px;line-height:1.5;">${escapeHtml(item.bodyText)}</div>`;
+      const descLine = eventDesc
+        ? `<div style="font-size:12px;color:${BRAND_MUTED};font-style:italic;margin-bottom:8px;">${escapeHtml(eventDesc)}</div>`
+        : "";
       return `
         <tr>
           <td style="padding:18px 24px;border-top:1px solid #e7e2d6;">
             <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${BRAND_BROWN};font-weight:600;margin-bottom:4px;">${escapeHtml(eventLabel)} &middot; ${escapeHtml(when)}</div>
-            <div style="font-size:16px;font-weight:600;color:${BRAND_GREEN_DARK};margin-bottom:8px;">${escapeHtml(item.subject)}</div>
+            <div style="font-size:16px;font-weight:600;color:${BRAND_GREEN_DARK};margin-bottom:4px;">${escapeHtml(item.subject)}</div>
+            ${descLine}
             ${inner}
           </td>
         </tr>`;
@@ -165,41 +174,33 @@ function buildDigestText(items: Array<{ subject: string; bodyText: string; event
     .join("\n----------\n\n");
 }
 
-// Postgres advisory lock key. Arbitrary 64-bit constant — only meaningful in
-// that the worker tick and the manual `/settings/notifications/flush` route
-// agree on it. Prevents overlapping flushes from reading the same unsent
-// rows and sending duplicate digests before either marks `sent_at`.
-const FLUSH_ADVISORY_LOCK_KEY = 7426891345210n;
+// In-process mutex. The API runs as a single Node process so a module-level
+// promise is sufficient to serialize the background tick and the manual
+// "Send digest now" admin action. We previously used pg_try_advisory_lock
+// here, but drizzle's connection pool can run the lock/unlock on different
+// physical sessions — session-scoped advisory locks are tied to a session,
+// so the unlock would silently no-op and a second caller would be told the
+// queue was busy when it actually wasn't. Worse, a manual flush kicked off
+// while the worker tick was running would return zero counts even though
+// digests were being sent, producing the misleading "Queue is empty" toast
+// while users still received mail.
+//
+// Awaiting the in-flight promise (rather than bailing) means the manual
+// flush returns the real counts of whichever drain ended up doing the work.
+let inFlight: Promise<{ usersNotified: number; itemsSent: number; errors: number }> | null = null;
 
 // Drain the queue: load all unsent rows, group by user, build one email per
 // user and send it. Marks rows sent on success. Returns counts for logging.
-//
-// Concurrency: protected by a session-scoped pg_try_advisory_lock so the
-// background tick and a manual admin "Send digest now" cannot interleave.
-// If the lock is already held, the second caller no-ops cleanly.
 export async function flushNotificationQueue(): Promise<{
   usersNotified: number;
   itemsSent: number;
   errors: number;
 }> {
-  const lockRes = await db.execute<{ locked: boolean }>(
-    sql`SELECT pg_try_advisory_lock(${FLUSH_ADVISORY_LOCK_KEY}) AS locked`,
-  );
-  // drizzle returns either {rows: [...]} or an array depending on driver; normalise.
-  const locked = Array.isArray(lockRes)
-    ? (lockRes[0] as { locked?: boolean } | undefined)?.locked === true
-    : (lockRes as { rows?: Array<{ locked?: boolean }> }).rows?.[0]?.locked === true;
-  if (!locked) {
-    logger.info("Notification flush already in progress; skipping this run");
-    return { usersNotified: 0, itemsSent: 0, errors: 0 };
-  }
-  try {
-    return await runFlush();
-  } finally {
-    await db
-      .execute(sql`SELECT pg_advisory_unlock(${FLUSH_ADVISORY_LOCK_KEY})`)
-      .catch((err) => logger.error({ err }, "Failed to release notification flush lock"));
-  }
+  if (inFlight) return inFlight;
+  inFlight = runFlush().finally(() => {
+    inFlight = null;
+  });
+  return inFlight;
 }
 
 async function runFlush(): Promise<{ usersNotified: number; itemsSent: number; errors: number }> {
