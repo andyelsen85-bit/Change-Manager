@@ -26,6 +26,68 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Render one change as an HTML "card" with field-per-line layout. Used in
+// the CAB agenda email so that recipients with HTML-capable clients see
+// each change visually grouped (header + key/value lines + description),
+// instead of the previous single text blob with everything jammed together.
+function renderAgendaChangeHtml(
+  c: {
+    ref: string;
+    title: string;
+    description: string | null;
+    track: string;
+    status: string;
+    risk: string;
+    impact: string;
+    plannedStart: Date | null;
+    plannedEnd: Date | null;
+  },
+  index: number,
+): string {
+  const desc = (c.description || "").trim();
+  const row = (label: string, value: string): string => `
+    <tr>
+      <td style="padding:4px 12px 4px 0;font-size:12px;color:#5a6677;white-space:nowrap;vertical-align:top;width:120px;">${escapeHtml(label)}</td>
+      <td style="padding:4px 0;font-size:13px;color:#1f2933;vertical-align:top;">${escapeHtml(value)}</td>
+    </tr>`;
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e7e2d6;border-radius:8px;overflow:hidden;background:#fbfaf6;margin:0 0 12px 0;">
+      <tr>
+        <td style="background:#00543f;padding:10px 14px;color:#ffffff;">
+          <div style="font-size:11px;letter-spacing:0.06em;text-transform:uppercase;opacity:0.85;">Change #${index + 1} &middot; ${escapeHtml(c.ref)}</div>
+          <div style="font-size:15px;font-weight:600;margin-top:2px;">${escapeHtml(c.title)}</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:10px 14px;">
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;">
+            ${row("Track", titleCase(c.track))}
+            ${row("Status", c.status.replace(/_/g, " "))}
+            ${row("Risk", titleCase(c.risk))}
+            ${row("Impact", titleCase(c.impact))}
+            ${row("Planned start", fmtAgendaDate(c.plannedStart))}
+            ${row("Planned end", fmtAgendaDate(c.plannedEnd))}
+          </table>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid #ece7d8;">
+            <div style="font-size:12px;color:#5a6677;margin-bottom:4px;">Description</div>
+            <div style="font-size:13px;color:#1f2933;white-space:pre-wrap;line-height:1.5;">${
+              desc ? escapeHtml(desc) : '<span style="color:#8a96a4;font-style:italic;">(no description provided)</span>'
+            }</div>
+          </div>
+        </td>
+      </tr>
+    </table>`;
+}
+
 const router: IRouter = Router();
 const requireCabManager = requireRole(["change_manager", "ecab_member", "cab_chair"]);
 
@@ -321,18 +383,22 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     .orderBy(asc(changeRequestsTable.plannedStart), asc(changeRequestsTable.ref));
 
   const meetingKindLabel = m.kind === "ecab" ? "Emergency CAB" : "CAB";
+  // Plain-text version: each change as its own block with one
+  // field-per-line for screen readers and text-only mail clients.
   const agendaItems = changeRows.length
     ? changeRows
         .map((c, i) => {
           const desc = (c.description || "").trim() || "(no description provided)";
           return [
-            `${i + 1}. [${c.ref}] ${c.title}`,
-            `   Track: ${titleCase(c.track)}    Status: ${c.status.replace(/_/g, " ")}`,
-            `   Risk: ${titleCase(c.risk)}      Impact: ${titleCase(c.impact)}`,
-            `   Planned start: ${fmtAgendaDate(c.plannedStart)}`,
-            `   Planned end:   ${fmtAgendaDate(c.plannedEnd)}`,
-            `   Description:`,
-            ...desc.split("\n").map((line) => `     ${line}`),
+            `--- Change #${i + 1} — [${c.ref}] ${c.title} ---`,
+            `Track:         ${titleCase(c.track)}`,
+            `Status:        ${c.status.replace(/_/g, " ")}`,
+            `Risk:          ${titleCase(c.risk)}`,
+            `Impact:        ${titleCase(c.impact)}`,
+            `Planned start: ${fmtAgendaDate(c.plannedStart)}`,
+            `Planned end:   ${fmtAgendaDate(c.plannedEnd)}`,
+            `Description:`,
+            ...desc.split("\n").map((line) => `  ${line}`),
           ].join("\n");
         })
         .join("\n\n")
@@ -354,11 +420,40 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     agendaItems,
   ].join("\n");
 
+  // HTML version: meeting header + one card per change so each change is
+  // visually grouped and the fields render one per line. Mail clients with
+  // HTML support will use this; text-only clients fall back to `text` above.
+  const meetingHeaderHtml = `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 14px 0;">
+      <tr>
+        <td style="padding:4px 12px 4px 0;font-size:12px;color:#5a6677;width:80px;">When</td>
+        <td style="padding:4px 0;font-size:13px;color:#1f2933;">${escapeHtml(m.scheduledStart.toUTCString())}</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 12px 4px 0;font-size:12px;color:#5a6677;">Where</td>
+        <td style="padding:4px 0;font-size:13px;color:#1f2933;">${escapeHtml(m.location)}</td>
+      </tr>
+      <tr>
+        <td style="padding:4px 12px 4px 0;font-size:12px;color:#5a6677;vertical-align:top;">Notes</td>
+        <td style="padding:4px 0;font-size:13px;color:#1f2933;white-space:pre-wrap;">${
+          m.agenda?.trim() ? escapeHtml(m.agenda.trim()) : '<span style="color:#8a96a4;font-style:italic;">(none)</span>'
+        }</td>
+      </tr>
+    </table>
+    <div style="margin:8px 0 12px 0;padding:8px 12px;background:#f6f4ee;border-left:3px solid #7a5a3a;font-size:12px;color:#5a6677;letter-spacing:0.04em;text-transform:uppercase;">
+      Changes for review (${changeRows.length})
+    </div>`;
+  const agendaItemsHtml = changeRows.length
+    ? changeRows.map((c, i) => renderAgendaChangeHtml(c, i)).join("")
+    : '<div style="padding:12px;font-style:italic;color:#8a96a4;">(no changes on the agenda)</div>';
+  const html = `<div>${meetingHeaderHtml}${agendaItemsHtml}</div>`;
+
   const result = await notify({
     eventKey: "cab.invited",
     to: targets,
     subject: `${m.kind === "ecab" ? "[eCAB Agenda]" : "[CAB Agenda]"} ${m.title} — ${m.scheduledStart.toUTCString()}`,
     text,
+    html,
   });
   await audit(req, {
     action: "cab.agenda_sent",
