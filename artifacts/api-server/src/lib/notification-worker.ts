@@ -126,13 +126,11 @@ function buildDigestHtml(opts: {
   const renderItem = (item: DigestItem & { rest: string }): string => {
     const eventLabel = EVENT_LABEL[item.eventKey] ?? item.eventKey;
     const eventDesc = EVENT_DESCRIPTION[item.eventKey];
-    const when = item.createdAt.toLocaleString("en-GB", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // Manual dd/MM/yyyy HH:mm formatting — some Node ICU builds wrongly
+    // return 12-hour AM/PM for en-GB even when hour12:false is requested.
+    const pad = (n: number): string => String(n).padStart(2, "0");
+    const d = item.createdAt;
+    const when = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     const inner = item.bodyHtml && item.bodyHtml.trim()
       ? item.bodyHtml
       : `<div style="white-space:pre-wrap;color:${BRAND_TEXT};font-size:14px;line-height:1.5;">${escapeHtml(item.bodyText)}</div>`;

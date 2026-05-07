@@ -13,12 +13,15 @@ import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
 import { notify, getUserEmail } from "../lib/email";
 
-// Format a date in a human-friendly way for plain-text emails. CAB members
-// read these in their mail client, so use a readable representation rather
-// than the raw ISO string. Falls back to "TBD" when no date is set.
+// Format a date for emails as dd/MM/yyyy HH:mm in 24-hour time. We do
+// the formatting manually rather than via toLocaleString("en-GB") because
+// some Node builds incorrectly return a 12-hour AM/PM string for the
+// en-GB locale, which the user explicitly does not want. Falls back to
+// "TBD" when no date is set.
 function fmtAgendaDate(d: Date | null): string {
   if (!d) return "TBD";
-  return d.toUTCString();
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function titleCase(s: string): string {
@@ -407,7 +410,7 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
   const text = [
     `${meetingKindLabel} agenda — ${m.title}`,
     "",
-    `When:  ${m.scheduledStart.toUTCString()}`,
+    `When:  ${fmtAgendaDate(m.scheduledStart)}`,
     `Where: ${m.location}`,
     "",
     "Notes:",
@@ -427,7 +430,7 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 14px 0;">
       <tr>
         <td style="padding:4px 12px 4px 0;font-size:12px;color:#5a6677;width:80px;">When</td>
-        <td style="padding:4px 0;font-size:13px;color:#1f2933;">${escapeHtml(m.scheduledStart.toUTCString())}</td>
+        <td style="padding:4px 0;font-size:13px;color:#1f2933;">${escapeHtml(fmtAgendaDate(m.scheduledStart))}</td>
       </tr>
       <tr>
         <td style="padding:4px 12px 4px 0;font-size:12px;color:#5a6677;">Where</td>
@@ -451,7 +454,7 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
   const result = await notify({
     eventKey: "cab.invited",
     to: targets,
-    subject: `${m.kind === "ecab" ? "[eCAB Agenda]" : "[CAB Agenda]"} ${m.title} — ${m.scheduledStart.toUTCString()}`,
+    subject: `${m.kind === "ecab" ? "[eCAB Agenda]" : "[CAB Agenda]"} ${m.title} — ${fmtAgendaDate(m.scheduledStart)}`,
     text,
     html,
   });
