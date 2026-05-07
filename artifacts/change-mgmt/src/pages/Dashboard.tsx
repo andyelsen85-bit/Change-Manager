@@ -40,14 +40,15 @@ const PIE_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--cha
 
 // Timerange filter for the summary KPIs and charts. Values match the
 // `range` query the API understands; "all" sends no filter (default).
-// All non-"all" ranges anchor to whole calendar months — see the resolveRange
-// helper in artifacts/api-server/src/routes/dashboard.ts for exact bounds.
+// last_month is calendar-anchored (previous full calendar month);
+// last_6_months and last_year are rolling windows back from today.
+// See resolveRange() in artifacts/api-server/src/routes/dashboard.ts.
 type RangeKey = "all" | "last_month" | "last_6_months" | "last_year";
 const RANGE_OPTIONS: ReadonlyArray<{ value: RangeKey; label: string }> = [
   { value: "all", label: "All time" },
   { value: "last_month", label: "Last calendar month" },
   { value: "last_6_months", label: "Last 6 months" },
-  { value: "last_year", label: "Last calendar year" },
+  { value: "last_year", label: "Last year" },
 ];
 
 export function DashboardPage() {
