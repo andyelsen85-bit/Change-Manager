@@ -8,21 +8,6 @@ if (!DATABASE_URL) {
 
 const STATEMENTS: { label: string; sql: string }[] = [
   {
-    label: "sso_settings table",
-    sql: `
-      CREATE TABLE IF NOT EXISTS sso_settings (
-        key text PRIMARY KEY DEFAULT 'global',
-        enabled boolean NOT NULL DEFAULT false,
-        service_principal text NOT NULL DEFAULT '',
-        keytab_b64 text,
-        krb5_conf text NOT NULL DEFAULT '',
-        strip_realm boolean NOT NULL DEFAULT true,
-        default_email_domain text NOT NULL DEFAULT '',
-        auto_create_users boolean NOT NULL DEFAULT true
-      );
-      INSERT INTO sso_settings (key) VALUES ('global') ON CONFLICT DO NOTHING;`,
-  },
-  {
     label: "test_records.kind column",
     sql: `
       DO $$

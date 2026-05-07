@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Save, Upload, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { CategoryItem, LdapSettings, LdapTestResult, SmtpSettings, SslSettings, SsoSettings, WorkflowTimeouts } from "@/lib/types";
+import type { CategoryItem, LdapSettings, LdapTestResult, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -57,7 +57,6 @@ export function SettingsPage() {
         <TabsList>
           <TabsTrigger value="smtp" data-testid="tab-smtp">SMTP</TabsTrigger>
           <TabsTrigger value="ldap" data-testid="tab-ldap">LDAP</TabsTrigger>
-          <TabsTrigger value="sso" data-testid="tab-sso">SSO (Windows)</TabsTrigger>
           <TabsTrigger value="ssl" data-testid="tab-ssl">SSL/TLS</TabsTrigger>
           <TabsTrigger value="timeouts" data-testid="tab-timeouts">Workflow timeouts</TabsTrigger>
           <TabsTrigger value="categories" data-testid="tab-categories">Categories</TabsTrigger>
@@ -65,7 +64,6 @@ export function SettingsPage() {
         </TabsList>
         <TabsContent value="smtp"><SmtpPanel /></TabsContent>
         <TabsContent value="ldap"><LdapPanel /></TabsContent>
-        <TabsContent value="sso"><SsoPanel /></TabsContent>
         <TabsContent value="ssl"><SslPanel /></TabsContent>
         <TabsContent value="timeouts"><TimeoutsPanel /></TabsContent>
         <TabsContent value="categories"><CategoriesPanel /></TabsContent>
@@ -528,189 +526,6 @@ function LdapPanel() {
               )}
             </div>
           )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// "Sign in with Windows" — Kerberos / SPNEGO. Admins paste the SPN, upload
-// a keytab generated on the AD side, and optionally override krb5.conf.
-// The keytab bytes are sent base64-encoded; the API never echoes them back
-// (it only reports keytabInstalled).
-function SsoPanel() {
-  const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["settings.sso"], queryFn: () => api.get<SsoSettings>("/settings/sso") });
-  const [form, setForm] = useState<(SsoSettings & { keytabB64?: string; keytabName?: string }) | null>(null);
-  useEffect(() => {
-    if (q.data && !form) setForm({ ...q.data });
-  }, [q.data, form]);
-  const save = useMutation({
-    mutationFn: () => api.put<SsoSettings>("/settings/sso", form),
-    onSuccess: (row) => {
-      toast.success("SSO settings saved");
-      setForm({ ...row });
-      qc.invalidateQueries({ queryKey: ["settings.sso"] });
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
-  });
-  if (!form) return <Skeleton className="mt-4 h-72 w-full" />;
-
-  // Read the keytab as base64 — the standard pattern for binary file
-  // uploads when the rest of the API speaks JSON. We keep the data URI
-  // prefix off so the server can decode the value directly.
-  const onKeytabFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const comma = result.indexOf(",");
-      const b64 = comma >= 0 ? result.slice(comma + 1) : result;
-      setForm({ ...form, keytabB64: b64, keytabName: file.name, keytabInstalled: true });
-    };
-    reader.onerror = () => toast.error("Could not read keytab file");
-    reader.readAsDataURL(file);
-  };
-
-  return (
-    <Card className="mt-4">
-      <CardHeader>
-        <CardTitle className="text-base">Single Sign-On (Kerberos / Windows)</CardTitle>
-        <CardDescription>
-          Lets domain-joined users sign in silently with their current Windows session via SPNEGO.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <Alert>
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription className="text-xs">
-            Requires (1) the API container built with <code>kerberos</code> and the MIT Kerberos
-            libraries; (2) the site reached by the same DNS hostname that's in the SPN — not
-            an IP address; (3) the URL added to the user's <em>Trusted/Intranet</em> zone in
-            their browser; and (4) a keytab generated on the AD side with <code>ktpass</code>.
-          </AlertDescription>
-        </Alert>
-
-        <div className="flex items-center justify-between rounded-md border border-border p-3">
-          <Label>Enabled</Label>
-          <Switch
-            checked={form.enabled}
-            onCheckedChange={(v) => setForm({ ...form, enabled: v })}
-            data-testid="switch-sso-enabled"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Service Principal Name (SPN)</Label>
-          <Input
-            value={form.servicePrincipal}
-            onChange={(e) => setForm({ ...form, servicePrincipal: e.target.value })}
-            placeholder="HTTP/changemgmt.corp.local@CORP.LOCAL"
-            data-testid="input-sso-spn"
-          />
-          <p className="text-xs text-muted-foreground">
-            The SPN registered against the AD service account that owns the keytab. Use the form
-            <code> HTTP/&lt;hostname&gt;@&lt;REALM&gt;</code>. The realm must be UPPER-CASE.
-          </p>
-        </div>
-
-        <div className="space-y-2 rounded-md border border-border p-3">
-          <Label>
-            Keytab file
-            {form.keytabInstalled && <span className="ml-2 text-xs text-success">Installed</span>}
-          </Label>
-          <Input
-            type="file"
-            accept=".keytab,application/octet-stream"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onKeytabFile(f);
-            }}
-            data-testid="input-sso-keytab"
-          />
-          {form.keytabName && (
-            <p className="text-xs text-muted-foreground">Pending upload: <code>{form.keytabName}</code></p>
-          )}
-          <p className="text-xs text-muted-foreground">
-            Generated on AD with <code>ktpass /princ HTTP/host.corp.local@CORP.LOCAL /mapuser
-            CORP\svc-changemgmt /pass * /crypto AES256-SHA1 /ptype KRB5_NT_PRINCIPAL /out
-            svc.keytab</code>. Treat this file like a long-term password — anyone holding it
-            can impersonate your service.
-          </p>
-          {form.keytabInstalled && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setForm({ ...form, keytabB64: "", keytabName: undefined, keytabInstalled: false })}
-            >
-              Clear stored keytab
-            </Button>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label>krb5.conf override (optional)</Label>
-          <Textarea
-            rows={6}
-            value={form.krb5Conf}
-            onChange={(e) => setForm({ ...form, krb5Conf: e.target.value })}
-            placeholder={"[libdefaults]\n  default_realm = CORP.LOCAL\n  dns_lookup_kdc = true\n[realms]\n  CORP.LOCAL = { kdc = dc01.corp.local }"}
-            data-testid="textarea-sso-krb5conf"
-          />
-          <p className="text-xs text-muted-foreground">
-            Leave blank to use the default <code>krb5.conf</code> baked into the container. Override
-            only if you need to pin specific KDCs or disable weak enctypes.
-          </p>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="flex items-center justify-between rounded-md border border-border p-3">
-            <div>
-              <Label>Strip realm from username</Label>
-              <p className="text-xs text-muted-foreground mt-1">
-                <code>alice@CORP.LOCAL</code> → <code>alice</code>. Recommended.
-              </p>
-            </div>
-            <Switch
-              checked={form.stripRealm}
-              onCheckedChange={(v) => setForm({ ...form, stripRealm: v })}
-              data-testid="switch-sso-strip-realm"
-            />
-          </div>
-          <div className="flex items-center justify-between rounded-md border border-border p-3">
-            <div>
-              <Label>Auto-create users on first SSO</Label>
-              <p className="text-xs text-muted-foreground mt-1">
-                Off → user must already exist in this app.
-              </p>
-            </div>
-            <Switch
-              checked={form.autoCreateUsers}
-              onCheckedChange={(v) => setForm({ ...form, autoCreateUsers: v })}
-              data-testid="switch-sso-autocreate"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Default email domain (for auto-created users)</Label>
-          <Input
-            value={form.defaultEmailDomain}
-            onChange={(e) => setForm({ ...form, defaultEmailDomain: e.target.value })}
-            placeholder="corp.local"
-            data-testid="input-sso-email-domain"
-          />
-          <p className="text-xs text-muted-foreground">
-            New users created via SSO get an email address of <code>&lt;username&gt;@&lt;this&gt;</code>.
-            Leave blank to use the placeholder <code>sso.local</code>.
-          </p>
-        </div>
-
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
-          <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-sso">
-            {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4" /> Save
-          </Button>
         </div>
       </CardContent>
     </Card>

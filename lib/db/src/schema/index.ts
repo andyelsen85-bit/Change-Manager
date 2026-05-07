@@ -9,7 +9,6 @@ export * from "./approvals";
 export * from "./cab";
 export * from "./comments";
 export * from "./settings";
-export * from "./sso-settings";
 export * from "./audit";
 export * from "./sequences";
 export * from "./categories";

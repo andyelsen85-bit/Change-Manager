@@ -5,7 +5,6 @@ import {
   smtpSettingsTable,
   ldapSettingsTable,
   sslSettingsTable,
-  ssoSettingsTable,
   workflowTimeoutsTable,
 } from "@workspace/db";
 import { requireAdmin } from "../lib/auth";
@@ -13,7 +12,7 @@ import { audit } from "../lib/audit";
 import { sendTestEmail } from "../lib/email";
 import { testLdapConnection } from "../lib/ldap";
 import { generateCsr } from "../lib/csr";
-import { encryptSecret, isEncrypted } from "../lib/secret-crypto";
+import { encryptSecret } from "../lib/secret-crypto";
 
 const router: IRouter = Router();
 
@@ -224,87 +223,6 @@ router.post("/settings/ldap/test", requireAdmin, async (req, res): Promise<void>
     },
   });
   res.json(r);
-});
-
-// SSO (Kerberos / SPNEGO) settings. The keytab is a long-term secret so we
-// never echo its bytes back to the UI; we only report whether one is
-// installed. The krb5.conf is plain text and is editable in the panel.
-function maskSso(row: typeof ssoSettingsTable.$inferSelect | undefined) {
-  if (!row) {
-    return {
-      enabled: false,
-      servicePrincipal: "",
-      keytabInstalled: false,
-      krb5Conf: "",
-      stripRealm: true,
-      defaultEmailDomain: "",
-      autoCreateUsers: true,
-    };
-  }
-  return {
-    enabled: row.enabled,
-    servicePrincipal: row.servicePrincipal,
-    keytabInstalled: !!row.keytabB64,
-    krb5Conf: row.krb5Conf,
-    stripRealm: row.stripRealm,
-    defaultEmailDomain: row.defaultEmailDomain,
-    autoCreateUsers: row.autoCreateUsers,
-  };
-}
-
-router.get("/settings/sso", requireAdmin, async (_req, res): Promise<void> => {
-  const [row] = await db.select().from(ssoSettingsTable).where(eq(ssoSettingsTable.key, KEY));
-  res.json(maskSso(row));
-});
-
-router.put("/settings/sso", requireAdmin, async (req, res): Promise<void> => {
-  const b = req.body ?? {};
-  const [before] = await db.select().from(ssoSettingsTable).where(eq(ssoSettingsTable.key, KEY));
-
-  // Accept the keytab as a base64 string in `keytabB64`. The browser
-  // reads the uploaded .keytab file via FileReader.readAsDataURL and
-  // strips the data: prefix before sending. Sending an empty string
-  // explicitly clears the stored keytab; omitting the field preserves
-  // whatever is on file.
-  // Keytab is a long-term Kerberos credential — anyone holding it can
-  // impersonate the service principal in the AD realm. Encrypt with the
-  // same AES-GCM helper used for SMTP/LDAP passwords before persisting,
-  // so a DB dump (or a backup file) does not directly leak it. The
-  // `enc:v1:` prefix lets `decryptSecret` distinguish encrypted blobs
-  // from any legacy plaintext rows that may already exist.
-  let keytab = before?.keytabB64 ?? null;
-  if (typeof b.keytabB64 === "string") {
-    if (b.keytabB64.length === 0) {
-      keytab = null;
-    } else {
-      keytab = isEncrypted(b.keytabB64) ? b.keytabB64 : encryptSecret(b.keytabB64);
-    }
-  }
-
-  const values = {
-    key: KEY,
-    enabled: !!b.enabled,
-    servicePrincipal: typeof b.servicePrincipal === "string" ? b.servicePrincipal : "",
-    keytabB64: keytab,
-    krb5Conf: typeof b.krb5Conf === "string" ? b.krb5Conf : "",
-    stripRealm: b.stripRealm === false ? false : true,
-    defaultEmailDomain: typeof b.defaultEmailDomain === "string" ? b.defaultEmailDomain : "",
-    autoCreateUsers: b.autoCreateUsers === false ? false : true,
-  };
-  const [row] = await db
-    .insert(ssoSettingsTable)
-    .values(values)
-    .onConflictDoUpdate({ target: ssoSettingsTable.key, set: values })
-    .returning();
-  await audit(req, {
-    action: "settings.sso_updated",
-    entityType: "settings",
-    entityId: null,
-    summary: `Updated SSO settings (spn=${row.servicePrincipal || "—"}, enabled=${row.enabled})`,
-    before: maskSso(before),
-    after: maskSso(row),
-  });
-  res.json(maskSso(row));
 });
 
 function maskSsl(row: typeof sslSettingsTable.$inferSelect | undefined) {
