@@ -20,6 +20,10 @@ import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/lib/theme-context";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+// The CHdN brand mark is rendered against the dark sidebar, so we use the
+// white-stroke variant. Importing through the @assets alias keeps the file
+// out of /public and lets Vite hash + cache-bust it like any other asset.
+import chdnLogo from "@assets/CHdN_Logo_Transp_WhiteStroke_1778142112460.png";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -73,13 +77,25 @@ export function AppShell({ children }: { children: ReactNode }) {
           mobileOpen ? "translate-x-0" : "-translate-x-full",
         )}
       >
-        <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-5">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-primary text-sidebar-primary-foreground">
-              <ShieldCheck className="h-4 w-4" />
-            </div>
+        <div className="flex h-20 items-center justify-between border-b border-sidebar-border px-5">
+          <Link href="/" className="flex items-center gap-3">
+            {/*
+             * The full CHdN logo includes the "Centre Hospitalier du Nord"
+             * tagline + wave; we crop visually with object-position to show
+             * just the wordmark + wave when the rail is collapsed. At the
+             * default 64px width the tagline reads cleanly enough to keep.
+             */}
+            <img
+              src={chdnLogo}
+              alt="CHdN — Centre Hospitalier du Nord"
+              className="h-12 w-auto select-none"
+              draggable={false}
+            />
             <div className="flex flex-col leading-tight">
-              <span className="text-sm font-semibold">Change Mgmt</span>
+              <span className="text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
+                Change
+              </span>
+              <span className="text-sm font-semibold">Management</span>
             </div>
           </Link>
           <Button
