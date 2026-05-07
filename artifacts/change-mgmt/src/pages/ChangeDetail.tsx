@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Loader2, MessageSquare, Send, Undo2, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Loader2, MessageSquare, Paperclip, Send, Trash2, Undo2, Upload, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { api } from "@/lib/api";
 import {
   STATUS_LABELS,
   type Approval,
+  type Attachment,
   type ChangeAssignee,
   type ChangeDetail as ChangeDetailT,
   type ChangeStatus,
@@ -516,8 +517,9 @@ export function ChangeDetailPage() {
             {c.hasPreprodEnv && (
               <TabsTrigger value="preprod-testing" data-testid="tab-preprod-testing">PreProdTesting</TabsTrigger>
             )}
-            <TabsTrigger value="testing" data-testid="tab-testing">Testing</TabsTrigger>
+            <TabsTrigger value="testing" data-testid="tab-testing">Post Prod Testing</TabsTrigger>
             <TabsTrigger value="pir" data-testid="tab-pir">PIR</TabsTrigger>
+            <TabsTrigger value="attachments" data-testid="tab-attachments">Attachments</TabsTrigger>
             <TabsTrigger value="comments" data-testid="tab-comments">Discussion</TabsTrigger>
           </TabsList>
 
@@ -530,6 +532,7 @@ export function ChangeDetailPage() {
           )}
           <TabsContent value="testing"><TestingTab id={id} kind="production" /></TabsContent>
           <TabsContent value="pir"><PirTab id={id} /></TabsContent>
+          <TabsContent value="attachments"><AttachmentsTab id={id} /></TabsContent>
           <TabsContent value="comments"><CommentsTab id={id} /></TabsContent>
         </Tabs>
       )}
@@ -1035,6 +1038,155 @@ function CommentsTab({ id }: { id: number }) {
             ))
           )}
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  return btoa(binary);
+}
+
+function AttachmentsTab({ id }: { id: number }) {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const aq = useQuery({
+    queryKey: ["change.attachments", id],
+    queryFn: () => api.get<Attachment[]>(`/changes/${id}/attachments`),
+  });
+  const del = useMutation({
+    mutationFn: (attId: number) => api.delete(`/attachments/${attId}`),
+    onSuccess: () => {
+      toast.success("Attachment deleted");
+      qc.invalidateQueries({ queryKey: ["change.attachments", id] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Delete failed"),
+  });
+
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error("File too large (max 20 MB)");
+      return;
+    }
+    setBusy(true);
+    try {
+      const dataBase64 = await fileToBase64(file);
+      await api.post(`/changes/${id}/attachments`, {
+        filename: file.name,
+        mimeType: file.type || "application/octet-stream",
+        dataBase64,
+      });
+      toast.success(`Uploaded ${file.name}`);
+      qc.invalidateQueries({ queryKey: ["change.attachments", id] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDownload = (att: Attachment) => {
+    api.download(`/attachments/${att.id}/download`, att.filename).catch((err) => {
+      toast.error(err instanceof Error ? err.message : "Download failed");
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Paperclip className="h-4 w-4" /> Attachments
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-xs text-muted-foreground">
+          Upload technical documentation, diagrams, runbooks, screenshots, or any supporting files
+          for this change. Max 20 MB per file.
+        </p>
+        <div>
+          <label className="inline-flex">
+            <input
+              type="file"
+              className="hidden"
+              onChange={onPick}
+              disabled={busy}
+              data-testid="input-attachment-file"
+            />
+            <Button asChild disabled={busy} data-testid="button-upload-attachment">
+              <span className="cursor-pointer">
+                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                Upload file
+              </span>
+            </Button>
+          </label>
+        </div>
+
+        {aq.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : (aq.data ?? []).length === 0 ? (
+          <p className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            No attachments yet.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border rounded-md border border-border">
+            {(aq.data ?? []).map((att) => {
+              const canDelete =
+                !!user && (user.isAdmin || user.id === att.uploadedById);
+              return (
+                <li
+                  key={att.id}
+                  className="flex items-center justify-between gap-3 p-3"
+                  data-testid={`row-attachment-${att.id}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{att.filename}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {fmtBytes(att.size)} · {att.mimeType} · uploaded by {att.uploadedByName ?? "Unknown"} {fmtAgo(att.uploadedAt)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onDownload(att)}
+                      data-testid={`button-download-${att.id}`}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => del.mutate(att.id)}
+                        disabled={del.isPending}
+                        data-testid={`button-delete-attachment-${att.id}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </CardContent>
     </Card>
   );

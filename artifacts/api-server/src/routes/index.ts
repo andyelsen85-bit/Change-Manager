@@ -15,6 +15,7 @@ import auditRouter from "./audit";
 import backupRouter from "./backup";
 import categoriesRouter from "./categories";
 import assigneesRouter from "./assignees";
+import attachmentsRouter from "./attachments";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(auditRouter);
 router.use(backupRouter);
 router.use(categoriesRouter);
 router.use(assigneesRouter);
+router.use(attachmentsRouter);
 
 export default router;

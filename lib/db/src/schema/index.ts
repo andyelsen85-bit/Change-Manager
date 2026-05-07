@@ -13,3 +13,4 @@ export * from "./audit";
 export * from "./sequences";
 export * from "./categories";
 export * from "./change_assignees";
+export * from "./attachments";

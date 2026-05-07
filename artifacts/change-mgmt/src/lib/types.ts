@@ -340,10 +340,21 @@ export const NOTIFICATION_EVENTS: { key: string; label: string; group: string }[
 ];
 
 export const TRACK_OPTIONS: { value: ChangeTrack; label: string; description: string }[] = [
-  { value: "normal", label: "Normal", description: "Full review with planning, approvals, CAB, testing, and PIR." },
   { value: "standard", label: "Standard", description: "Pre-approved, low-risk template. Auto-approves and bypasses CAB." },
+  { value: "normal", label: "Normal", description: "Full review with planning, approvals, CAB, testing, and PIR." },
   { value: "emergency", label: "Emergency", description: "Expedited path with eCAB approvals." },
 ];
+
+export type Attachment = {
+  id: number;
+  changeId: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  uploadedById: number;
+  uploadedByName: string | null;
+  uploadedAt: string;
+};
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {
   draft: "Draft",

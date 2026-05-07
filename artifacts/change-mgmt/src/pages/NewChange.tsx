@@ -13,6 +13,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { AlertTriangle } from "lucide-react";
 import { fromLocalDateTimeInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +40,7 @@ export function NewChangePage() {
   const [category, setCategory] = useState<string>("general");
   const [hasPreprodEnv, setHasPreprodEnv] = useState(false);
   const [preprodEnvUrl, setPreprodEnvUrl] = useState("");
+  const [emergencyConfirmOpen, setEmergencyConfirmOpen] = useState(false);
 
   const templatesQ = useQuery({ queryKey: ["templates"], queryFn: () => api.get<StandardTemplate[]>("/templates") });
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
@@ -113,28 +123,66 @@ export function NewChangePage() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 md:grid-cols-3">
-            {TRACK_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setTrack(opt.value)}
-                data-testid={`button-track-${opt.value}`}
-                className={cn(
-                  "rounded-lg border-2 p-4 text-left transition-colors",
-                  track === opt.value ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/40",
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">{opt.label}</div>
-                  {track === opt.value && (
-                    <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
-                      Selected
-                    </span>
+            {TRACK_OPTIONS.map((opt) => {
+              const isEmergency = opt.value === "emergency";
+              const isSelected = track === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => {
+                    if (isEmergency && track !== "emergency") {
+                      setEmergencyConfirmOpen(true);
+                    } else {
+                      setTrack(opt.value);
+                    }
+                  }}
+                  data-testid={`button-track-${opt.value}`}
+                  className={cn(
+                    "rounded-lg border-2 p-4 text-left transition-colors",
+                    isEmergency
+                      ? isSelected
+                        ? "border-destructive bg-destructive/10"
+                        : "border-destructive/60 bg-destructive/5 hover:border-destructive"
+                      : isSelected
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-muted-foreground/40",
                   )}
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">{opt.description}</p>
-              </button>
-            ))}
+                >
+                  <div className="flex items-center justify-between">
+                    <div
+                      className={cn(
+                        "text-sm font-semibold flex items-center gap-1.5",
+                        isEmergency && "text-destructive",
+                      )}
+                    >
+                      {isEmergency && <AlertTriangle className="h-4 w-4" />}
+                      {opt.label}
+                    </div>
+                    {isSelected && (
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-xs font-medium",
+                          isEmergency
+                            ? "bg-destructive text-destructive-foreground"
+                            : "bg-primary text-primary-foreground",
+                        )}
+                      >
+                        Selected
+                      </span>
+                    )}
+                  </div>
+                  <p
+                    className={cn(
+                      "mt-2 text-xs",
+                      isEmergency ? "text-destructive/80" : "text-muted-foreground",
+                    )}
+                  >
+                    {opt.description}
+                  </p>
+                </button>
+              );
+            })}
           </div>
         </CardContent>
       </Card>
@@ -292,6 +340,44 @@ export function NewChangePage() {
           Create change
         </Button>
       </div>
+
+      <Dialog open={emergencyConfirmOpen} onOpenChange={setEmergencyConfirmOpen}>
+        <DialogContent data-testid="dialog-emergency-confirm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Attention — Emergency Change
+            </DialogTitle>
+            <DialogDescription className="text-foreground">
+              When choosing Emergency Change, the eCAB Members will instantly be notified, and an
+              eCAB Meeting will be launched. If your change is really an emergency, go on and contact
+              the Change Manager or his deputy after creation. If both are not reachable, contact your
+              Management immediately.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEmergencyConfirmOpen(false)}
+              data-testid="button-emergency-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                setTrack("emergency");
+                setEmergencyConfirmOpen(false);
+              }}
+              data-testid="button-emergency-confirm"
+            >
+              I Understand, Proceed with Emergency Change
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }
