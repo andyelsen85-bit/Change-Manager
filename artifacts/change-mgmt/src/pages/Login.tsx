@@ -48,12 +48,13 @@ export function LoginPage() {
       }}
     >
       <Card className="w-full max-w-md overflow-hidden border-border/60 shadow-2xl">
-        {/* Brand banner: dark espresso panel with the white-stroke logo,
-            capped by the wave divider so the brand colors lead into the
-            form below. Mirrors the visual language of the logo itself. */}
+        {/* Brand banner: white panel so the CHdN logo (dark letters +
+            green/brown wave) reads at full saturation. Capped by the
+            brand-wave divider to introduce the brand colors before the
+            form. */}
         <div
           className="flex flex-col items-center gap-2 px-6 pt-8 pb-6 text-center"
-          style={{ background: "hsl(30 43% 22%)" }}
+          style={{ background: "#ffffff" }}
         >
           <img
             src={chdnLogo}
