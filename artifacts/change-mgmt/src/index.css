@@ -62,91 +62,137 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/*
+ * CHdN brand palette (charte graphique):
+ *   Greens   #96B423 (74° 67 42)  primary       #BDCD23 (65° 71 47)  lime
+ *   Yellows  #D7E178 (66° 60 68)  pale          #F0F055 (60° 84 64)  bright
+ *   Earths   #C8963C (38° 56 51)  ochre         #966E3C (30° 43 41)  brown (accent)
+ *            #BEA57D (35° 35 62)  sand
+ *
+ * The logo's wave gradient runs from the olive green into the brown, so we
+ * lean on those two as primary + accent and use the sandy/yellow tones for
+ * supporting surfaces (badges, soft backgrounds, status pills).
+ */
 :root {
-  --background: 210 40% 98%;
-  --foreground: 222 47% 11%;
+  --background: 60 30% 98%;       /* warm off-white, picks up the sand tone */
+  --foreground: 30 25% 12%;       /* dark espresso instead of cool slate */
   --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
+  --card-foreground: 30 25% 12%;
   --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --primary: 221 83% 53%;
+  --popover-foreground: 30 25% 12%;
+
+  --primary: 74 67% 42%;          /* CHdN olive green #96B423 */
   --primary-foreground: 0 0% 100%;
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --accent: 210 40% 94%;
-  --accent-foreground: 222 47% 11%;
+
+  --secondary: 35 35% 92%;        /* very pale sand */
+  --secondary-foreground: 30 35% 18%;
+
+  --muted: 60 25% 94%;
+  --muted-foreground: 30 12% 38%;
+
+  --accent: 30 43% 41%;           /* CHdN brown #966E3C */
+  --accent-foreground: 0 0% 100%;
+
   --destructive: 0 72% 51%;
   --destructive-foreground: 0 0% 100%;
-  --success: 142 71% 38%;
+  --success: 74 67% 36%;          /* slightly darker than primary so badges read */
   --success-foreground: 0 0% 100%;
-  --warning: 38 92% 50%;
-  --warning-foreground: 222 47% 11%;
-  --info: 199 89% 48%;
+  --warning: 38 56% 51%;          /* CHdN ochre #C8963C */
+  --warning-foreground: 0 0% 100%;
+  --info: 35 35% 50%;             /* tan, used sparingly */
   --info-foreground: 0 0% 100%;
-  --border: 214 32% 91%;
-  --input: 214 32% 91%;
-  --ring: 221 83% 53%;
+
+  --border: 35 25% 86%;
+  --input: 35 25% 86%;
+  --ring: 74 67% 42%;
   --radius: 0.5rem;
 
-  --sidebar: 222 47% 11%;
-  --sidebar-foreground: 210 40% 96%;
-  --sidebar-border: 217 33% 22%;
-  --sidebar-accent: 217 33% 17%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-primary: 221 83% 53%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-ring: 221 83% 53%;
+  /* Dark, warm sidebar so the white-stroke logo reads well, with the
+     brand green as the highlight color for the active item. */
+  --sidebar: 30 30% 12%;
+  --sidebar-foreground: 35 25% 92%;
+  --sidebar-border: 30 20% 20%;
+  --sidebar-accent: 30 25% 18%;
+  --sidebar-accent-foreground: 60 30% 98%;
+  --sidebar-primary: 74 67% 50%;
+  --sidebar-primary-foreground: 30 30% 12%;
+  --sidebar-ring: 74 67% 50%;
 
-  --chart-1: 221 83% 53%;
-  --chart-2: 142 71% 45%;
-  --chart-3: 38 92% 50%;
-  --chart-4: 0 72% 51%;
-  --chart-5: 280 65% 60%;
+  /* Charts span the brand palette in order — green, lime, ochre, brown,
+     sand — so analytics screens stay on-brand without re-mapping. */
+  --chart-1: 74 67% 42%;          /* green */
+  --chart-2: 65 71% 47%;          /* lime */
+  --chart-3: 38 56% 51%;          /* ochre */
+  --chart-4: 30 43% 41%;          /* brown */
+  --chart-5: 35 35% 62%;          /* sand */
 }
 
 .dark {
-  --background: 222 47% 6%;
-  --foreground: 210 40% 96%;
-  --card: 222 47% 9%;
-  --card-foreground: 210 40% 96%;
-  --popover: 222 47% 9%;
-  --popover-foreground: 210 40% 96%;
-  --primary: 217 91% 60%;
-  --primary-foreground: 222 47% 11%;
-  --secondary: 217 33% 17%;
-  --secondary-foreground: 210 40% 96%;
-  --muted: 217 33% 14%;
-  --muted-foreground: 215 20% 65%;
-  --accent: 217 33% 17%;
-  --accent-foreground: 210 40% 96%;
-  --destructive: 0 63% 50%;
+  --background: 30 25% 7%;
+  --foreground: 35 25% 92%;
+  --card: 30 25% 10%;
+  --card-foreground: 35 25% 92%;
+  --popover: 30 25% 10%;
+  --popover-foreground: 35 25% 92%;
+
+  --primary: 74 67% 50%;          /* lifted green so it pops on dark */
+  --primary-foreground: 30 30% 10%;
+
+  --secondary: 30 20% 18%;
+  --secondary-foreground: 35 25% 92%;
+
+  --muted: 30 18% 15%;
+  --muted-foreground: 35 15% 65%;
+
+  --accent: 30 43% 50%;           /* lifted brown */
+  --accent-foreground: 30 30% 10%;
+
+  --destructive: 0 63% 55%;
   --destructive-foreground: 0 0% 100%;
-  --success: 142 71% 42%;
-  --success-foreground: 0 0% 100%;
-  --warning: 38 92% 50%;
-  --warning-foreground: 222 47% 11%;
-  --info: 199 89% 55%;
-  --info-foreground: 0 0% 100%;
-  --border: 217 33% 18%;
-  --input: 217 33% 18%;
-  --ring: 217 91% 60%;
+  --success: 74 67% 45%;
+  --success-foreground: 30 30% 10%;
+  --warning: 38 56% 56%;
+  --warning-foreground: 30 30% 10%;
+  --info: 35 35% 60%;
+  --info-foreground: 30 30% 10%;
 
-  --sidebar: 222 47% 4%;
-  --sidebar-foreground: 210 40% 96%;
-  --sidebar-border: 217 33% 14%;
-  --sidebar-accent: 217 33% 12%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-primary: 217 91% 60%;
-  --sidebar-primary-foreground: 222 47% 11%;
-  --sidebar-ring: 217 91% 60%;
+  --border: 30 18% 20%;
+  --input: 30 18% 20%;
+  --ring: 74 67% 50%;
 
-  --chart-1: 217 91% 60%;
-  --chart-2: 142 71% 50%;
-  --chart-3: 38 92% 55%;
-  --chart-4: 0 72% 60%;
-  --chart-5: 280 65% 70%;
+  --sidebar: 30 30% 8%;
+  --sidebar-foreground: 35 25% 92%;
+  --sidebar-border: 30 20% 16%;
+  --sidebar-accent: 30 25% 14%;
+  --sidebar-accent-foreground: 60 30% 98%;
+  --sidebar-primary: 74 67% 55%;
+  --sidebar-primary-foreground: 30 30% 8%;
+  --sidebar-ring: 74 67% 55%;
+
+  --chart-1: 74 67% 50%;
+  --chart-2: 65 71% 55%;
+  --chart-3: 38 56% 58%;
+  --chart-4: 30 43% 50%;
+  --chart-5: 35 35% 65%;
+}
+
+/*
+ * The CHdN brand mark (a crossed wave that fades from olive green into
+ * warm brown). Used as a slim divider on the login splash + as a subtle
+ * decoration on dashboard hero areas. Pure CSS so it scales without an
+ * extra image request.
+ */
+.brand-wave {
+  height: 6px;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    hsl(74 67% 42%) 0%,
+    hsl(65 71% 47%) 25%,
+    hsl(38 56% 51%) 65%,
+    hsl(30 43% 41%) 100%
+  );
 }
 
 @layer base {
