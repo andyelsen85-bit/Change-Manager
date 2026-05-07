@@ -37,9 +37,10 @@ const OPEN_STATUSES = [
  *   - "all" (default)  : no filtering
  *   - "last_month"     : the previous calendar month (e.g. on 2026-05-07
  *                        this is 2026-04-01 00:00 .. 2026-04-30 23:59:59.999)
- *   - "last_6_months"  : the six previous calendar months ending last month
- *                        inclusive (i.e. months [-6 .. -1])
- *   - "last_year"      : the previous calendar year, Jan 1 .. Dec 31
+ *   - "last_6_months"  : rolling 6 months back from now (e.g. on 2026-05-07
+ *                        this is 2025-11-07 00:00 .. now)
+ *   - "last_year"      : rolling 12 months back from now (e.g. on 2026-05-07
+ *                        this is 2025-05-07 00:00 .. now)
  *
  * Returns `null` for "all" / unknown values so callers can skip filtering.
  */
@@ -55,16 +56,17 @@ function resolveRange(range: string | undefined): { start: Date; end: Date } | n
       return { start, end };
     }
     case "last_6_months": {
-      // Six full months ending last month inclusive — drop the current month
-      // so the window doesn't move mid-day. Start = first day of (m - 6).
-      const start = new Date(y, m - 6, 1, 0, 0, 0, 0);
-      const end = new Date(y, m, 0, 23, 59, 59, 999); // last instant of last month
-      return { start, end };
+      // Rolling 6 months back from today (inclusive of today). Day-of-month
+      // is preserved; if the target month doesn't have that day (e.g. Aug 31
+      // - 6 months would be Feb 31), Date arithmetic rolls forward, which is
+      // acceptable for a dashboard window.
+      const start = new Date(y, m - 6, now.getDate(), 0, 0, 0, 0);
+      return { start, end: now };
     }
     case "last_year": {
-      const start = new Date(y - 1, 0, 1, 0, 0, 0, 0);
-      const end = new Date(y - 1, 11, 31, 23, 59, 59, 999);
-      return { start, end };
+      // Rolling 12 months back from today (inclusive of today).
+      const start = new Date(y - 1, m, now.getDate(), 0, 0, 0, 0);
+      return { start, end: now };
     }
     default:
       return null;
