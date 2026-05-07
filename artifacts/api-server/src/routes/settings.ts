@@ -13,6 +13,12 @@ import { sendTestEmail } from "../lib/email";
 import { testLdapConnection } from "../lib/ldap";
 import { generateCsr } from "../lib/csr";
 import { encryptSecret } from "../lib/secret-crypto";
+import {
+  flushNotificationQueue,
+  getNotificationSettings,
+  getQueueDepth,
+  setNotificationSettings,
+} from "../lib/notification-worker";
 
 const router: IRouter = Router();
 
@@ -368,6 +374,64 @@ router.put("/settings/workflow-timeouts", requireAdmin, async (req, res): Promis
     after: row,
   });
   res.json(row);
+});
+
+// Notification batching: lets admins choose the digest interval and see
+// how many items are pending plus when the next send will run. The worker
+// itself lives in lib/notification-worker.ts.
+async function notificationStatus(): Promise<{
+  batchIntervalMinutes: number;
+  lastRunAt: string | null;
+  nextRunAt: string;
+  queuedCount: number;
+}> {
+  const { batchIntervalMinutes, lastRunAt } = await getNotificationSettings();
+  const queuedCount = await getQueueDepth();
+  const baseMs = lastRunAt ? lastRunAt.getTime() : Date.now();
+  const nextMs = baseMs + batchIntervalMinutes * 60_000;
+  return {
+    batchIntervalMinutes,
+    lastRunAt: lastRunAt ? lastRunAt.toISOString() : null,
+    nextRunAt: new Date(Math.max(nextMs, Date.now())).toISOString(),
+    queuedCount,
+  };
+}
+
+router.get("/settings/notifications", requireAdmin, async (_req, res): Promise<void> => {
+  res.json(await notificationStatus());
+});
+
+router.put("/settings/notifications", requireAdmin, async (req, res): Promise<void> => {
+  const b = req.body ?? {};
+  const raw = Number(b.batchIntervalMinutes);
+  if (!Number.isFinite(raw) || raw < 1 || raw > 60 * 24) {
+    res.status(400).json({ error: "batchIntervalMinutes must be between 1 and 1440" });
+    return;
+  }
+  const before = await getNotificationSettings();
+  await setNotificationSettings(raw);
+  const after = await notificationStatus();
+  await audit(req, {
+    action: "settings.notifications_updated",
+    entityType: "settings",
+    entityId: null,
+    summary: `Notification batch interval ${before.batchIntervalMinutes} → ${after.batchIntervalMinutes} min`,
+    before,
+    after,
+  });
+  res.json(after);
+});
+
+router.post("/settings/notifications/flush", requireAdmin, async (req, res): Promise<void> => {
+  const r = await flushNotificationQueue();
+  await audit(req, {
+    action: "settings.notifications_flushed",
+    entityType: "settings",
+    entityId: null,
+    summary: `Manual digest flush — ${r.usersNotified} user(s), ${r.itemsSent} item(s)`,
+    after: r,
+  });
+  res.json({ ...r, status: await notificationStatus() });
 });
 
 export default router;

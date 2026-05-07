@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { runSeed } from "./seed";
 import { applyDbConstraints } from "./lib/db-bootstrap";
+import { startNotificationWorker } from "./lib/notification-worker";
 
 const rawPort = process.env["PORT"];
 
@@ -35,5 +36,9 @@ applyDbConstraints()
         process.exit(1);
       }
       logger.info({ port }, "Server listening");
+      // Background email digest worker — drains notification_queue every
+      // (configurable) N minutes so users get one consolidated email
+      // instead of one per event.
+      startNotificationWorker();
     });
   });

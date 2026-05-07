@@ -5,6 +5,7 @@ import {
   db,
   smtpSettingsTable,
   notificationPreferencesTable,
+  notificationQueueTable,
   usersTable,
 } from "@workspace/db";
 import { logger } from "./logger";
@@ -18,9 +19,6 @@ export async function getSmtp() {
 export async function buildTransporter() {
   const cfg = await getSmtp();
   if (!cfg || !cfg.enabled || !cfg.host) return null;
-  // Build a TLS options object honouring the admin's "verify TLS cert" toggle
-  // and any uploaded CA chain. We always set rejectUnauthorized explicitly so
-  // a future Node default change cannot silently flip behaviour.
   const tlsOpts: tls.ConnectionOptions = {
     rejectUnauthorized: cfg.tlsRejectUnauthorized !== false,
   };
@@ -39,8 +37,6 @@ export async function buildTransporter() {
 }
 
 export async function userWantsEmail(userId: number, eventKey: string): Promise<boolean> {
-  // Admin master switch — when notifications_enabled is false on the user
-  // row, no notification of any kind is delivered to that user.
   const [u] = await db
     .select({ notificationsEnabled: usersTable.notificationsEnabled, isActive: usersTable.isActive })
     .from(usersTable)
@@ -56,7 +52,65 @@ export async function userWantsEmail(userId: number, eventKey: string): Promise<
 
 export type NotifyTarget = { userId: number; email: string; name: string };
 
+// notify() no longer sends mail directly. It enqueues one row per recipient
+// in notification_queue; the background worker (lib/notification-worker.ts)
+// drains the queue every N minutes (admin-configurable) and sends ONE
+// consolidated email per user. This eliminates the per-event spam pattern
+// and guarantees per-user grouping (no recipient ever sees another user's
+// queued items).
+//
+// CAB invitations / agendas use sendImmediate() below because they ship an
+// .ics calendar attachment that has to land at the moment the meeting is
+// created — batching a calendar invite an arbitrary 0–15 minutes later would
+// confuse Outlook's accept/decline flow.
 export async function notify(opts: {
+  eventKey: string;
+  to: NotifyTarget[];
+  subject: string;
+  text: string;
+  html?: string;
+  ics?: { content: string; filename: string };
+}): Promise<{ sent: number; skipped: number; errors: number }> {
+  if (opts.ics) {
+    return sendImmediate(opts);
+  }
+  const seen = new Set<number>();
+  const unique = opts.to.filter((t) => {
+    if (seen.has(t.userId)) return false;
+    seen.add(t.userId);
+    return true;
+  });
+  let queued = 0;
+  let skipped = 0;
+  let errors = 0;
+  for (const t of unique) {
+    if (!(await userWantsEmail(t.userId, opts.eventKey))) {
+      skipped++;
+      continue;
+    }
+    try {
+      await db.insert(notificationQueueTable).values({
+        userId: t.userId,
+        eventKey: opts.eventKey,
+        subject: opts.subject,
+        bodyText: opts.text,
+        bodyHtml: opts.html ?? "",
+      });
+      queued++;
+    } catch (err) {
+      logger.error({ err, userId: t.userId, eventKey: opts.eventKey }, "Failed to enqueue notification");
+      errors++;
+    }
+  }
+  // Preserve the old return shape so call-sites that log the result keep working.
+  // `sent` here means "accepted into the outbound queue", not "delivered to SMTP";
+  // `errors` covers enqueue failures (DB insert problems) so callers can react.
+  return { sent: queued, skipped, errors };
+}
+
+// Send right now, bypassing the queue. Use only for time-critical mails like
+// CAB invites with attached .ics calendar entries.
+async function sendImmediate(opts: {
   eventKey: string;
   to: NotifyTarget[];
   subject: string;
@@ -67,11 +121,9 @@ export async function notify(opts: {
   const transporter = await buildTransporter();
   const cfg = await getSmtp();
   if (!transporter || !cfg) {
-    logger.info({ eventKey: opts.eventKey }, "SMTP not configured; skipping notification");
+    logger.info({ eventKey: opts.eventKey }, "SMTP not configured; skipping immediate notification");
     return { sent: 0, skipped: opts.to.length, errors: 0 };
   }
-  // De-duplicate targets — when assignees + owner overlap we'd otherwise
-  // send the same person the same email twice.
   const seen = new Set<number>();
   const unique = opts.to.filter((t) => {
     if (seen.has(t.userId)) return false;
@@ -135,7 +187,6 @@ export async function getUserEmail(userId: number): Promise<NotifyTarget | null>
   return { userId: u.id, email: u.email, name: u.fullName };
 }
 
-// Resolve a list of user IDs to NotifyTarget rows, dropping unknown users.
 export async function getUserEmails(userIds: number[]): Promise<NotifyTarget[]> {
   const out: NotifyTarget[] = [];
   for (const id of userIds) {

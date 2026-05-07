@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, integer, timestamp } from "drizzle-orm/pg-core";
 
 // Single-row tables (key = constant 'global').
 export const smtpSettingsTable = pgTable("smtp_settings", {
@@ -52,6 +52,17 @@ export const sslSettingsTable = pgTable("ssl_settings", {
   chainPem: text("chain_pem"),
   forceHttps: boolean("force_https").notNull().default(false),
   hstsEnabled: boolean("hsts_enabled").notNull().default(false),
+});
+
+// Notification batching configuration. Single-row table (key='global').
+// `batchIntervalMinutes` controls how often the worker drains the queue;
+// `lastRunAt` is updated by the worker after each run so the UI can show
+// "next send in N minutes". Defaults to a 15-minute interval which empirically
+// balances responsiveness against email volume for a small change-mgmt team.
+export const notificationSettingsTable = pgTable("notification_settings", {
+  key: text("key").primaryKey().default("global"),
+  batchIntervalMinutes: integer("batch_interval_minutes").notNull().default(15),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
 });
 
 export const workflowTimeoutsTable = pgTable("workflow_timeouts", {

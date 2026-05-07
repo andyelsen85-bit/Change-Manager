@@ -59,6 +59,7 @@ export function SettingsPage() {
           <TabsTrigger value="ldap" data-testid="tab-ldap">LDAP</TabsTrigger>
           <TabsTrigger value="ssl" data-testid="tab-ssl">SSL/TLS</TabsTrigger>
           <TabsTrigger value="timeouts" data-testid="tab-timeouts">Workflow timeouts</TabsTrigger>
+          <TabsTrigger value="notifications" data-testid="tab-notifications">Notifications</TabsTrigger>
           <TabsTrigger value="categories" data-testid="tab-categories">Categories</TabsTrigger>
           <TabsTrigger value="backup" data-testid="tab-backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
@@ -66,6 +67,7 @@ export function SettingsPage() {
         <TabsContent value="ldap"><LdapPanel /></TabsContent>
         <TabsContent value="ssl"><SslPanel /></TabsContent>
         <TabsContent value="timeouts"><TimeoutsPanel /></TabsContent>
+        <TabsContent value="notifications"><NotificationsBatchPanel /></TabsContent>
         <TabsContent value="categories"><CategoriesPanel /></TabsContent>
         <TabsContent value="backup"><BackupPanel /></TabsContent>
       </Tabs>
@@ -888,6 +890,164 @@ function TimeoutsPanel() {
         <NField k="emergencyApprovalMinutes" label="Emergency approval window" suffix="minutes" />
         <div className="md:col-span-2 flex justify-end border-t border-border pt-4">
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
+            {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            <Save className="mr-2 h-4 w-4" /> Save
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+type NotificationBatchStatus = {
+  batchIntervalMinutes: number;
+  lastRunAt: string | null;
+  nextRunAt: string;
+  queuedCount: number;
+};
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "any moment now";
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `${s}s`;
+  if (m < 60) return `${m}m ${s.toString().padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h ${rm}m`;
+}
+
+function NotificationsBatchPanel() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["settings.notifications"],
+    queryFn: () => api.get<NotificationBatchStatus>("/settings/notifications"),
+    // Refresh every 15s so the countdown stays roughly accurate even
+    // without re-rendering on a 1-second tick.
+    refetchInterval: 15_000,
+  });
+  const [interval, setIntervalMinutes] = useState<number | null>(null);
+  useEffect(() => {
+    if (q.data && interval === null) setIntervalMinutes(q.data.batchIntervalMinutes);
+  }, [q.data, interval]);
+
+  // Local 1-second tick so the "Next send in …" countdown is smooth without
+  // hammering the API.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const save = useMutation({
+    mutationFn: (mins: number) =>
+      api.put<NotificationBatchStatus>("/settings/notifications", { batchIntervalMinutes: mins }),
+    onSuccess: (row) => {
+      toast.success("Notification interval saved");
+      setIntervalMinutes(row.batchIntervalMinutes);
+      qc.invalidateQueries({ queryKey: ["settings.notifications"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
+  });
+
+  const flush = useMutation({
+    mutationFn: () => api.post<{ usersNotified: number; itemsSent: number; status: NotificationBatchStatus }>(
+      "/settings/notifications/flush",
+      {},
+    ),
+    onSuccess: (r) => {
+      if (r.itemsSent === 0) toast.success("Queue is empty — nothing to send");
+      else toast.success(`Sent ${r.itemsSent} notification(s) to ${r.usersNotified} user(s)`);
+      qc.invalidateQueries({ queryKey: ["settings.notifications"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Flush failed"),
+  });
+
+  if (!q.data || interval === null) return <Skeleton className="mt-4 h-64 w-full" />;
+
+  const nextMs = new Date(q.data.nextRunAt).getTime();
+  const remaining = nextMs - now;
+  const countdown = formatCountdown(remaining);
+  const lastRunLabel = q.data.lastRunAt
+    ? new Date(q.data.lastRunAt).toLocaleString("en-GB", {
+        day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+      })
+    : "never";
+  const dirty = interval !== q.data.batchIntervalMinutes;
+  const valid = Number.isFinite(interval) && interval >= 1 && interval <= 1440;
+
+  return (
+    <Card className="mt-4">
+      <CardHeader>
+        <CardTitle className="text-base">Notification batching</CardTitle>
+        <CardDescription>
+          Group every user's pending notifications into a single branded email and send digests on a schedule
+          instead of one email per event. Each user only ever sees their own notifications — digests are built
+          per recipient.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-md border border-border bg-muted/30 p-3">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Pending in queue</div>
+            <div className="mt-1 text-2xl font-semibold" data-testid="text-notifications-queued">
+              {q.data.queuedCount}
+            </div>
+            <div className="text-xs text-muted-foreground">item(s) waiting for next digest</div>
+          </div>
+          <div className="rounded-md border border-border bg-muted/30 p-3">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Next send in</div>
+            <div className="mt-1 text-2xl font-semibold" data-testid="text-notifications-countdown">
+              {countdown}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              at {new Date(q.data.nextRunAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+            </div>
+          </div>
+          <div className="rounded-md border border-border bg-muted/30 p-3">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground">Last run</div>
+            <div className="mt-1 text-base font-medium">{lastRunLabel}</div>
+            <div className="text-xs text-muted-foreground">timestamp of the most recent digest</div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="batch-interval">Send digest every</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="batch-interval"
+              type="number"
+              min={1}
+              max={1440}
+              value={interval}
+              onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+              className="max-w-xs"
+              data-testid="input-batch-interval"
+            />
+            <span className="text-xs text-muted-foreground">minutes (1 – 1440)</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Lower values are more responsive but may produce more email; higher values further reduce volume.
+            Changes take effect on the next worker tick (within ~30 seconds).
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+          <Button
+            variant="outline"
+            onClick={() => flush.mutate()}
+            disabled={flush.isPending}
+            data-testid="button-flush-now"
+          >
+            {flush.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Send digest now
+          </Button>
+          <Button
+            onClick={() => save.mutate(interval)}
+            disabled={save.isPending || !dirty || !valid}
+            data-testid="button-save-batch-interval"
+          >
             {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             <Save className="mr-2 h-4 w-4" /> Save
           </Button>

@@ -36,12 +36,19 @@ const TABLES = [
   "ldap_settings",
   "ssl_settings",
   "workflow_timeouts",
+  "notification_settings",
+  "notification_queue",
   "audit_log",
 ] as const;
 
 // Tables that are new in the current backup version. Older backups (v1)
 // don't include these — that's fine, we leave them empty after restore.
-const TABLES_OPTIONAL = new Set<string>(["change_categories", "change_assignees"]);
+const TABLES_OPTIONAL = new Set<string>([
+  "change_categories",
+  "change_assignees",
+  "notification_settings",
+  "notification_queue",
+]);
 
 export type BackupPayload = {
   version: number;
