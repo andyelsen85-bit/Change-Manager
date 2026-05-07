@@ -28,8 +28,59 @@ const OPEN_STATUSES = [
   "awaiting_pir",
 ];
 
-router.get("/dashboard/summary", requireAuth, async (_req, res): Promise<void> => {
-  const all = await db.select().from(changeRequestsTable);
+/**
+ * Resolve a `range` query value into an inclusive [start, end] window over
+ * `created_at`. Always anchored to whole calendar months so the result is
+ * stable regardless of the time of day the request is made.
+ *
+ * Supported values:
+ *   - "all" (default)  : no filtering
+ *   - "last_month"     : the previous calendar month (e.g. on 2026-05-07
+ *                        this is 2026-04-01 00:00 .. 2026-04-30 23:59:59.999)
+ *   - "last_6_months"  : the six previous calendar months ending last month
+ *                        inclusive (i.e. months [-6 .. -1])
+ *   - "last_year"      : the previous calendar year, Jan 1 .. Dec 31
+ *
+ * Returns `null` for "all" / unknown values so callers can skip filtering.
+ */
+function resolveRange(range: string | undefined): { start: Date; end: Date } | null {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-based
+  switch (range) {
+    case "last_month": {
+      // Previous calendar month: from day 1 to last instant of that month.
+      const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
+      const end = new Date(y, m, 0, 23, 59, 59, 999); // day 0 of current month = last day of previous
+      return { start, end };
+    }
+    case "last_6_months": {
+      // Six full months ending last month inclusive — drop the current month
+      // so the window doesn't move mid-day. Start = first day of (m - 6).
+      const start = new Date(y, m - 6, 1, 0, 0, 0, 0);
+      const end = new Date(y, m, 0, 23, 59, 59, 999); // last instant of last month
+      return { start, end };
+    }
+    case "last_year": {
+      const start = new Date(y - 1, 0, 1, 0, 0, 0, 0);
+      const end = new Date(y - 1, 11, 31, 23, 59, 59, 999);
+      return { start, end };
+    }
+    default:
+      return null;
+  }
+}
+
+router.get("/dashboard/summary", requireAuth, async (req, res): Promise<void> => {
+  const range = resolveRange(typeof req.query.range === "string" ? req.query.range : undefined);
+  // We pull all rows then filter in-process. The dataset is small (single-org
+  // change log) and this keeps the in-memory aggregations identical to the
+  // unfiltered branch — switching to SQL aggregates would only matter once
+  // we hit tens of thousands of changes.
+  const allRaw = await db.select().from(changeRequestsTable);
+  const all = range
+    ? allRaw.filter((c) => c.createdAt >= range.start && c.createdAt <= range.end)
+    : allRaw;
   const totalChanges = all.length;
   const openChanges = all.filter((c) => OPEN_STATUSES.includes(c.status)).length;
   const awaitingApproval = all.filter((c) => c.status === "awaiting_approval" || c.status === "in_review").length;

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -16,6 +17,13 @@ import { Button } from "@/components/ui/button";
 import { fmtDateTime } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -30,8 +38,29 @@ import {
 
 const PIE_COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
+// Timerange filter for the summary KPIs and charts. Values match the
+// `range` query the API understands; "all" sends no filter (default).
+// All non-"all" ranges anchor to whole calendar months — see the resolveRange
+// helper in artifacts/api-server/src/routes/dashboard.ts for exact bounds.
+type RangeKey = "all" | "last_month" | "last_6_months" | "last_year";
+const RANGE_OPTIONS: ReadonlyArray<{ value: RangeKey; label: string }> = [
+  { value: "all", label: "All time" },
+  { value: "last_month", label: "Last calendar month" },
+  { value: "last_6_months", label: "Last 6 months" },
+  { value: "last_year", label: "Last calendar year" },
+];
+
 export function DashboardPage() {
-  const summaryQ = useQuery({ queryKey: ["dashboard.summary"], queryFn: () => api.get<DashboardSummary>("/dashboard/summary") });
+  const [range, setRange] = useState<RangeKey>("all");
+  const summaryQ = useQuery({
+    // Range is part of the cache key so React Query keeps a separate result
+    // per range and switching back is instant.
+    queryKey: ["dashboard.summary", range],
+    queryFn: () =>
+      api.get<DashboardSummary>(
+        range === "all" ? "/dashboard/summary" : `/dashboard/summary?range=${range}`,
+      ),
+  });
   const cabQ = useQuery({ queryKey: ["dashboard.upcoming-cab"], queryFn: () => api.get<CabMeeting[]>("/dashboard/upcoming-cab") });
   const tasksQ = useQuery({ queryKey: ["dashboard.my-tasks"], queryFn: () => api.get<DashboardTask[]>("/dashboard/my-tasks") });
 
@@ -39,17 +68,31 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6" data-testid="page-dashboard">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Operations overview</h2>
           <p className="text-sm text-muted-foreground">Real-time pulse of your change management practice.</p>
         </div>
-        <Link href="/changes/new">
-          <Button data-testid="button-new-change">
-            <Plus className="mr-2 h-4 w-4" />
-            New Change
-          </Button>
-        </Link>
+        <div className="flex items-center gap-3">
+          <Select value={range} onValueChange={(v) => setRange(v as RangeKey)}>
+            <SelectTrigger className="w-[210px]" data-testid="select-dashboard-range">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {RANGE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value} data-testid={`option-range-${o.value}`}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Link href="/changes/new">
+            <Button data-testid="button-new-change">
+              <Plus className="mr-2 h-4 w-4" />
+              New Change
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
