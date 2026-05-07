@@ -14,7 +14,7 @@ import { api } from "@/lib/api";
 import type { CabMeeting, DashboardSummary, DashboardTask } from "@/lib/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { fmtDateTime } from "@/lib/format";
+import { fmtDateShort, fmtDateTime } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
@@ -51,6 +51,30 @@ const RANGE_OPTIONS: ReadonlyArray<{ value: RangeKey; label: string }> = [
   { value: "last_year", label: "Last year" },
 ];
 
+/**
+ * Mirrors resolveRange() in artifacts/api-server/src/routes/dashboard.ts so
+ * we can show the user the exact [start, end] window the API will use.
+ * Returns null for "all" — caller hides the hint in that case.
+ */
+function describeRange(range: RangeKey): { start: Date; end: Date } | null {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  switch (range) {
+    case "last_month":
+      return {
+        start: new Date(y, m - 1, 1, 0, 0, 0, 0),
+        end: new Date(y, m, 0, 23, 59, 59, 999),
+      };
+    case "last_6_months":
+      return { start: new Date(y, m - 6, now.getDate(), 0, 0, 0, 0), end: now };
+    case "last_year":
+      return { start: new Date(y - 1, m, now.getDate(), 0, 0, 0, 0), end: now };
+    default:
+      return null;
+  }
+}
+
 export function DashboardPage() {
   const [range, setRange] = useState<RangeKey>("all");
   const summaryQ = useQuery({
@@ -75,18 +99,35 @@ export function DashboardPage() {
           <p className="text-sm text-muted-foreground">Real-time pulse of your change management practice.</p>
         </div>
         <div className="flex items-center gap-3">
-          <Select value={range} onValueChange={(v) => setRange(v as RangeKey)}>
-            <SelectTrigger className="w-[210px]" data-testid="select-dashboard-range">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {RANGE_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value} data-testid={`option-range-${o.value}`}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-col items-end gap-1">
+            <Select value={range} onValueChange={(v) => setRange(v as RangeKey)}>
+              <SelectTrigger className="w-[210px]" data-testid="select-dashboard-range">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RANGE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value} data-testid={`option-range-${o.value}`}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(() => {
+              // Show the resolved [start - end] under the dropdown so the
+              // user knows exactly which window the dashboard is summarizing.
+              // Hidden for "All time" since there's no window to describe.
+              const r = describeRange(range);
+              if (!r) return null;
+              return (
+                <span
+                  className="text-xs text-muted-foreground"
+                  data-testid="text-range-hint"
+                >
+                  {fmtDateShort(r.start)} – {fmtDateShort(r.end)}
+                </span>
+              );
+            })()}
+          </div>
           <Link href="/changes/new">
             <Button data-testid="button-new-change">
               <Plus className="mr-2 h-4 w-4" />
