@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Save, Upload, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { fmtDate, fmtDateTime } from "@/lib/format";
 import type { CategoryItem, LdapSettings, LdapTestResult, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -969,11 +970,7 @@ function NotificationsBatchPanel() {
   const nextMs = new Date(q.data.nextRunAt).getTime();
   const remaining = nextMs - now;
   const countdown = formatCountdown(remaining);
-  const lastRunLabel = q.data.lastRunAt
-    ? new Date(q.data.lastRunAt).toLocaleString("en-GB", {
-        day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
-      })
-    : "never";
+  const lastRunLabel = q.data.lastRunAt ? fmtDateTime(q.data.lastRunAt) : "never";
   const dirty = interval !== q.data.batchIntervalMinutes;
   const valid = Number.isFinite(interval) && interval >= 1 && interval <= 1440;
 
@@ -1002,7 +999,7 @@ function NotificationsBatchPanel() {
               {countdown}
             </div>
             <div className="text-xs text-muted-foreground">
-              at {new Date(q.data.nextRunAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+              at {fmtDate(q.data.nextRunAt, "HH:mm")}
             </div>
           </div>
           <div className="rounded-md border border-border bg-muted/30 p-3">
