@@ -17,6 +17,7 @@ import { requireAuth, getChangeAccess, isPrivilegedAccess, loadUserRoles } from 
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
 import { notify, getUserEmail, getUserEmails } from "../lib/email";
+import { resolveRecipients } from "../lib/notification-routing";
 import { getAssignedUserIds } from "./assignees";
 import {
   isTransitionAllowed,
@@ -123,23 +124,14 @@ async function notifyApprovers(changeId: number, change: typeof changeRequestsTa
   }
 }
 
-// Broadcast change.completed to the owner + all per-change assignees.
+// Broadcast change.completed using the admin-configurable routing rules.
 async function notifyChangeCompleted(change: typeof changeRequestsTable.$inferSelect) {
-  const ids = new Set<number>([change.ownerId]);
-  if (change.assigneeId) ids.add(change.assigneeId);
-  for (const r of ["implementer", "tester"] as const) {
-    const perChange = await getAssignedUserIds(change.id, r);
-    if (perChange.length > 0) {
-      for (const u of perChange) ids.add(u);
-    } else {
-      const pool = await db
-        .select({ userId: roleAssignmentsTable.userId })
-        .from(roleAssignmentsTable)
-        .where(eq(roleAssignmentsTable.roleKey, r));
-      for (const u of pool) ids.add(u.userId);
-    }
-  }
-  const targets = await getUserEmails(Array.from(ids));
+  const targets = await resolveRecipients("change.completed", {
+    changeId: change.id,
+    ownerId: change.ownerId,
+    assigneeId: change.assigneeId,
+    track: change.track,
+  });
   if (targets.length === 0) return;
   await notify({
     eventKey: "change.completed",
@@ -556,18 +548,12 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     (track === "normal" && fromStatus === "draft" && toStatus === "in_review") ||
     (track === "emergency" && fromStatus === "draft" && toStatus === "awaiting_approval");
   if (isSubmit) {
-    // Loop in Change Managers (always) plus eCAB members for emergency
-    // changes so governance roles know a change is awaiting their review.
-    const recipientIds = new Set<number>();
-    for (const r of track === "emergency" ? ["change_manager", "ecab_member"] : ["change_manager"]) {
-      const pool = await db
-        .select({ userId: roleAssignmentsTable.userId })
-        .from(roleAssignmentsTable)
-        .where(eq(roleAssignmentsTable.roleKey, r));
-      for (const u of pool) recipientIds.add(u.userId);
-    }
-    if (before.ownerId) recipientIds.add(before.ownerId);
-    const targets = await getUserEmails(Array.from(recipientIds));
+    const targets = await resolveRecipients("change.submitted", {
+      changeId: before.id,
+      ownerId: before.ownerId,
+      assigneeId: before.assigneeId,
+      track,
+    });
     if (targets.length > 0) {
       await notify({
         eventKey: "change.submitted",
@@ -578,9 +564,12 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     }
   }
   if (toStatus === "cancelled") {
-    const recipientIds = new Set<number>([before.ownerId]);
-    if (before.assigneeId) recipientIds.add(before.assigneeId);
-    const targets = await getUserEmails(Array.from(recipientIds));
+    const targets = await resolveRecipients("change.cancelled", {
+      changeId: before.id,
+      ownerId: before.ownerId,
+      assigneeId: before.assigneeId,
+      track: before.track,
+    });
     if (targets.length > 0) {
       await notify({
         eventKey: "change.cancelled",

@@ -11,7 +11,8 @@ import {
 } from "@workspace/db";
 import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
-import { notify, getUserEmail } from "../lib/email";
+import { notify } from "../lib/email";
+import { resolveRecipients } from "../lib/notification-routing";
 
 const router: IRouter = Router();
 
@@ -195,11 +196,16 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
   // does not generate email. This keeps the notification stream narrow per
   // user request.
   if (change && ap.roleKey === "change_manager" && decision === "approved") {
-    const owner = await getUserEmail(change.ownerId);
-    if (owner) {
+    const targets = await resolveRecipients("approval.granted", {
+      changeId: change.id,
+      ownerId: change.ownerId,
+      assigneeId: change.assigneeId,
+      track: change.track,
+    });
+    if (targets.length > 0) {
       await notify({
         eventKey: "approval.granted",
-        to: [owner],
+        to: targets,
         subject: `[CHG ${change.ref}] Approved: ${change.title}`,
         text: `${change.ref} ${change.title}\n\n${change.description ?? ""}\n\nThe Change Manager${me?.isDeputy ? " (deputy)" : ""} has approved this change.${comment ? "\n\n" + comment : ""}`,
       });

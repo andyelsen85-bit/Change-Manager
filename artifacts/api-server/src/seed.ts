@@ -14,6 +14,7 @@ import {
 import { inArray } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
 import { logger } from "./lib/logger";
+import { seedDefaultRoutingRules } from "./lib/notification-routing";
 
 // Bootstrap the initial admin user.
 //
@@ -286,4 +287,10 @@ export async function runSeed(): Promise<void> {
   await db.insert(ldapSettingsTable).values({ key: "global" }).onConflictDoNothing();
   await db.insert(sslSettingsTable).values({ key: "global" }).onConflictDoNothing();
   await db.insert(workflowTimeoutsTable).values({ key: "global" }).onConflictDoNothing();
+
+  // Default notification routing rules — idempotent: only inserted when the
+  // notification_routing_rules table is completely empty. Admins can edit
+  // these from Settings → Notifications without their changes being
+  // overwritten on the next restart.
+  await seedDefaultRoutingRules();
 }

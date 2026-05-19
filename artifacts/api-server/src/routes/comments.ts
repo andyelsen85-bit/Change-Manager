@@ -3,7 +3,8 @@ import { desc, eq } from "drizzle-orm";
 import { db, commentsTable, usersTable, changeRequestsTable } from "@workspace/db";
 import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
-import { notify, getUserEmail } from "../lib/email";
+import { notify } from "../lib/email";
+import { resolveRecipients } from "../lib/notification-routing";
 
 const router: IRouter = Router();
 
@@ -73,15 +74,13 @@ router.post("/changes/:id/comments", requireAuth, async (req, res): Promise<void
   });
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
   if (c) {
-    const targets = [];
-    if (c.ownerId !== session.uid) {
-      const o = await getUserEmail(c.ownerId);
-      if (o) targets.push(o);
-    }
-    if (c.assigneeId && c.assigneeId !== session.uid && c.assigneeId !== c.ownerId) {
-      const a = await getUserEmail(c.assigneeId);
-      if (a) targets.push(a);
-    }
+    const targets = await resolveRecipients("comment.added", {
+      changeId: c.id,
+      ownerId: c.ownerId,
+      assigneeId: c.assigneeId,
+      track: c.track,
+      actorUserId: session.uid,
+    });
     if (targets.length) {
       await notify({
         eventKey: "comment.added",
