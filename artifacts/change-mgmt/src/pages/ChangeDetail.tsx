@@ -616,7 +616,7 @@ function PlanningTab({ id }: { id: number }) {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
   });
   if (!form) return <Skeleton className="mt-4 h-72 w-full" />;
-  const F = ({ k, label, rows = 3 }: { k: keyof PlanningRecord; label: string; rows?: number }) => (
+  const field = (k: keyof PlanningRecord, label: string, rows = 3) => (
     <div className="space-y-2">
       <Label>{label}</Label>
       <Textarea
@@ -630,13 +630,13 @@ function PlanningTab({ id }: { id: number }) {
   return (
     <Card className="mt-4">
       <CardContent className="space-y-4 p-6">
-        <F k="scope" label="Scope" />
-        <F k="implementationPlan" label="Implementation plan" rows={5} />
-        <F k="rollbackPlan" label="Rollback plan" rows={4} />
-        <F k="riskAssessment" label="Risk assessment" rows={3} />
-        <F k="impactedServices" label="Impacted services" rows={2} />
-        <F k="communicationsPlan" label="Communications plan" rows={2} />
-        <F k="successCriteria" label="Success criteria" rows={2} />
+        {field("scope", "Scope")}
+        {field("implementationPlan", "Implementation plan", 5)}
+        {field("rollbackPlan", "Rollback plan", 4)}
+        {field("riskAssessment", "Risk assessment", 3)}
+        {field("impactedServices", "Impacted services", 2)}
+        {field("communicationsPlan", "Communications plan", 2)}
+        {field("successCriteria", "Success criteria", 2)}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
           <div className="text-xs text-muted-foreground">
             {form.signedOff && form.signedOffBy ? (
