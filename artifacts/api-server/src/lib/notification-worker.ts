@@ -91,55 +91,6 @@ function parseChangeRef(subject: string): { ref: string | null; rest: string } {
 
 type DigestItem = { subject: string; bodyHtml: string; bodyText: string; eventKey: string; createdAt: Date };
 
-// Within a single change group, collapse multiple change.transitioned items
-// into a single synthesized row so the recipient sees "draft → approved" in
-// one place rather than three sequential rows for draft → in_review,
-// in_review → awaiting_approval, awaiting_approval → approved. We keep the
-// note (if any) from the last transition and preserve the title/description
-// header lines from the most recent item so the merged row still carries
-// the change context.
-function collapseStatusTransitions(
-  group: Array<DigestItem & { rest: string }>,
-): Array<DigestItem & { rest: string }> {
-  const transitions = group.filter((g) => g.eventKey === "change.transitioned");
-  if (transitions.length < 2) return group;
-  // Parse "X → Y" from each bodyText. The arrow may be a unicode arrow
-  // (notify path) or "→ Reverted" (revert path); we accept either.
-  const arrowRe = /(\w+)\s*→\s*(\w+)/;
-  let from: string | null = null;
-  let to: string | null = null;
-  for (const t of transitions) {
-    const m = arrowRe.exec(t.bodyText);
-    if (!m) continue;
-    if (from === null) from = m[1];
-    to = m[2];
-  }
-  if (!from || !to) return group;
-  const last = transitions[transitions.length - 1];
-  // Preserve the title + description lead lines from the last item by
-  // taking everything up to (but not including) the first "X → Y" line.
-  const headLines: string[] = [];
-  for (const line of last.bodyText.split("\n")) {
-    if (arrowRe.test(line)) break;
-    headLines.push(line);
-  }
-  const head = headLines.join("\n").trimEnd();
-  const synthesized: DigestItem & { rest: string } = {
-    ...last,
-    subject: last.subject.replace(/Status:\s*\w+/, `Status: ${to}`),
-    rest: last.rest.replace(/Status:\s*\w+/, `Status: ${from} → ${to}`),
-    bodyText: `${head}\n\n${from} → ${to}`.trim(),
-    bodyHtml: "",
-    createdAt: last.createdAt,
-  };
-  // Keep all non-transition items in original order, then append the
-  // synthesized merged transition at the end of the group.
-  return [
-    ...group.filter((g) => g.eventKey !== "change.transitioned"),
-    synthesized,
-  ];
-}
-
 function groupByChange(items: DigestItem[]): Array<{ ref: string | null; items: Array<DigestItem & { rest: string }> }> {
   const order: Array<string | null> = [];
   const map = new Map<string | null, Array<DigestItem & { rest: string }>>();
@@ -158,7 +109,7 @@ function groupByChange(items: DigestItem[]): Array<{ ref: string | null; items: 
       ref,
       // Only collapse when the group is anchored to a change ref — the
       // "Other" bucket has unrelated items and shouldn't be merged.
-      items: ref ? collapseStatusTransitions(map.get(ref)!) : map.get(ref)!,
+      items: map.get(ref)!,
     }));
 }
 

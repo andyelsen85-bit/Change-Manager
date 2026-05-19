@@ -170,14 +170,17 @@ async function putTesting(req: Request, res: Response, kind: "production" | "pre
     summary: `${kind === "preprod" ? "Pre-prod testing" : "Testing"} updated (overall: ${overallResult})`,
     after: row,
   });
-  if (overallResult === "passed" || overallResult === "failed") {
+  // Notification stream is narrow: only fire when *production* testing is
+  // signed off as PASSED. Pre-prod results and failed runs are captured in
+  // the audit log + visible in-app but do not generate email.
+  if (kind === "production" && overallResult === "passed") {
     const owner = await getUserEmail(c.ownerId);
     if (owner) {
       await notify({
         eventKey: "test.signed_off",
         to: [owner],
-        subject: `[CHG ${c.ref}] ${kind === "preprod" ? "Pre-prod testing" : "Testing"} ${overallResult}`,
-        text: `${kind === "preprod" ? "Pre-prod testing" : "Testing"} for ${c.ref} ${c.title} was ${overallResult}.`,
+        subject: `[CHG ${c.ref}] Production testing passed: ${c.title}`,
+        text: `${c.ref} ${c.title}\n\n${c.description ?? ""}\n\nProduction testing has been signed off as PASSED.`,
       });
     }
   }

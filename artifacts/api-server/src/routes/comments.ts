@@ -86,7 +86,7 @@ router.post("/changes/:id/comments", requireAuth, async (req, res): Promise<void
       await notify({
         eventKey: "comment.added",
         to: targets,
-        subject: `[CHG ${c.ref}] New comment from ${session.username}`,
+        subject: `[CHG ${c.ref}] ${c.title} — new comment from ${session.username}`,
         text: `${session.username} commented on ${c.ref} ${c.title}:\n\n${body.trim()}`,
       });
     }
