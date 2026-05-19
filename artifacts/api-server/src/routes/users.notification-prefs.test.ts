@@ -62,7 +62,7 @@ describe("GET /users/:id/notification-preferences", () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     // sample at least one well-known key
-    const change = res.body.find((p: { eventKey: string }) => p.eventKey === "change.created");
+    const change = res.body.find((p: { eventKey: string }) => p.eventKey === "change.submitted");
     expect(change).toBeTruthy();
     expect(change.emailEnabled).toBe(true);
     expect(change.inAppEnabled).toBe(true);
@@ -76,12 +76,12 @@ describe("GET /users/:id/notification-preferences", () => {
 
   it("admin can read another user's preferences", async () => {
     dbMock.enqueue("select", [
-      { userId: 42, eventKey: "change.created", emailEnabled: false, inAppEnabled: true },
+      { userId: 42, eventKey: "change.submitted", emailEnabled: false, inAppEnabled: true },
     ]);
     const app = buildTestApp(usersRouter, ADMIN_SESSION);
     const res = await request(app).get("/api/users/42/notification-preferences");
     expect(res.status).toBe(200);
-    const p = res.body.find((x: { eventKey: string }) => x.eventKey === "change.created");
+    const p = res.body.find((x: { eventKey: string }) => x.eventKey === "change.submitted");
     expect(p.emailEnabled).toBe(false);
     expect(p.inAppEnabled).toBe(true);
   });
@@ -98,7 +98,7 @@ describe("PUT /users/:id/notification-preferences — round-trip", () => {
     dbMock.enqueue("insert", undefined);
     // Re-fetch
     dbMock.enqueue("select", [
-      { userId: 42, eventKey: "change.created", emailEnabled: false, inAppEnabled: true },
+      { userId: 42, eventKey: "change.submitted", emailEnabled: false, inAppEnabled: true },
       { userId: 42, eventKey: "approval.requested", emailEnabled: true, inAppEnabled: false },
     ]);
 
@@ -106,7 +106,7 @@ describe("PUT /users/:id/notification-preferences — round-trip", () => {
     const res = await request(app)
       .put("/api/users/42/notification-preferences")
       .send([
-        { eventKey: "change.created", emailEnabled: false, inAppEnabled: true },
+        { eventKey: "change.submitted", emailEnabled: false, inAppEnabled: true },
         { eventKey: "approval.requested", emailEnabled: true, inAppEnabled: false },
       ]);
 
@@ -119,7 +119,7 @@ describe("PUT /users/:id/notification-preferences — round-trip", () => {
       expect(typeof p.emailEnabled).toBe("boolean");
       expect(typeof p.inAppEnabled).toBe("boolean");
     }
-    const change = res.body.find((x: { eventKey: string }) => x.eventKey === "change.created");
+    const change = res.body.find((x: { eventKey: string }) => x.eventKey === "change.submitted");
     expect(change).toMatchObject({ emailEnabled: false, inAppEnabled: true });
     const ap = res.body.find((x: { eventKey: string }) => x.eventKey === "approval.requested");
     expect(ap).toMatchObject({ emailEnabled: true, inAppEnabled: false });
@@ -129,7 +129,7 @@ describe("PUT /users/:id/notification-preferences — round-trip", () => {
     const app = buildTestApp(usersRouter, STRANGER_SESSION);
     const res = await request(app)
       .put("/api/users/42/notification-preferences")
-      .send([{ eventKey: "change.created", emailEnabled: false }]);
+      .send([{ eventKey: "change.submitted", emailEnabled: false }]);
     expect(res.status).toBe(403);
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Download, Loader2, MessageSquare, Paperclip, Send, Trash2, Undo2, Upload, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Loader2, MessageSquare, Paperclip, Send, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -380,6 +380,14 @@ export function ChangeDetailPage() {
     queryFn: () => api.get<ChangeAssignee[]>(`/changes/${id}/assignees`),
     enabled: Number.isFinite(id),
   });
+  // For emergency changes we surface a "Launch Teams meeting" button that
+  // pre-fills the eCAB members as attendees. Fetched lazily — only triggered
+  // when an emergency change is being viewed.
+  const ecabMembersQ = useQuery({
+    queryKey: ["users.ecab_member"],
+    queryFn: () => api.get<User[]>("/users?role=ecab_member"),
+    enabled: Number.isFinite(id) && changeQ.data?.track === "emergency",
+  });
 
   const transition = useMutation({
     mutationFn: (status: ChangeStatus) => api.post(`/changes/${id}/transition`, { toStatus: status }),
@@ -413,6 +421,19 @@ export function ChangeDetailPage() {
   });
 
   const c = changeQ.data;
+  // Build a Teams "new meeting" deep-link with eCAB member emails as the
+  // attendee list. https://teams.microsoft.com/l/meeting/new?subject=…&attendees=…
+  const teamsMeetingUrl = (() => {
+    if (!c || c.track !== "emergency") return null;
+    const emails = (ecabMembersQ.data ?? [])
+      .map((u) => u.email)
+      .filter((e): e is string => typeof e === "string" && e.length > 0);
+    const subject = encodeURIComponent(`eCAB URGENT — ${c.ref} ${c.title}`);
+    const attendees = encodeURIComponent(emails.join(","));
+    return `https://teams.microsoft.com/l/meeting/new?subject=${subject}${
+      attendees ? `&attendees=${attendees}` : ""
+    }`;
+  })();
   if (!Number.isFinite(id)) return <div className="p-8">Invalid change id.</div>;
 
   return (
@@ -468,6 +489,19 @@ export function ChangeDetailPage() {
               ))}
               {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).length === 0 && (
                 <span className="text-xs text-muted-foreground">No further transitions available from this state.</span>
+              )}
+              {c.track === "emergency" && teamsMeetingUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  asChild
+                  data-testid="button-teams-meeting"
+                  title="Open Microsoft Teams and start a meeting pre-filled with the eCAB members as attendees."
+                >
+                  <a href={teamsMeetingUrl} target="_blank" rel="noopener noreferrer">
+                    <Video className="mr-1.5 h-3.5 w-3.5" /> Launch Teams meeting
+                  </a>
+                </Button>
               )}
               {canRevert && REVERSIONS_BY_TRACK[c.track][c.status].length > 0 && (
                 <Button

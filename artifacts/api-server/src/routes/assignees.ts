@@ -8,7 +8,6 @@ import {
 } from "@workspace/db";
 import { requireAuth, getChangeAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
-import { notify, getUserEmails } from "../lib/email";
 
 // Roles that can be assigned per-change. Mirrors the seeded role keys but
 // scoped to those that map onto a single human contributor for an
@@ -90,21 +89,10 @@ router.put("/changes/:id/assignees", requireAuth, async (req, res): Promise<void
     before,
     after,
   });
-  // Notify the union of previous + new assignees so dropped users learn
-  // they're off the change and freshly assigned users are looped in.
-  const userIds = new Set<number>();
-  for (const r of [...before, ...after]) userIds.add(r.userId);
-  if (userIds.size > 0) {
-    const targets = await getUserEmails(Array.from(userIds));
-    if (targets.length > 0) {
-      await notify({
-        eventKey: "change.assignee_changed",
-        to: targets,
-        subject: `[CHG ${chg.ref}] Assignees updated`,
-        text: `Per-change assignees were updated on ${chg.ref} ${chg.title}.`,
-      });
-    }
-  }
+  // Per-change assignee updates do not generate user-facing notifications
+  // (audit log captures the change). The notification stream is reserved
+  // for the four lifecycle events: submitted / cancelled / completed /
+  // approved / production-testing-passed.
   const rows = await db
     .select({
       id: changeAssigneesTable.id,

@@ -322,19 +322,15 @@ export type WorkflowTimeouts = {
 };
 
 export const NOTIFICATION_EVENTS: { key: string; label: string; group: string }[] = [
-  { key: "change.created", label: "Change created", group: "Lifecycle" },
   { key: "change.submitted", label: "Change submitted", group: "Lifecycle" },
-  { key: "change.transitioned", label: "Change status changed", group: "Lifecycle" },
-  { key: "change.scheduled", label: "Change scheduled", group: "Lifecycle" },
+  { key: "change.cancelled", label: "Change cancelled", group: "Lifecycle" },
   { key: "change.completed", label: "Change completed", group: "Lifecycle" },
-  { key: "change.assignee_changed", label: "Assignee changed", group: "Lifecycle" },
   { key: "approval.requested", label: "Approval requested", group: "Approvals" },
   { key: "approval.granted", label: "Approval granted", group: "Approvals" },
-  { key: "approval.rejected", label: "Approval rejected", group: "Approvals" },
   { key: "cab.invited", label: "CAB invitation", group: "CAB" },
   { key: "cab.reminder", label: "CAB reminder", group: "CAB" },
   { key: "cab.minutes", label: "CAB minutes published", group: "CAB" },
-  { key: "test.signed_off", label: "Test results signed off", group: "Testing & PIR" },
+  { key: "test.signed_off", label: "Production testing passed", group: "Testing & PIR" },
   { key: "pir.due", label: "PIR due", group: "Testing & PIR" },
   { key: "comment.added", label: "Comment added", group: "Collaboration" },
 ];

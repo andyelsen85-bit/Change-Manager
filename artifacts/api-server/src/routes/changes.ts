@@ -542,47 +542,51 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     before: { status: before.status },
     after: { status: toStatus, note: note ?? null },
   });
-  // Notify owner + assignee
-  const targets = [];
-  const owner = await getUserEmail(before.ownerId);
-  if (owner) targets.push(owner);
-  if (before.assigneeId && before.assigneeId !== before.ownerId) {
-    const a = await getUserEmail(before.assigneeId);
-    if (a) targets.push(a);
-  }
-  if (targets.length > 0) {
-    await notify({
-      eventKey: "change.transitioned",
-      to: targets,
-      subject: `[CHG ${before.ref}] Status: ${toStatus}`,
-      text: `${before.ref} ${before.title}\n\n${before.description ?? ""}\n\n${before.status} → ${toStatus}${note ? "\n\nNote: " + note : ""}`,
-    });
-  }
-  // Per-status broadcasts: scheduled / completed reach the full assignee
-  // list, not just owner+assignee, so all stakeholders are looped in.
-  if (toStatus === "scheduled") {
-    const ids = new Set<number>([before.ownerId]);
-    if (before.assigneeId) ids.add(before.assigneeId);
-    for (const r of ["implementer", "tester"] as const) {
-      const perChange = await getAssignedUserIds(id, r);
-      if (perChange.length > 0) {
-        for (const u of perChange) ids.add(u);
-      } else {
-        // Fallback to the global role pool when no per-change assignee is set.
-        const pool = await db
-          .select({ userId: roleAssignmentsTable.userId })
-          .from(roleAssignmentsTable)
-          .where(eq(roleAssignmentsTable.roleKey, r));
-        for (const u of pool) ids.add(u.userId);
-      }
+  // ─── Notification routing ────────────────────────────────────────────────
+  // The notification stream is intentionally narrow: only four lifecycle
+  // events broadcast email:
+  //   1. submitted   — change enters in_review (normal) or awaiting_approval (emergency direct submit)
+  //   2. cancelled   — toStatus === "cancelled"
+  //   3. completed   — toStatus === "completed" (handled by notifyChangeCompleted)
+  //   4. approved    — fired from /approvals when change_manager grants
+  //   5. test passed — fired from /phases when production testing passes
+  // Generic per-transition notifications and the old "scheduled" broadcast
+  // were removed at user request.
+  const isSubmit =
+    (track === "normal" && fromStatus === "draft" && toStatus === "in_review") ||
+    (track === "emergency" && fromStatus === "draft" && toStatus === "awaiting_approval");
+  if (isSubmit) {
+    // Loop in Change Managers (always) plus eCAB members for emergency
+    // changes so governance roles know a change is awaiting their review.
+    const recipientIds = new Set<number>();
+    for (const r of track === "emergency" ? ["change_manager", "ecab_member"] : ["change_manager"]) {
+      const pool = await db
+        .select({ userId: roleAssignmentsTable.userId })
+        .from(roleAssignmentsTable)
+        .where(eq(roleAssignmentsTable.roleKey, r));
+      for (const u of pool) recipientIds.add(u.userId);
     }
-    const sched = await getUserEmails(Array.from(ids));
-    if (sched.length > 0) {
+    if (before.ownerId) recipientIds.add(before.ownerId);
+    const targets = await getUserEmails(Array.from(recipientIds));
+    if (targets.length > 0) {
       await notify({
-        eventKey: "change.scheduled",
-        to: sched,
-        subject: `[CHG ${before.ref}] Scheduled: ${before.title}`,
-        text: `${before.ref} is now scheduled.\n\n${before.description ?? ""}`,
+        eventKey: "change.submitted",
+        to: targets,
+        subject: `[CHG ${before.ref}] Submitted: ${before.title}`,
+        text: `${before.ref} ${before.title}\n\n${before.description ?? ""}\n\nA ${track} change was submitted for review.`,
+      });
+    }
+  }
+  if (toStatus === "cancelled") {
+    const recipientIds = new Set<number>([before.ownerId]);
+    if (before.assigneeId) recipientIds.add(before.assigneeId);
+    const targets = await getUserEmails(Array.from(recipientIds));
+    if (targets.length > 0) {
+      await notify({
+        eventKey: "change.cancelled",
+        to: targets,
+        subject: `[CHG ${before.ref}] Cancelled: ${before.title}`,
+        text: `${before.ref} ${before.title}\n\n${before.description ?? ""}\n\nThis change has been cancelled${note ? `: ${note}` : "."}`,
       });
     }
   }
@@ -704,22 +708,10 @@ router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> 
       actualEndCleared: updates.actualEnd === null && before.actualEnd != null,
     },
   });
-  // Notify owner + assignee that the change was walked back.
-  const targets = [];
-  const owner = await getUserEmail(before.ownerId);
-  if (owner) targets.push(owner);
-  if (before.assigneeId && before.assigneeId !== before.ownerId) {
-    const a = await getUserEmail(before.assigneeId);
-    if (a) targets.push(a);
-  }
-  if (targets.length > 0) {
-    await notify({
-      eventKey: "change.transitioned",
-      to: targets,
-      subject: `[CHG ${before.ref}] Reverted: ${fromStatus} → ${targetStatus}`,
-      text: `${before.ref} ${before.title}\n\n${before.description ?? ""}\n\n${fromStatus} → ${targetStatus} (reverted)\n\nReason: ${reason.trim()}${approvalsResetCount > 0 ? `\n\n${approvalsResetCount} approval(s) were reset to pending — fresh votes are required before this change can move forward again.` : ""}`,
-    });
-  }
+  // Reverts are governance actions and are captured by the audit log; they
+  // intentionally do not trigger email notifications (notification stream is
+  // scoped to lifecycle events: submitted / cancelled / completed / approved
+  // / production testing passed).
   res.json(await expandChangeRow(updated));
 });
 

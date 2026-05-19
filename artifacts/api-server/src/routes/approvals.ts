@@ -190,14 +190,18 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     summary: `${change?.ref ?? ap.changeId}: ${ap.roleKey} ${decision}${comment ? ` — ${comment}` : ""}`,
     after: { decision, comment, viaDeputy: !!me?.isDeputy },
   });
-  if (change) {
+  // Only notify the owner when the Change Manager (or their deputy) grants
+  // approval — every other approval vote is captured in the audit log but
+  // does not generate email. This keeps the notification stream narrow per
+  // user request.
+  if (change && ap.roleKey === "change_manager" && decision === "approved") {
     const owner = await getUserEmail(change.ownerId);
     if (owner) {
       await notify({
-        eventKey: decision === "rejected" ? "approval.rejected" : "approval.granted",
+        eventKey: "approval.granted",
         to: [owner],
-        subject: `[CHG ${change.ref}] ${ap.roleKey} ${decision}`,
-        text: `${change.ref} ${change.title}\n\n${ap.roleKey} decision: ${decision}${comment ? "\n\n" + comment : ""}`,
+        subject: `[CHG ${change.ref}] Approved: ${change.title}`,
+        text: `${change.ref} ${change.title}\n\n${change.description ?? ""}\n\nThe Change Manager${me?.isDeputy ? " (deputy)" : ""} has approved this change.${comment ? "\n\n" + comment : ""}`,
       });
     }
   }
