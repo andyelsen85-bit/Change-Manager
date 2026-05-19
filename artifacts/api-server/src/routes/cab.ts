@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, gte, lte } from "drizzle-orm";
 import {
   db,
@@ -167,45 +168,112 @@ router.get("/cab-meetings", requireAuth, async (req, res): Promise<void> => {
 
 router.post("/cab-meetings", requireCabManager, async (req, res): Promise<void> => {
   const b = req.body ?? {};
-  if (!b.title || !b.scheduledStart || !b.scheduledEnd) {
-    res.status(400).json({ error: "title, scheduledStart, scheduledEnd required" });
+  if (!b.title || !b.scheduledStart) {
+    res.status(400).json({ error: "title and scheduledStart required" });
     return;
   }
-  const [created] = await db
-    .insert(cabMeetingsTable)
-    .values({
-      title: b.title,
-      kind: b.kind === "ecab" ? "ecab" : "cab",
-      scheduledStart: new Date(b.scheduledStart),
-      scheduledEnd: new Date(b.scheduledEnd),
-      location: b.location ?? "",
-      agenda: b.agenda ?? "",
-      chairUserId: typeof b.chairUserId === "number" ? b.chairUserId : null,
-    })
-    .returning();
-  if (Array.isArray(b.memberIds)) {
-    for (const uid of b.memberIds) {
-      if (typeof uid === "number") {
-        await db.insert(cabMembersTable).values({ meetingId: created.id, userId: uid }).onConflictDoNothing();
+  const kind = b.kind === "ecab" ? "ecab" : "cab";
+  const firstStart = new Date(b.scheduledStart);
+  if (Number.isNaN(firstStart.getTime())) {
+    res.status(400).json({ error: "Invalid scheduledStart" });
+    return;
+  }
+  if (b.scheduledEnd && Number.isNaN(new Date(b.scheduledEnd).getTime())) {
+    res.status(400).json({ error: "Invalid scheduledEnd" });
+    return;
+  }
+  // Duration in minutes (default 60). Used to compute scheduledEnd; if the
+  // caller still passes a literal scheduledEnd we honour it for backwards
+  // compatibility.
+  const durationMin = Number.isFinite(b.durationMinutes) && b.durationMinutes > 0
+    ? Math.floor(b.durationMinutes)
+    : null;
+  const computeEnd = (start: Date): Date => {
+    if (durationMin != null) return new Date(start.getTime() + durationMin * 60_000);
+    if (b.scheduledEnd) return new Date(b.scheduledEnd);
+    return new Date(start.getTime() + 60 * 60_000);
+  };
+  // Recurrence parameters. Repeat-until is required when recurring is on;
+  // we generate the full series up-front so each occurrence has its own row
+  // (members, changes, status) and the calendar reflects them immediately.
+  const recurring = !!b.recurring;
+  const intervalWeeks = Number.isFinite(b.recurrenceIntervalWeeks) && b.recurrenceIntervalWeeks > 0
+    ? Math.floor(b.recurrenceIntervalWeeks)
+    : 1;
+  let recurrenceUntil: Date | null = null;
+  if (recurring) {
+    if (!b.recurrenceUntil) {
+      res.status(400).json({ error: "recurrenceUntil is required when recurring is true" });
+      return;
+    }
+    recurrenceUntil = new Date(b.recurrenceUntil);
+    if (Number.isNaN(recurrenceUntil.getTime())) {
+      res.status(400).json({ error: "Invalid recurrenceUntil" });
+      return;
+    }
+  }
+  // Build occurrence start dates: first occurrence then +N weeks while
+  // <= recurrenceUntil. Cap at 200 to keep an honest mistake from blowing up.
+  const starts: Date[] = [firstStart];
+  if (recurring && recurrenceUntil) {
+    const untilMs = recurrenceUntil.getTime() + 24 * 60 * 60_000 - 1; // inclusive end-of-day
+    let next = new Date(firstStart.getTime() + intervalWeeks * 7 * 24 * 60 * 60_000);
+    while (next.getTime() <= untilMs && starts.length < 200) {
+      starts.push(next);
+      next = new Date(next.getTime() + intervalWeeks * 7 * 24 * 60 * 60_000);
+    }
+  }
+  const groupId = recurring ? randomUUID() : null;
+  const createdRows: Array<typeof cabMeetingsTable.$inferSelect> = [];
+  for (let i = 0; i < starts.length; i++) {
+    const s = starts[i];
+    const [row] = await db
+      .insert(cabMeetingsTable)
+      .values({
+        title: b.title,
+        kind,
+        scheduledStart: s,
+        scheduledEnd: computeEnd(s),
+        location: b.location ?? "",
+        agenda: b.agenda ?? "",
+        chairUserId: typeof b.chairUserId === "number" ? b.chairUserId : null,
+        recurrenceIntervalWeeks: recurring ? intervalWeeks : null,
+        recurrenceUntil: recurring && recurrenceUntil
+          ? recurrenceUntil.toISOString().slice(0, 10)
+          : null,
+        recurrenceGroupId: groupId,
+      })
+      .returning();
+    createdRows.push(row);
+    if (Array.isArray(b.memberIds)) {
+      for (const uid of b.memberIds) {
+        if (typeof uid === "number") {
+          await db.insert(cabMembersTable).values({ meetingId: row.id, userId: uid }).onConflictDoNothing();
+        }
+      }
+    }
+    // Only the first occurrence carries the requested change-set; later
+    // occurrences start with an empty agenda the chair can populate.
+    if (i === 0 && Array.isArray(b.changeIds)) {
+      for (const cid of b.changeIds) {
+        if (typeof cid === "number") {
+          await db.insert(cabChangesTable).values({ meetingId: row.id, changeId: cid }).onConflictDoNothing();
+          await db.update(changeRequestsTable).set({ cabMeetingId: row.id }).where(eq(changeRequestsTable.id, cid));
+        }
       }
     }
   }
-  if (Array.isArray(b.changeIds)) {
-    for (const cid of b.changeIds) {
-      if (typeof cid === "number") {
-        await db.insert(cabChangesTable).values({ meetingId: created.id, changeId: cid }).onConflictDoNothing();
-        await db.update(changeRequestsTable).set({ cabMeetingId: created.id }).where(eq(changeRequestsTable.id, cid));
-      }
-    }
-  }
+  const primary = createdRows[0];
   await audit(req, {
     action: "cab.created",
     entityType: "cab",
-    entityId: created.id,
-    summary: `Created ${created.kind.toUpperCase()} meeting "${created.title}"`,
-    after: created,
+    entityId: primary.id,
+    summary: recurring
+      ? `Created recurring ${primary.kind.toUpperCase()} series "${primary.title}" (${createdRows.length} occurrences)`
+      : `Created ${primary.kind.toUpperCase()} meeting "${primary.title}"`,
+    after: primary,
   });
-  res.status(201).json(await expandMeeting(created));
+  res.status(201).json(await expandMeeting(primary));
 });
 
 router.get("/cab-meetings/:id", requireAuth, async (req, res): Promise<void> => {

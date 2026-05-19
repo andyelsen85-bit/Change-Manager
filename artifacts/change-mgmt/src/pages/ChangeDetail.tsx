@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, Download, Loader2, MessageSquare, Paperclip, Send, Trash2, Undo2, Upload, X } from "lucide-react";
@@ -54,7 +54,6 @@ type TimelineStep = ChangeStatus | ChangeStatus[];
 const TIMELINE_BY_TRACK: Record<ChangeTrack, TimelineStep[]> = {
   normal: [
     "draft",
-    "submitted",
     "in_review",
     "awaiting_approval",
     "approved",
@@ -109,8 +108,8 @@ const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus
   normal: {
     draft: [],
     submitted: ["draft"],
-    in_review: ["submitted", "draft"],
-    awaiting_approval: ["in_review", "submitted", "draft"],
+    in_review: ["draft"],
+    awaiting_approval: ["in_review", "draft"],
     approved: ["awaiting_approval", "in_review", "draft"],
     in_preprod_testing: ["approved"],
     scheduled: ["in_preprod_testing", "approved", "awaiting_approval"],
@@ -157,7 +156,7 @@ const REVERSIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus
 // doesn't share the Normal path, so we keep one entry per track.
 const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatus[]>> = {
   normal: {
-    draft: ["submitted", "cancelled"],
+    draft: ["in_review", "cancelled"],
     submitted: ["in_review", "cancelled"],
     in_review: ["awaiting_approval", "rejected", "cancelled"],
     awaiting_approval: ["approved", "rejected", "cancelled"],
@@ -191,13 +190,50 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
   },
 };
 
+// Human-friendly button labels keyed by (track, from, to). Falls back to the
+// raw status name if no override exists so we never render an empty button.
+// Negative transitions are universal across tracks.
+const TRANSITION_LABELS: Record<string, string> = {
+  "normal:draft->in_review": "Submit",
+  "normal:in_review->awaiting_approval": "Reviewed",
+  "normal:awaiting_approval->approved": "Approve",
+  "normal:approved->in_preprod_testing": "Start pre-prod testing",
+  "normal:approved->scheduled": "Prepared",
+  "normal:in_preprod_testing->scheduled": "Pre-prod tested",
+  "normal:scheduled->in_progress": "Start implementation",
+  "normal:in_progress->implemented": "Implemented",
+  "normal:implemented->in_testing": "Start testing",
+  "normal:implemented->awaiting_pir": "Skip to PIR",
+  "normal:in_testing->awaiting_pir": "Tested",
+  "normal:awaiting_pir->completed": "Close change",
+  "standard:draft->scheduled": "Prepared",
+  "standard:draft->awaiting_implementation": "Awaiting implementation",
+  "standard:awaiting_implementation->scheduled": "Prepared",
+  "standard:awaiting_implementation->in_progress": "Start implementation",
+  "standard:scheduled->in_progress": "Start implementation",
+  "standard:in_progress->implemented": "Implemented",
+  "standard:implemented->completed": "Close change",
+  "emergency:draft->awaiting_approval": "Submit for eCAB",
+  "emergency:awaiting_approval->approved": "Approve",
+  "emergency:approved->in_progress": "Start implementation",
+  "emergency:in_progress->implemented": "Implemented",
+  "emergency:implemented->awaiting_pir": "Skip to PIR",
+  "emergency:awaiting_pir->completed": "Close change",
+};
+function transitionLabel(track: ChangeTrack, from: ChangeStatus, to: ChangeStatus): string {
+  if (to === "cancelled") return "Cancel";
+  if (to === "rejected") return "Reject";
+  if (to === "rolled_back") return "Roll back";
+  return TRANSITION_LABELS[`${track}:${from}->${to}`] ?? to.replace(/_/g, " ");
+}
+
 // Maps each lifecycle status to the role/person responsible for that step
 // so the timeline can display the assigned user beneath each tile.
-type StepRole = "owner" | "technical_reviewer" | "implementer" | "tester" | "approvers" | null;
+type StepRole = "owner" | "change_manager" | "implementer" | "tester" | "approvers" | null;
 const STATUS_ROLE: Record<ChangeStatus, StepRole> = {
   draft: "owner",
   submitted: "owner",
-  in_review: "technical_reviewer",
+  in_review: "change_manager",
   awaiting_approval: "approvers",
   approved: "approvers",
   in_preprod_testing: "tester",
@@ -225,6 +261,7 @@ function resolveStepAssignee(
   if (!role) return null;
   if (role === "owner") return ownerName ?? null;
   if (role === "approvers") return "Approvers";
+  if (role === "change_manager") return "Change Manager";
   const a = assignees.find((x) => x.roleKey === role);
   if (a) return a.userName;
   // Implementer step falls back to the change owner / assignee field
@@ -426,7 +463,7 @@ export function ChangeDetailPage() {
                   disabled={transition.isPending}
                   data-testid={`button-transition-${next}`}
                 >
-                  → {next.replace(/_/g, " ")}
+                  {transitionLabel(c.track, c.status, next)}
                 </Button>
               ))}
               {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).length === 0 && (
@@ -514,7 +551,6 @@ export function ChangeDetailPage() {
             <TabsTrigger value="planning" data-testid="tab-planning">Planning</TabsTrigger>
             <TabsTrigger value="approvals" data-testid="tab-approvals">Approvals</TabsTrigger>
             <TabsTrigger value="assignees" data-testid="tab-assignees">Assignees</TabsTrigger>
-            <TabsTrigger value="schedule" data-testid="tab-schedule">Schedule</TabsTrigger>
             {c.hasPreprodEnv && (
               <TabsTrigger value="preprod-testing" data-testid="tab-preprod-testing">PreProdTesting</TabsTrigger>
             )}
@@ -524,10 +560,9 @@ export function ChangeDetailPage() {
             <TabsTrigger value="comments" data-testid="tab-comments">Discussion</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="planning"><PlanningTab id={id} /></TabsContent>
+          <TabsContent value="planning"><PlanningTab id={id} change={c} /></TabsContent>
           <TabsContent value="approvals"><ApprovalsTab id={id} currentUserId={user?.id ?? 0} /></TabsContent>
           <TabsContent value="assignees"><AssigneesTab id={id} /></TabsContent>
-          <TabsContent value="schedule"><ScheduleTab change={c} /></TabsContent>
           {c.hasPreprodEnv && (
             <TabsContent value="preprod-testing"><TestingTab id={id} kind="preprod" /></TabsContent>
           )}
@@ -546,8 +581,7 @@ export function ChangeDetailPage() {
 // user overrides the global role-pool fallback used elsewhere (approvals +
 // notifications). Setting back to "Unassigned" deletes the override and
 // re-enables the role-pool fallback for that role on this change.
-const ASSIGNABLE_ROLE_LABELS: Record<"technical_reviewer" | "implementer" | "tester", string> = {
-  technical_reviewer: "Technical reviewer",
+const ASSIGNABLE_ROLE_LABELS: Record<"implementer" | "tester", string> = {
   implementer: "Implementer",
   tester: "Tester",
 };
@@ -577,7 +611,7 @@ function AssigneesTab({ id }: { id: number }) {
         <p className="text-xs text-muted-foreground">
           Override the global role pool for this change. If left unassigned, members of the role are notified instead.
         </p>
-        {(["technical_reviewer", "implementer", "tester"] as const).map((role) => (
+        {(["implementer", "tester"] as const).map((role) => (
           <div key={role} className="grid items-center gap-2 md:grid-cols-[200px_1fr]">
             <Label>{ASSIGNABLE_ROLE_LABELS[role]}</Label>
             <Select
@@ -601,7 +635,40 @@ function AssigneesTab({ id }: { id: number }) {
   );
 }
 
-function PlanningTab({ id }: { id: number }) {
+// Auto-growing textarea: resizes to fit content as the user types so long
+// planning sections (rollback plan, risk assessment) don't get hidden behind
+// an internal scrollbar. The `value` dependency triggers re-measurement on
+// every keystroke; the `minRows` prop preserves the initial visual size.
+function AutoTextarea({
+  value,
+  onChange,
+  minRows = 3,
+  ...rest
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  minRows?: number;
+} & Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange" | "rows">) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return (
+    <Textarea
+      ref={ref}
+      rows={minRows}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ overflow: "hidden", resize: "none" }}
+      {...rest}
+    />
+  );
+}
+
+function PlanningTab({ id, change }: { id: number; change: ChangeDetailT }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["change.planning", id], queryFn: () => api.get<PlanningRecord>(`/changes/${id}/planning`) });
   const [form, setForm] = useState<PlanningRecord | null>(null);
@@ -615,14 +682,34 @@ function PlanningTab({ id }: { id: number }) {
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
   });
+
+  // Schedule section state (formerly the Schedule tab). Stored separately
+  // from the planning form because it PATCHes the change row directly and
+  // has its own save button — keeping them split avoids cross-saving partial
+  // schedule edits when the user only wanted to save draft planning text.
+  const [plannedStart, setPlannedStart] = useState(toLocalDateTimeInput(change.plannedStart));
+  const [plannedEnd, setPlannedEnd] = useState(toLocalDateTimeInput(change.plannedEnd));
+  const saveSchedule = useMutation({
+    mutationFn: () =>
+      api.patch(`/changes/${change.id}`, {
+        plannedStart: fromLocalDateTimeInput(plannedStart),
+        plannedEnd: fromLocalDateTimeInput(plannedEnd),
+      }),
+    onSuccess: () => {
+      toast.success("Schedule updated");
+      qc.invalidateQueries({ queryKey: ["change", change.id] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Update failed"),
+  });
+
   if (!form) return <Skeleton className="mt-4 h-72 w-full" />;
-  const field = (k: keyof PlanningRecord, label: string, rows = 3) => (
+  const field = (k: keyof PlanningRecord, label: string, minRows = 3) => (
     <div className="space-y-2">
       <Label>{label}</Label>
-      <Textarea
-        rows={rows}
+      <AutoTextarea
+        minRows={minRows}
         value={(form[k] as string) ?? ""}
-        onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+        onChange={(v) => setForm({ ...form, [k]: v })}
         data-testid={`textarea-${String(k)}`}
       />
     </div>
@@ -630,6 +717,48 @@ function PlanningTab({ id }: { id: number }) {
   return (
     <Card className="mt-4">
       <CardContent className="space-y-4 p-6">
+        <div className="rounded-md border border-border bg-muted/20 p-4 space-y-4">
+          <div className="text-sm font-semibold">Schedule</div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Planned start</Label>
+              <DateTimePicker value={plannedStart} onChange={setPlannedStart} data-testid="input-schedule-start" />
+            </div>
+            <div className="space-y-2">
+              <Label>Planned end</Label>
+              <DateTimePicker value={plannedEnd} onChange={setPlannedEnd} data-testid="input-schedule-end" />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 text-sm">
+            <div>
+              <div className="text-muted-foreground">Actual start</div>
+              <div>{fmtDateTime(change.actualStart)}</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Actual end</div>
+              <div>{fmtDateTime(change.actualEnd)}</div>
+            </div>
+          </div>
+          <div className="rounded-md border border-border bg-background p-3 text-sm">
+            {change.cabMeetingId ? (
+              <Link href={`/cab/${change.cabMeetingId}`} className="text-primary hover:underline">
+                Linked to CAB meeting #{change.cabMeetingId} →
+              </Link>
+            ) : change.track === "standard" ? (
+              "Standard change — bypasses CAB."
+            ) : (
+              <Link href="/cab" className="text-primary hover:underline">
+                Not yet on a CAB agenda. Schedule from the CAB calendar →
+              </Link>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => saveSchedule.mutate()} disabled={saveSchedule.isPending} data-testid="button-save-schedule">
+              {saveSchedule.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save schedule
+            </Button>
+          </div>
+        </div>
         {field("scope", "Scope")}
         {field("implementationPlan", "Implementation plan", 5)}
         {field("rollbackPlan", "Rollback plan", 4)}
@@ -742,72 +871,6 @@ function ApprovalCard({ approval, canVote, onVote, busy }: { approval: Approval;
         </div>
       )}
     </div>
-  );
-}
-
-function ScheduleTab({ change }: { change: ChangeDetailT }) {
-  const qc = useQueryClient();
-  const [plannedStart, setPlannedStart] = useState(toLocalDateTimeInput(change.plannedStart));
-  const [plannedEnd, setPlannedEnd] = useState(toLocalDateTimeInput(change.plannedEnd));
-  const save = useMutation({
-    mutationFn: () =>
-      api.patch(`/changes/${change.id}`, {
-        plannedStart: fromLocalDateTimeInput(plannedStart),
-        plannedEnd: fromLocalDateTimeInput(plannedEnd),
-      }),
-    onSuccess: () => {
-      toast.success("Schedule updated");
-      qc.invalidateQueries({ queryKey: ["change", change.id] });
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Update failed"),
-  });
-  return (
-    <Card className="mt-4">
-      <CardHeader>
-        <CardTitle className="text-base">Schedule & timing</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Planned start</Label>
-            <DateTimePicker value={plannedStart} onChange={setPlannedStart} data-testid="input-schedule-start" />
-          </div>
-          <div className="space-y-2">
-            <Label>Planned end</Label>
-            <DateTimePicker value={plannedEnd} onChange={setPlannedEnd} data-testid="input-schedule-end" />
-          </div>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 text-sm">
-          <div>
-            <div className="text-muted-foreground">Actual start</div>
-            <div>{fmtDateTime(change.actualStart)}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground">Actual end</div>
-            <div>{fmtDateTime(change.actualEnd)}</div>
-          </div>
-        </div>
-        <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
-          {change.cabMeetingId ? (
-            <Link href={`/cab/${change.cabMeetingId}`} className="text-primary hover:underline">
-              Linked to CAB meeting #{change.cabMeetingId} →
-            </Link>
-          ) : change.track === "standard" ? (
-            "Standard change — bypasses CAB."
-          ) : (
-            <Link href="/cab" className="text-primary hover:underline">
-              Not yet on a CAB agenda. Schedule from the CAB calendar →
-            </Link>
-          )}
-        </div>
-        <div className="flex justify-end">
-          <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-save-schedule">
-            {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save schedule
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 

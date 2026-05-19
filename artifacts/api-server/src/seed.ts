@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -41,7 +41,6 @@ function planAdminBootstrap(): AdminBootstrap {
 
 const ROLES = [
   { key: "change_manager", name: "Change Manager", description: "Owns the change management process end-to-end." },
-  { key: "technical_reviewer", name: "Technical Reviewer", description: "Reviews technical risk and feasibility." },
   { key: "business_owner", name: "Business Owner", description: "Approves business impact and timing." },
   { key: "cab_member", name: "CAB Member", description: "Standing member of the Change Advisory Board." },
   { key: "ecab_member", name: "eCAB Member", description: "Emergency CAB member, expedited approval authority." },
@@ -51,7 +50,17 @@ const ROLES = [
 
 // Roles that were removed from this version and must be cleaned out of any
 // pre-existing database. We delete role_assignments first then the roles.
-const REMOVED_ROLE_KEYS = ["service_owner", "security_reviewer"] as const;
+const REMOVED_ROLE_KEYS = ["service_owner", "security_reviewer", "technical_reviewer"] as const;
+
+// Per-change assignee rows for removed roles are orphans once the role row
+// is deleted (FK is set-null on delete, but the role_key column would still
+// reference a non-existent role). We hard-delete them on seed so the
+// Assignees tab stops surfacing ghost slots.
+async function cleanupRemovedAssigneeRoles(): Promise<void> {
+  for (const key of REMOVED_ROLE_KEYS) {
+    await db.execute(sql`DELETE FROM change_assignees WHERE role_key = ${key}`);
+  }
+}
 
 // Default category catalogue. Admins can add / edit / disable in the
 // Settings → Categories panel.
@@ -196,6 +205,7 @@ export async function runSeed(): Promise<void> {
     .delete(roleAssignmentsTable)
     .where(inArray(roleAssignmentsTable.roleKey, REMOVED_ROLE_KEYS as unknown as string[]));
   await db.delete(rolesTable).where(inArray(rolesTable.key, REMOVED_ROLE_KEYS as unknown as string[]));
+  await cleanupRemovedAssigneeRoles();
 
   // Default change categories — insert any missing keys (idempotent via
   // ON CONFLICT) so newly-added defaults appear on existing deployments

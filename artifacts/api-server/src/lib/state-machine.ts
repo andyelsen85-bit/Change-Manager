@@ -26,7 +26,7 @@ export type ChangeStatus =
 const TERMINAL_FROM_ANY: ChangeStatus[] = ["cancelled", "rolled_back"];
 
 const NORMAL: Record<ChangeStatus, ChangeStatus[]> = {
-  draft: ["submitted", "cancelled"],
+  draft: ["in_review", "cancelled"],
   submitted: ["in_review", "cancelled"],
   in_review: ["awaiting_approval", "rejected", "cancelled"],
   awaiting_approval: ["approved", "rejected", "cancelled"],
@@ -120,8 +120,8 @@ const TRANSITIONS_BY_TRACK: Record<ChangeTrack, Record<ChangeStatus, ChangeStatu
 const REVERSE_NORMAL: Record<ChangeStatus, ChangeStatus[]> = {
   draft: [],
   submitted: ["draft"],
-  in_review: ["submitted", "draft"],
-  awaiting_approval: ["in_review", "submitted", "draft"],
+  in_review: ["draft"],
+  awaiting_approval: ["in_review", "draft"],
   approved: ["awaiting_approval", "in_review", "draft"],
   scheduled: ["approved", "awaiting_approval"],
   in_progress: ["scheduled", "approved"],

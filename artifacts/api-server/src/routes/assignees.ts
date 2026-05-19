@@ -13,7 +13,7 @@ import { notify, getUserEmails } from "../lib/email";
 // Roles that can be assigned per-change. Mirrors the seeded role keys but
 // scoped to those that map onto a single human contributor for an
 // individual change record (Tech Reviewer / Implementer / Tester).
-const ASSIGNABLE_ROLES = ["technical_reviewer", "implementer", "tester"] as const;
+const ASSIGNABLE_ROLES = ["implementer", "tester"] as const;
 type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
 const router: IRouter = Router();
