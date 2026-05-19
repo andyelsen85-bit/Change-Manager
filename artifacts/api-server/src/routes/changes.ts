@@ -98,7 +98,7 @@ async function createApprovalsForChange(changeId: number, track: string) {
 async function resolveRoleTargets(changeId: number, roleKey: string) {
   const perChange = await getAssignedUserIds(
     changeId,
-    roleKey as "technical_reviewer" | "implementer" | "tester",
+    roleKey as "implementer" | "tester",
   ).catch(() => [] as number[]);
   if (perChange.length > 0) return getUserEmails(perChange);
   const fallback = await db
@@ -127,7 +127,7 @@ async function notifyApprovers(changeId: number, change: typeof changeRequestsTa
 async function notifyChangeCompleted(change: typeof changeRequestsTable.$inferSelect) {
   const ids = new Set<number>([change.ownerId]);
   if (change.assigneeId) ids.add(change.assigneeId);
-  for (const r of ["technical_reviewer", "implementer", "tester"] as const) {
+  for (const r of ["implementer", "tester"] as const) {
     const perChange = await getAssignedUserIds(change.id, r);
     if (perChange.length > 0) {
       for (const u of perChange) ids.add(u);
@@ -555,7 +555,7 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
       eventKey: "change.transitioned",
       to: targets,
       subject: `[CHG ${before.ref}] Status: ${toStatus}`,
-      text: `${before.ref} ${before.title}\n\n${before.status} → ${toStatus}${note ? "\n\nNote: " + note : ""}`,
+      text: `${before.ref} ${before.title}\n\n${before.description ?? ""}\n\n${before.status} → ${toStatus}${note ? "\n\nNote: " + note : ""}`,
     });
   }
   // Per-status broadcasts: scheduled / completed reach the full assignee
@@ -563,7 +563,7 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   if (toStatus === "scheduled") {
     const ids = new Set<number>([before.ownerId]);
     if (before.assigneeId) ids.add(before.assigneeId);
-    for (const r of ["technical_reviewer", "implementer", "tester"] as const) {
+    for (const r of ["implementer", "tester"] as const) {
       const perChange = await getAssignedUserIds(id, r);
       if (perChange.length > 0) {
         for (const u of perChange) ids.add(u);
@@ -717,7 +717,7 @@ router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> 
       eventKey: "change.transitioned",
       to: targets,
       subject: `[CHG ${before.ref}] Reverted: ${fromStatus} → ${targetStatus}`,
-      text: `${before.ref} ${before.title}\n\nA Change Manager reverted this change from ${fromStatus} back to ${targetStatus}.\n\nReason: ${reason.trim()}${approvalsResetCount > 0 ? `\n\n${approvalsResetCount} approval(s) were reset to pending — fresh votes are required before this change can move forward again.` : ""}`,
+      text: `${before.ref} ${before.title}\n\n${before.description ?? ""}\n\n${fromStatus} → ${targetStatus} (reverted)\n\nReason: ${reason.trim()}${approvalsResetCount > 0 ? `\n\n${approvalsResetCount} approval(s) were reset to pending — fresh votes are required before this change can move forward again.` : ""}`,
     });
   }
   res.json(await expandChangeRow(updated));

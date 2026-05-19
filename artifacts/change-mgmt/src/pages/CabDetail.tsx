@@ -46,7 +46,6 @@ export function CabDetailPage() {
     scheduledStart: string;
     scheduledEnd: string;
     chairUserId: string;
-    memberIds: number[];
     changeIds: number[];
   } | null>(null);
 
@@ -62,7 +61,6 @@ export function CabDetailPage() {
         scheduledStart: toLocalDateTimeInput(m.scheduledStart),
         scheduledEnd: toLocalDateTimeInput(m.scheduledEnd),
         chairUserId: m.chairUserId == null ? "none" : String(m.chairUserId),
-        memberIds: m.members.map((mb) => mb.userId),
         changeIds: m.changes.map((c) => c.id),
       });
     }
@@ -79,7 +77,6 @@ export function CabDetailPage() {
         scheduledStart: fromLocalDateTimeInput(form!.scheduledStart),
         scheduledEnd: fromLocalDateTimeInput(form!.scheduledEnd),
         chairUserId: form!.chairUserId === "none" ? null : Number(form!.chairUserId),
-        memberIds: form!.memberIds,
         changeIds: form!.changeIds,
       }),
     onSuccess: () => {
@@ -126,7 +123,7 @@ export function CabDetailPage() {
   if (meetingQ.isLoading || !form || !meetingQ.data) return <Skeleton className="h-72 w-full" />;
   const m = meetingQ.data;
 
-  const toggle = (key: "memberIds" | "changeIds", value: number) =>
+  const toggle = (key: "changeIds", value: number) =>
     setForm({ ...form, [key]: form[key].includes(value) ? form[key].filter((x) => x !== value) : [...form[key], value] });
 
   return (
@@ -244,26 +241,7 @@ export function CabDetailPage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader><CardTitle className="text-base">Members ({form.memberIds.length})</CardTitle></CardHeader>
-          <CardContent>
-            <div className="max-h-72 overflow-y-auto rounded-md border border-border p-2 text-sm">
-              {(usersQ.data ?? []).map((u) => (
-                <label key={u.id} className="flex items-center gap-2 py-1">
-                  <input
-                    type="checkbox"
-                    checked={form.memberIds.includes(u.id)}
-                    onChange={() => toggle("memberIds", u.id)}
-                    data-testid={`checkbox-member-${u.id}`}
-                  />
-                  <span>{u.fullName}</span>
-                  <span className="text-xs text-muted-foreground">{u.email}</span>
-                </label>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4">
         <Card>
           <CardHeader><CardTitle className="text-base">Changes on agenda ({form.changeIds.length})</CardTitle></CardHeader>
           <CardContent>

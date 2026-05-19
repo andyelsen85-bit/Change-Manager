@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { addMonths, endOfMonth, format, isSameDay, isSameMonth, startOfMonth, startOfWeek, addDays } from "date-fns";
@@ -147,68 +147,54 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [, setLocation] = useLocation();
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
-  // Primary (non-deputy) members per role — used to pre-select attendees
-  // based on the meeting kind. Standard CAB meetings default to all primary
-  // CAB Members; eCAB meetings default to all primary eCAB Members.
-  const cabPrimaryQ = useQuery({
-    queryKey: ["users.role.cab_member.primary"],
-    queryFn: () => api.get<User[]>("/users?role=cab_member&primary=1"),
-  });
-  const ecabPrimaryQ = useQuery({
-    queryKey: ["users.role.ecab_member.primary"],
-    queryFn: () => api.get<User[]>("/users?role=ecab_member&primary=1"),
-  });
   const changesQ = useQuery({
     queryKey: ["changes.cab-eligible"],
     queryFn: () => api.get<ChangeRequest[]>("/changes?status=awaiting_approval"),
   });
 
-  const now = new Date();
-  const startDefault = new Date(now.getTime() + 60 * 60 * 1000);
-  const endDefault = new Date(startDefault.getTime() + 60 * 60 * 1000);
+  // Default start: 10:30 on the next calendar day. Operators told us the
+  // common CAB cadence is "tomorrow morning"; today's morning slot is often
+  // already past when they sit down to schedule.
+  const startDefault = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(10, 30, 0, 0);
+    return d;
+  })();
 
   const [title, setTitle] = useState("Weekly CAB");
   const [kind, setKind] = useState<"cab" | "ecab">("cab");
   const [scheduledStart, setScheduledStart] = useState(toLocalDateTimeInput(startDefault));
-  const [scheduledEnd, setScheduledEnd] = useState(toLocalDateTimeInput(endDefault));
+  const [durationMinutes, setDurationMinutes] = useState<number>(60);
   const [location, setMeetingLocation] = useState("");
   const [agenda, setAgenda] = useState("");
   const [chairUserId, setChairUserId] = useState<string>("none");
-  const [memberIds, setMemberIds] = useState<number[]>([]);
   const [changeIds, setChangeIds] = useState<number[]>([]);
-
-  // Auto-select the appropriate primary role members when the meeting kind
-  // changes (or when their data first arrives for the active kind). Manual
-  // additions/removals made by the operator are NOT overwritten by background
-  // refetches of either query — the ref tracks which kind we last applied
-  // defaults for, so the effect only fires on a real kind switch or on the
-  // initial arrival of the active kind's data.
-  const cabDefaults = cabPrimaryQ.data;
-  const ecabDefaults = ecabPrimaryQ.data;
-  const lastAppliedKindRef = useRef<"cab" | "ecab" | null>(null);
-  useEffect(() => {
-    const defaults = kind === "ecab" ? ecabDefaults : cabDefaults;
-    if (!defaults) return;
-    if (lastAppliedKindRef.current === kind) return;
-    lastAppliedKindRef.current = kind;
-    setMemberIds(defaults.map((u) => u.id));
-  }, [kind, cabDefaults, ecabDefaults]);
+  const [recurring, setRecurring] = useState(false);
+  const [recurrenceIntervalWeeks, setRecurrenceIntervalWeeks] = useState<number>(1);
+  const [recurrenceUntil, setRecurrenceUntil] = useState<string>("");
 
   const create = useMutation({
-    mutationFn: () =>
-      api.post<{ id: number }>("/cab-meetings", {
+    mutationFn: () => {
+      if (recurring && !recurrenceUntil) {
+        throw new Error("Please choose a 'Repeat until' date for recurring meetings.");
+      }
+      return api.post<{ id: number }>("/cab-meetings", {
         title,
         kind,
         scheduledStart: fromLocalDateTimeInput(scheduledStart),
-        scheduledEnd: fromLocalDateTimeInput(scheduledEnd),
+        durationMinutes,
         location,
         agenda,
         chairUserId: chairUserId === "none" ? null : Number(chairUserId),
-        memberIds,
         changeIds,
-      }),
+        recurring,
+        recurrenceIntervalWeeks: recurring ? recurrenceIntervalWeeks : undefined,
+        recurrenceUntil: recurring ? recurrenceUntil : undefined,
+      });
+    },
     onSuccess: (m) => {
-      toast.success("Meeting created");
+      toast.success(recurring ? "Recurring meeting series created" : "Meeting created");
       qc.invalidateQueries({ queryKey: ["cab.month"] });
       onClose();
       setLocation(`/cab/${m.id}`);
@@ -250,9 +236,52 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
             <DateTimePicker value={scheduledStart} onChange={setScheduledStart} />
           </div>
           <div className="space-y-2">
-            <Label>End</Label>
-            <DateTimePicker value={scheduledEnd} onChange={setScheduledEnd} />
+            <Label>Duration (minutes)</Label>
+            <Input
+              type="number"
+              min={5}
+              step={5}
+              value={durationMinutes}
+              onChange={(e) => setDurationMinutes(Math.max(5, Number(e.target.value) || 60))}
+              data-testid="input-cab-duration"
+            />
           </div>
+        </div>
+        <div className="rounded-md border border-border p-3 space-y-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={recurring}
+              onChange={(e) => setRecurring(e.target.checked)}
+              data-testid="checkbox-recurring"
+            />
+            <span className="font-medium">Recurring meeting</span>
+          </label>
+          {recurring && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Every</Label>
+                <Select value={String(recurrenceIntervalWeeks)} onValueChange={(v) => setRecurrenceIntervalWeeks(Number(v))}>
+                  <SelectTrigger data-testid="select-recurrence-interval"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">Week</SelectItem>
+                    <SelectItem value="2">2 weeks</SelectItem>
+                    <SelectItem value="3">3 weeks</SelectItem>
+                    <SelectItem value="4">4 weeks</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Repeat until</Label>
+                <Input
+                  type="date"
+                  value={recurrenceUntil}
+                  onChange={(e) => setRecurrenceUntil(e.target.value)}
+                  data-testid="input-recurrence-until"
+                />
+              </div>
+            </div>
+          )}
         </div>
         <div className="space-y-2">
           <Label>Location</Label>
@@ -278,29 +307,16 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
             </SelectContent>
           </Select>
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Members ({memberIds.length})</Label>
-            <div className="max-h-40 overflow-y-auto rounded-md border border-border p-2 text-sm">
-              {(usersQ.data ?? []).map((u) => (
-                <label key={u.id} className="flex items-center gap-2 py-1">
-                  <input type="checkbox" checked={memberIds.includes(u.id)} onChange={() => toggle(memberIds, setMemberIds, u.id)} />
-                  {u.fullName}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Changes on agenda ({changeIds.length})</Label>
-            <div className="max-h-40 overflow-y-auto rounded-md border border-border p-2 text-sm">
-              {(changesQ.data ?? []).map((c) => (
-                <label key={c.id} className="flex items-center gap-2 py-1">
-                  <input type="checkbox" checked={changeIds.includes(c.id)} onChange={() => toggle(changeIds, setChangeIds, c.id)} />
-                  <span className="font-mono text-xs">{c.ref}</span> {c.title}
-                </label>
-              ))}
-              {(changesQ.data ?? []).length === 0 && <span className="text-xs text-muted-foreground">No changes awaiting CAB.</span>}
-            </div>
+        <div className="space-y-2">
+          <Label>Changes on agenda ({changeIds.length})</Label>
+          <div className="max-h-40 overflow-y-auto rounded-md border border-border p-2 text-sm">
+            {(changesQ.data ?? []).map((c) => (
+              <label key={c.id} className="flex items-center gap-2 py-1">
+                <input type="checkbox" checked={changeIds.includes(c.id)} onChange={() => toggle(changeIds, setChangeIds, c.id)} />
+                <span className="font-mono text-xs">{c.ref}</span> {c.title}
+              </label>
+            ))}
+            {(changesQ.data ?? []).length === 0 && <span className="text-xs text-muted-foreground">No changes awaiting CAB.</span>}
           </div>
         </div>
       </div>

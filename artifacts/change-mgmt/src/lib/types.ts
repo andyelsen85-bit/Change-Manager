@@ -262,7 +262,7 @@ export type CategoryItem = {
 export type ChangeAssignee = {
   id: number;
   changeId: number;
-  roleKey: "technical_reviewer" | "implementer" | "tester";
+  roleKey: "implementer" | "tester";
   userId: number;
   userName: string;
 };
@@ -363,7 +363,7 @@ export const STATUS_LABELS: Record<ChangeStatus, string> = {
   awaiting_approval: "Awaiting Approval",
   approved: "Approved",
   in_preprod_testing: "Pre-prod testing",
-  scheduled: "Scheduled",
+  scheduled: "Prepared",
   in_progress: "In Progress",
   implemented: "Implemented",
   in_testing: "In Testing",

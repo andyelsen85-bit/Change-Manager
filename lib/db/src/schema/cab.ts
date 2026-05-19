@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, timestamp, boolean, unique } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, timestamp, boolean, unique, date } from "drizzle-orm/pg-core";
 
 export const cabMeetingsTable = pgTable("cab_meetings", {
   id: serial("id").primaryKey(),
@@ -11,6 +11,9 @@ export const cabMeetingsTable = pgTable("cab_meetings", {
   chairUserId: integer("chair_user_id"),
   status: text("status").notNull().default("scheduled"),
   minutes: text("minutes").notNull().default(""),
+  recurrenceIntervalWeeks: integer("recurrence_interval_weeks"),
+  recurrenceUntil: date("recurrence_until"),
+  recurrenceGroupId: text("recurrence_group_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
