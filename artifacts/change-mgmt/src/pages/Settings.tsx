@@ -985,6 +985,135 @@ function NotificationsBatchPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        <div
+          className="rounded-md border border-border bg-muted/20 p-4 text-sm"
+          data-testid="notification-policy-summary"
+        >
+          <div className="mb-2 text-sm font-semibold">Who gets notified, and when</div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Email notifications are intentionally narrow: only the five lifecycle events below
+            generate email. Everything else (status flips, assignee tweaks, pre-prod runs, rejected
+            approvals, reverts) is still recorded in the audit log and visible in-app, but does not
+            produce email. Each row of every digest opens with <span className="font-mono">[CHG &lt;ref&gt;]</span>
+            plus the change title so recipients can recognise the change at a glance.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-border text-muted-foreground">
+                <tr>
+                  <th className="py-1.5 pr-3 font-medium">Trigger</th>
+                  <th className="py-1.5 pr-3 font-medium">Recipients</th>
+                  <th className="py-1.5 font-medium">Event key</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    Change <strong>submitted</strong>
+                    <div className="text-muted-foreground">
+                      Normal: draft → In review. Emergency: draft → Awaiting approval.
+                    </div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">
+                    All Change Managers + the owner. For Emergency changes, all eCAB members are
+                    added too.
+                  </td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">change.submitted</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    Change <strong>cancelled</strong>
+                    <div className="text-muted-foreground">Any track, when the change moves to Cancelled.</div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">Owner + assignee.</td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">change.cancelled</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    Change <strong>completed</strong>
+                    <div className="text-muted-foreground">Final PIR signed off, change closed.</div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">
+                    Owner + assignee + every per-change implementer/tester (falling back to the
+                    global Implementer/Tester role pool when none are set).
+                  </td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">change.completed</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    Approval <strong>granted by Change Manager</strong>
+                    <div className="text-muted-foreground">
+                      Only the Change Manager (or their deputy) approval vote generates email.
+                      Votes from eCAB / other roles, and rejections, are silent.
+                    </div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">Owner of the change.</td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">approval.granted</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    Production testing <strong>signed off as PASSED</strong>
+                    <div className="text-muted-foreground">
+                      Pre-prod runs and failed verdicts do not email — only a passed production
+                      sign-off does.
+                    </div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">Owner of the change.</td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">test.signed_off</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    Approval <strong>requested</strong>
+                    <div className="text-muted-foreground">
+                      Fired when a change enters Awaiting approval — used to wake up the approver
+                      pool for the upcoming CAB vote.
+                    </div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">
+                    Per-change approver assignees for that role (falling back to the global role
+                    pool if no per-change assignment exists).
+                  </td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">approval.requested</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    <strong>CAB</strong> meeting invitation / reminder / minutes
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">
+                    Standing CAB or eCAB member pool + every owner whose change is docketed on the
+                    agenda.
+                  </td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">cab.invited / cab.reminder / cab.minutes</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    New <strong>comment</strong> added
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">
+                    Owner + assignee of the change (excluding whoever wrote the comment).
+                  </td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">comment.added</td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3 align-top">
+                    <strong>PIR due</strong>
+                    <div className="text-muted-foreground">
+                      Automated reminder when a post-implementation review is overdue.
+                    </div>
+                  </td>
+                  <td className="py-1.5 pr-3 align-top">Owner + assignee.</td>
+                  <td className="py-1.5 align-top font-mono text-[11px]">pir.due</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Each user can still mute any of the events above for themselves under{" "}
+            <em>Account → Notification preferences</em>. The schedule below decides only how often
+            each user's queued items are bundled into a digest email — it does not change who is on
+            the recipient list for each trigger.
+          </p>
+        </div>
         <div className="grid gap-4 md:grid-cols-3">
           <div className="rounded-md border border-border bg-muted/30 p-3">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Pending in queue</div>
