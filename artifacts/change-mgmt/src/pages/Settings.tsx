@@ -985,135 +985,7 @@ function NotificationsBatchPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div
-          className="rounded-md border border-border bg-muted/20 p-4 text-sm"
-          data-testid="notification-policy-summary"
-        >
-          <div className="mb-2 text-sm font-semibold">Who gets notified, and when</div>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Email notifications are intentionally narrow: only the five lifecycle events below
-            generate email. Everything else (status flips, assignee tweaks, pre-prod runs, rejected
-            approvals, reverts) is still recorded in the audit log and visible in-app, but does not
-            produce email. Each row of every digest opens with <span className="font-mono">[CHG &lt;ref&gt;]</span>
-            plus the change title so recipients can recognise the change at a glance.
-          </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-border text-muted-foreground">
-                <tr>
-                  <th className="py-1.5 pr-3 font-medium">Trigger</th>
-                  <th className="py-1.5 pr-3 font-medium">Recipients</th>
-                  <th className="py-1.5 font-medium">Event key</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    Change <strong>submitted</strong>
-                    <div className="text-muted-foreground">
-                      Normal: draft → In review. Emergency: draft → Awaiting approval.
-                    </div>
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">
-                    All Change Managers + the owner. For Emergency changes, all eCAB members are
-                    added too.
-                  </td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">change.submitted</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    Change <strong>cancelled</strong>
-                    <div className="text-muted-foreground">Any track, when the change moves to Cancelled.</div>
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">Owner + assignee.</td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">change.cancelled</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    Change <strong>completed</strong>
-                    <div className="text-muted-foreground">Final PIR signed off, change closed.</div>
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">
-                    Owner + assignee + every per-change implementer/tester (falling back to the
-                    global Implementer/Tester role pool when none are set).
-                  </td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">change.completed</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    Approval <strong>granted by Change Manager</strong>
-                    <div className="text-muted-foreground">
-                      Only the Change Manager (or their deputy) approval vote generates email.
-                      Votes from eCAB / other roles, and rejections, are silent.
-                    </div>
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">Owner of the change.</td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">approval.granted</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    Production testing <strong>signed off as PASSED</strong>
-                    <div className="text-muted-foreground">
-                      Pre-prod runs and failed verdicts do not email — only a passed production
-                      sign-off does.
-                    </div>
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">Owner of the change.</td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">test.signed_off</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    Approval <strong>requested</strong>
-                    <div className="text-muted-foreground">
-                      Fired when a change enters Awaiting approval — used to wake up the approver
-                      pool for the upcoming CAB vote.
-                    </div>
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">
-                    Per-change approver assignees for that role (falling back to the global role
-                    pool if no per-change assignment exists).
-                  </td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">approval.requested</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    <strong>CAB</strong> meeting invitation / reminder / minutes
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">
-                    Standing CAB or eCAB member pool + every owner whose change is docketed on the
-                    agenda.
-                  </td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">cab.invited / cab.reminder / cab.minutes</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    New <strong>comment</strong> added
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">
-                    Owner + assignee of the change (excluding whoever wrote the comment).
-                  </td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">comment.added</td>
-                </tr>
-                <tr>
-                  <td className="py-1.5 pr-3 align-top">
-                    <strong>PIR due</strong>
-                    <div className="text-muted-foreground">
-                      Automated reminder when a post-implementation review is overdue.
-                    </div>
-                  </td>
-                  <td className="py-1.5 pr-3 align-top">Owner + assignee.</td>
-                  <td className="py-1.5 align-top font-mono text-[11px]">pir.due</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Each user can still mute any of the events above for themselves under{" "}
-            <em>Account → Notification preferences</em>. The schedule below decides only how often
-            each user's queued items are bundled into a digest email — it does not change who is on
-            the recipient list for each trigger.
-          </p>
-        </div>
+        <NotificationRoutingEditor />
         <div className="grid gap-4 md:grid-cols-3">
           <div className="rounded-md border border-border bg-muted/30 p-3">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Pending in queue</div>
@@ -1180,6 +1052,349 @@ function NotificationsBatchPanel() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+type RoutingRule = {
+  id?: number;
+  eventKey: string;
+  kind: "owner" | "assignee" | "role" | "per_change_role";
+  roleKey: string | null;
+  trackFilter: string | null;
+  excludeActor: boolean;
+  isActive: boolean;
+  sortOrder: number;
+};
+
+type RoutingPayload = {
+  events: readonly string[];
+  rules: RoutingRule[];
+};
+
+type RoleRow = { key: string; name: string };
+
+const ROUTABLE_EVENT_META: Record<string, { label: string; hint: string }> = {
+  "change.submitted": {
+    label: "Change submitted",
+    hint: "Fires when a change leaves draft (normal: → In review, emergency: → Awaiting approval).",
+  },
+  "change.cancelled": {
+    label: "Change cancelled",
+    hint: "Fires when a change moves to Cancelled from any state.",
+  },
+  "change.completed": {
+    label: "Change completed",
+    hint: "Fires when the PIR is signed off and the change is closed.",
+  },
+  "approval.granted": {
+    label: "Approval granted (Change Manager)",
+    hint: "Fires only when the Change Manager (or their deputy) approves. Other approval votes are silent.",
+  },
+  "test.signed_off": {
+    label: "Production testing passed",
+    hint: "Fires only on a passed production sign-off. Pre-prod and failed verdicts are silent.",
+  },
+  "comment.added": {
+    label: "Comment added",
+    hint: "Fires when anyone comments on a change. The comment author is automatically excluded.",
+  },
+  "pir.due": {
+    label: "PIR due",
+    hint: "Automated reminder when a post-implementation review is overdue.",
+  },
+};
+
+const RECIPIENT_KIND_OPTIONS: Array<{ value: RoutingRule["kind"]; label: string; needsRole: boolean }> = [
+  { value: "owner", label: "Change owner", needsRole: false },
+  { value: "assignee", label: "Change assignee", needsRole: false },
+  { value: "role", label: "Role pool", needsRole: true },
+  { value: "per_change_role", label: "Per-change role (with role-pool fallback)", needsRole: true },
+];
+
+const TRACK_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "__all__", label: "All tracks" },
+  { value: "normal", label: "Normal only" },
+  { value: "emergency", label: "Emergency only" },
+  { value: "standard", label: "Standard only" },
+];
+
+const PER_CHANGE_ROLE_OPTIONS = ["implementer", "tester"] as const;
+
+function NotificationRoutingEditor() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["notification-routing"],
+    queryFn: () => api.get<RoutingPayload>("/notification-routing"),
+  });
+  const rolesQ = useQuery({
+    queryKey: ["roles"],
+    queryFn: () => api.get<RoleRow[]>("/roles"),
+  });
+  const [draft, setDraft] = useState<RoutingRule[] | null>(null);
+
+  useEffect(() => {
+    if (q.data && draft === null) {
+      setDraft(q.data.rules.map((r) => ({ ...r })));
+    }
+  }, [q.data, draft]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<RoutingPayload>("/notification-routing", {
+        rules: (draft ?? []).map((r, i) => ({
+          eventKey: r.eventKey,
+          kind: r.kind,
+          roleKey: r.kind === "role" || r.kind === "per_change_role" ? r.roleKey : null,
+          trackFilter: r.trackFilter,
+          excludeActor: r.excludeActor,
+          isActive: r.isActive,
+          sortOrder: i,
+        })),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(["notification-routing"], data);
+      setDraft(data.rules.map((r) => ({ ...r })));
+      toast.success("Notification routing saved");
+    },
+    onError: (e: Error) => toast.error(e.message || "Save failed"),
+  });
+
+  const reset = useMutation({
+    mutationFn: () => api.post<RoutingPayload>("/notification-routing/reset", {}),
+    onSuccess: (data) => {
+      qc.setQueryData(["notification-routing"], data);
+      setDraft(data.rules.map((r) => ({ ...r })));
+      toast.success("Reset to defaults");
+    },
+    onError: (e: Error) => toast.error(e.message || "Reset failed"),
+  });
+
+  if (q.isLoading || !q.data || draft === null) {
+    return <Skeleton className="h-72 w-full" />;
+  }
+  const events = q.data.events;
+  const rolesByKey = new Map((rolesQ.data ?? []).map((r) => [r.key, r.name] as const));
+  const dirty = JSON.stringify(draft) !== JSON.stringify(q.data.rules);
+
+  const updateRule = (idx: number, patch: Partial<RoutingRule>) => {
+    setDraft((prev) => (prev ? prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)) : prev));
+  };
+  const removeRule = (idx: number) => {
+    setDraft((prev) => (prev ? prev.filter((_, i) => i !== idx) : prev));
+  };
+  const addRule = (eventKey: string) => {
+    setDraft((prev) =>
+      prev
+        ? [
+            ...prev,
+            {
+              eventKey,
+              kind: "owner",
+              roleKey: null,
+              trackFilter: null,
+              excludeActor: eventKey === "comment.added",
+              isActive: true,
+              sortOrder: prev.length,
+            },
+          ]
+        : prev,
+    );
+  };
+
+  return (
+    <div
+      className="rounded-md border border-border bg-muted/20 p-4 text-sm"
+      data-testid="notification-routing-editor"
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">Who gets notified, and when</div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => reset.mutate()}
+            disabled={reset.isPending || save.isPending}
+            data-testid="button-routing-reset"
+          >
+            Reset to defaults
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => save.mutate()}
+            disabled={!dirty || save.isPending}
+            data-testid="button-routing-save"
+          >
+            {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Save routing
+          </Button>
+        </div>
+      </div>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Define exactly which users get an email for each lifecycle event. Each event can have any number of
+        recipient rules — they are unioned together. Email subjects always open with{" "}
+        <span className="font-mono">[CHG &lt;ref&gt;]</span> plus the change title. Anything not configured here is
+        recorded in the audit log but does not produce email. The batch schedule below only controls digest
+        cadence, not the recipient list.
+      </p>
+      <div className="space-y-4">
+        {events.map((evt) => {
+          const meta = ROUTABLE_EVENT_META[evt] ?? { label: evt, hint: "" };
+          const rules = draft
+            .map((r, i) => ({ rule: r, idx: i }))
+            .filter((r) => r.rule.eventKey === evt);
+          return (
+            <div
+              key={evt}
+              className="rounded border border-border bg-background p-3"
+              data-testid={`routing-event-${evt}`}
+            >
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <div className="text-sm font-medium">{meta.label}</div>
+                  <div className="text-[11px] text-muted-foreground">{meta.hint}</div>
+                </div>
+                <span className="font-mono text-[11px] text-muted-foreground">{evt}</span>
+              </div>
+              {rules.length === 0 ? (
+                <div className="mb-2 rounded border border-dashed border-border p-2 text-xs italic text-muted-foreground">
+                  No recipients — nobody will be emailed for this event.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {rules.map(({ rule, idx }) => {
+                    const meta = RECIPIENT_KIND_OPTIONS.find((k) => k.value === rule.kind);
+                    return (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-1 gap-2 rounded border border-border bg-muted/30 p-2 md:grid-cols-[1.4fr_1.4fr_1fr_auto_auto]"
+                      >
+                        <Select
+                          value={rule.kind}
+                          onValueChange={(v) =>
+                            updateRule(idx, {
+                              kind: v as RoutingRule["kind"],
+                              roleKey:
+                                v === "per_change_role"
+                                  ? "implementer"
+                                  : v === "role"
+                                    ? rule.roleKey ?? "change_manager"
+                                    : null,
+                            })
+                          }
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {RECIPIENT_KIND_OPTIONS.map((k) => (
+                              <SelectItem key={k.value} value={k.value} className="text-xs">
+                                {k.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {meta?.needsRole ? (
+                          <Select
+                            value={rule.roleKey ?? ""}
+                            onValueChange={(v) => updateRule(idx, { roleKey: v })}
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Pick a role…" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {rule.kind === "per_change_role"
+                                ? PER_CHANGE_ROLE_OPTIONS.map((rk) => (
+                                    <SelectItem key={rk} value={rk} className="text-xs">
+                                      {rolesByKey.get(rk) ?? rk}
+                                    </SelectItem>
+                                  ))
+                                : (rolesQ.data ?? []).map((r) => (
+                                    <SelectItem key={r.key} value={r.key} className="text-xs">
+                                      {r.name}
+                                    </SelectItem>
+                                  ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <div className="text-[11px] italic text-muted-foreground self-center">
+                            (no role needed)
+                          </div>
+                        )}
+                        <Select
+                          value={rule.trackFilter ?? "__all__"}
+                          onValueChange={(v) =>
+                            updateRule(idx, { trackFilter: v === "__all__" ? null : v })
+                          }
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TRACK_OPTIONS.map((t) => (
+                              <SelectItem key={t.value} value={t.value} className="text-xs">
+                                {t.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <label className="flex items-center gap-1 text-[11px] text-muted-foreground self-center">
+                          <Switch
+                            checked={rule.excludeActor}
+                            onCheckedChange={(v) => updateRule(idx, { excludeActor: !!v })}
+                          />
+                          Exclude actor
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 px-2 text-xs text-destructive"
+                          onClick={() => removeRule(idx)}
+                          data-testid={`button-routing-remove-${evt}-${idx}`}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => addRule(evt)}
+                  data-testid={`button-routing-add-${evt}`}
+                >
+                  + Add recipient
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4 rounded border border-dashed border-border bg-background p-3 text-xs text-muted-foreground">
+        <div className="mb-1 font-medium text-foreground">Other events (not configurable here)</div>
+        <ul className="list-disc space-y-0.5 pl-4">
+          <li>
+            <span className="font-mono">approval.requested</span> — sent to the approver pool of the role being
+            asked (per-change assignee, with role-pool fallback). Inherent to the approval row.
+          </li>
+          <li>
+            <span className="font-mono">cab.invited / cab.reminder / cab.minutes</span> — sent to the standing
+            CAB or eCAB roster of the meeting, plus owners of changes on the agenda. Inherent to the meeting.
+          </li>
+        </ul>
+        <div className="mt-2">
+          Each user can still mute any event for themselves under{" "}
+          <em>Account → Notification preferences</em>.
+        </div>
+      </div>
+    </div>
   );
 }
 

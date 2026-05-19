@@ -16,6 +16,7 @@ import backupRouter from "./backup";
 import categoriesRouter from "./categories";
 import assigneesRouter from "./assignees";
 import attachmentsRouter from "./attachments";
+import notificationRoutingRouter from "./notification-routing";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(backupRouter);
 router.use(categoriesRouter);
 router.use(assigneesRouter);
 router.use(attachmentsRouter);
+router.use(notificationRoutingRouter);
 
 export default router;

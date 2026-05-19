@@ -38,6 +38,7 @@ const TABLES = [
   "workflow_timeouts",
   "notification_settings",
   "notification_queue",
+  "notification_routing_rules",
   "audit_log",
 ] as const;
 
@@ -48,6 +49,7 @@ const TABLES_OPTIONAL = new Set<string>([
   "change_assignees",
   "notification_settings",
   "notification_queue",
+  "notification_routing_rules",
 ]);
 
 export type BackupPayload = {

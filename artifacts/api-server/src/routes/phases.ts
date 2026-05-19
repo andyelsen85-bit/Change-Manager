@@ -10,7 +10,8 @@ import {
 } from "@workspace/db";
 import { requireAuth, getChangeAccess, isPrivilegedAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
-import { notify, getUserEmail } from "../lib/email";
+import { notify } from "../lib/email";
+import { resolveRecipients } from "../lib/notification-routing";
 
 const router: IRouter = Router();
 
@@ -174,11 +175,16 @@ async function putTesting(req: Request, res: Response, kind: "production" | "pre
   // signed off as PASSED. Pre-prod results and failed runs are captured in
   // the audit log + visible in-app but do not generate email.
   if (kind === "production" && overallResult === "passed") {
-    const owner = await getUserEmail(c.ownerId);
-    if (owner) {
+    const targets = await resolveRecipients("test.signed_off", {
+      changeId: c.id,
+      ownerId: c.ownerId,
+      assigneeId: c.assigneeId,
+      track: c.track,
+    });
+    if (targets.length > 0) {
       await notify({
         eventKey: "test.signed_off",
-        to: [owner],
+        to: targets,
         subject: `[CHG ${c.ref}] Production testing passed: ${c.title}`,
         text: `${c.ref} ${c.title}\n\n${c.description ?? ""}\n\nProduction testing has been signed off as PASSED.`,
       });
