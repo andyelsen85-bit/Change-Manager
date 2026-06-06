@@ -7,6 +7,7 @@ export type SessionUser = {
   isAdmin: boolean;
   roles: string[];
   mustChangePassword: boolean;
+  canAccessPentest: boolean;
 };
 
 export type Role = {
@@ -350,6 +351,90 @@ export type Attachment = {
   uploadedById: number;
   uploadedByName: string | null;
   uploadedAt: string;
+};
+
+// ─── PenTesting (confidential / TopSecret) ──────────────────────────────────
+
+export type PentestStatus =
+  | "requested"
+  | "scheduled"
+  | "in_progress"
+  | "reported"
+  | "remediation"
+  | "closed"
+  | "cancelled";
+
+export const PENTEST_STATUS_LABELS: Record<PentestStatus, string> = {
+  requested: "Requested",
+  scheduled: "Scheduled",
+  in_progress: "In Progress",
+  reported: "Reported",
+  remediation: "Remediation",
+  closed: "Closed",
+  cancelled: "Cancelled",
+};
+
+export const PENTEST_STATUS_ORDER: PentestStatus[] = [
+  "requested",
+  "scheduled",
+  "in_progress",
+  "reported",
+  "remediation",
+  "closed",
+  "cancelled",
+];
+
+export type PentestTestType = {
+  id: number;
+  key: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+};
+
+export type PentestRequest = {
+  id: number;
+  ref: string;
+  title: string;
+  testType: string;
+  scope: string;
+  objective: string;
+  authorizedBy: string;
+  status: PentestStatus;
+  classification: string;
+  findingsSummary: string;
+  remediationActions: string;
+  requestedStart: string | null;
+  requestedEnd: string | null;
+  createdById: number;
+  createdAt: string;
+  updatedAt: string;
+  canManage: boolean;
+};
+
+export type PentestCollaborator = {
+  userId: number;
+  addedAt: string;
+  fullName: string | null;
+  username: string | null;
+  email: string | null;
+};
+
+export type PentestAttachment = {
+  id: number;
+  pentestId: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  uploadedById: number;
+  uploadedByName: string | null;
+  uploadedAt: string;
+};
+
+export type PentestDetail = PentestRequest & {
+  createdByName: string;
+  collaborators: PentestCollaborator[];
+  attachments: PentestAttachment[];
 };
 
 export const STATUS_LABELS: Record<ChangeStatus, string> = {

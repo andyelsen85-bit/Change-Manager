@@ -10,6 +10,9 @@ import { DashboardPage } from "@/pages/Dashboard";
 import { ChangesListPage } from "@/pages/ChangesList";
 import { NewChangePage } from "@/pages/NewChange";
 import { ChangeDetailPage } from "@/pages/ChangeDetail";
+import { PentestListPage } from "@/pages/PentestList";
+import { NewPentestPage } from "@/pages/NewPentest";
+import { PentestDetailPage } from "@/pages/PentestDetail";
 import { CabCalendarPage } from "@/pages/CabCalendar";
 import { CabDetailPage } from "@/pages/CabDetail";
 import { TemplatesPage } from "@/pages/Templates";
@@ -75,6 +78,12 @@ function ProtectedRoutes() {
         <Route path="/changes" component={ChangesListPage} />
         <Route path="/changes/new" component={NewChangePage} />
         <Route path="/changes/:id" component={ChangeDetailPage} />
+        <Route path="/pentests" component={user.canAccessPentest ? PentestListPage : ForbiddenPage} />
+        <Route
+          path="/pentests/new"
+          component={user.isAdmin || user.roles.includes("pentest_mgmt") ? NewPentestPage : ForbiddenPage}
+        />
+        <Route path="/pentests/:id" component={user.canAccessPentest ? PentestDetailPage : ForbiddenPage} />
         <Route path="/cab" component={CabCalendarPage} />
         <Route path="/cab/:id" component={CabDetailPage} />
         <Route path="/templates" component={TemplatesPage} />

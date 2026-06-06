@@ -10,6 +10,7 @@ import {
   sslSettingsTable,
   workflowTimeoutsTable,
   changeCategoriesTable,
+  pentestTestTypesTable,
 } from "@workspace/db";
 import { inArray } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
@@ -47,6 +48,19 @@ const ROLES = [
   { key: "ecab_member", name: "eCAB Member", description: "Emergency CAB member, expedited approval authority." },
   { key: "implementer", name: "Implementer", description: "Carries out the change in production." },
   { key: "tester", name: "Tester", description: "Validates change in pre-prod / prod." },
+  { key: "pentest_mgmt", name: "PenTest Management", description: "Manages confidential penetration-test requests (TopSecret)." },
+];
+
+// Default penetration-test types. Admins can add / rename / activate-deactivate
+// from Settings → PenTest test types.
+const DEFAULT_PENTEST_TEST_TYPES = [
+  { key: "external_network", name: "External network", sortOrder: 10 },
+  { key: "internal_network", name: "Internal network", sortOrder: 20 },
+  { key: "web_application", name: "Web application", sortOrder: 30 },
+  { key: "wireless", name: "Wireless", sortOrder: 40 },
+  { key: "social_engineering", name: "Social engineering", sortOrder: 50 },
+  { key: "physical", name: "Physical", sortOrder: 60 },
+  { key: "red_team", name: "Red team", sortOrder: 70 },
 ];
 
 // Roles that were removed from this version and must be cleaned out of any
@@ -213,6 +227,11 @@ export async function runSeed(): Promise<void> {
   // without clobbering admin edits to existing rows.
   for (const c of DEFAULT_CATEGORIES) {
     await db.insert(changeCategoriesTable).values(c).onConflictDoNothing();
+  }
+
+  // Default pentest test types — idempotent insert keyed on the unique key.
+  for (const tt of DEFAULT_PENTEST_TEST_TYPES) {
+    await db.insert(pentestTestTypesTable).values(tt).onConflictDoNothing();
   }
 
   // Admin user. On first startup we create the row in either:

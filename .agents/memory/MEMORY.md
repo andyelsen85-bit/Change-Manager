@@ -1,0 +1,1 @@
+- [db dist rebuild](db-dist-rebuild.md) — api-server resolves @workspace/db types from dist/, not src; rebuild after any schema change or tsc fails on missing tables/columns.

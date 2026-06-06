@@ -172,7 +172,7 @@ export async function sendTestEmail(to: string): Promise<{ success: boolean; mes
     await transporter.sendMail({
       from: `"${cfg.fromName}" <${cfg.fromAddress}>`,
       to,
-      subject: "Change Management — SMTP test",
+      subject: "Change-it — SMTP test",
       text: "If you received this, SMTP is configured correctly.",
     });
     return { success: true, message: `Test email sent to ${to}` };

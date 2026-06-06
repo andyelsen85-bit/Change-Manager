@@ -33,7 +33,7 @@ function maskSmtp(row: typeof smtpSettingsTable.$inferSelect | undefined) {
       username: "",
       passwordSet: false,
       fromAddress: "",
-      fromName: "Change Management",
+      fromName: "Change-it",
       enabled: false,
       tlsRejectUnauthorized: true,
       caCertInstalled: false,
@@ -72,7 +72,7 @@ router.put("/settings/smtp", requireAdmin, async (req, res): Promise<void> => {
         ? encryptSecret(b.password)
         : before?.passwordEnc ?? null,
     fromAddress: b.fromAddress ?? "",
-    fromName: b.fromName ?? "Change Management",
+    fromName: b.fromName ?? "Change-it",
     enabled: !!b.enabled,
     tlsRejectUnauthorized: b.tlsRejectUnauthorized === false ? false : true,
     caCertPem:
