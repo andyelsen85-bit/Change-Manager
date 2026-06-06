@@ -21,6 +21,7 @@ import {
   type ChangeStatus,
   type ChangeTrack,
   type Comment,
+  type CategoryItem,
   type PirRecord,
   type PlanningRecord,
   type TestRecord,
@@ -30,13 +31,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { RiskBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
+import { RiskBadge, RiskScoreBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
 import { fmtAgo, fmtDateTime, toLocalDateTimeInput, fromLocalDateTimeInput } from "@/lib/format";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import {
+  FieldHint,
+  IMPACT_HINT,
+  PROBABILITY_HINT,
+  PRIORITY_HINT,
+  CATEGORY_HINT,
+} from "@/components/FieldHint";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 
@@ -580,8 +590,9 @@ export function ChangeDetailPage() {
       )}
 
       {c && (
-        <Tabs defaultValue="planning" className="w-full">
+        <Tabs defaultValue="details" className="w-full">
           <TabsList className="flex flex-wrap">
+            <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
             <TabsTrigger value="planning" data-testid="tab-planning">Planning</TabsTrigger>
             <TabsTrigger value="approvals" data-testid="tab-approvals">Approvals</TabsTrigger>
             <TabsTrigger value="assignees" data-testid="tab-assignees">Assignees</TabsTrigger>
@@ -594,6 +605,7 @@ export function ChangeDetailPage() {
             <TabsTrigger value="comments" data-testid="tab-comments">Discussion</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="details"><DetailsTab id={id} change={c} /></TabsContent>
           <TabsContent value="planning"><PlanningTab id={id} change={c} /></TabsContent>
           <TabsContent value="approvals"><ApprovalsTab id={id} currentUserId={user?.id ?? 0} /></TabsContent>
           <TabsContent value="assignees"><AssigneesTab id={id} /></TabsContent>
@@ -699,6 +711,194 @@ function AutoTextarea({
       style={{ overflow: "hidden", resize: "none" }}
       {...rest}
     />
+  );
+}
+
+// Editable mirror of the creation form. Lets users correct the descriptive
+// fields (title, description, the risk-matrix inputs, category, owner, preprod
+// env) after a change has been created. Track and template are intentionally
+// not editable — they drive the lifecycle graph and approvals.
+function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
+  const qc = useQueryClient();
+  const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
+  const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: () => api.get<CategoryItem[]>("/categories") });
+
+  const [title, setTitle] = useState(change.title);
+  const [description, setDescription] = useState(change.description);
+  const [impact, setImpact] = useState<"low" | "medium" | "high">(change.impact);
+  const [risk, setRisk] = useState<"low" | "medium" | "high">(change.risk);
+  const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">(change.priority);
+  const [category, setCategory] = useState<string>(change.category ?? "");
+  const [assigneeId, setAssigneeId] = useState<string>(change.assigneeId ? String(change.assigneeId) : "none");
+  const [hasPreprodEnv, setHasPreprodEnv] = useState<boolean>(change.hasPreprodEnv ?? false);
+  const [preprodEnvUrl, setPreprodEnvUrl] = useState<string>(change.preprodEnvUrl ?? "");
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.patch(`/changes/${change.id}`, {
+        title: title.trim(),
+        description: description.trim(),
+        impact,
+        risk,
+        priority,
+        category: category || null,
+        assigneeId: assigneeId === "none" ? null : Number(assigneeId),
+        hasPreprodEnv,
+        preprodEnvUrl: hasPreprodEnv ? preprodEnvUrl.trim() : "",
+      }),
+    onSuccess: () => {
+      toast.success("Details updated");
+      qc.invalidateQueries({ queryKey: ["change", id] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Update failed"),
+  });
+
+  const dirty =
+    title !== change.title ||
+    description !== change.description ||
+    impact !== change.impact ||
+    risk !== change.risk ||
+    priority !== change.priority ||
+    (category ?? "") !== (change.category ?? "") ||
+    assigneeId !== (change.assigneeId ? String(change.assigneeId) : "none") ||
+    hasPreprodEnv !== (change.hasPreprodEnv ?? false) ||
+    preprodEnvUrl !== (change.preprodEnvUrl ?? "");
+
+  return (
+    <TooltipProvider>
+      <Card className="mt-4">
+        <CardContent className="space-y-4 p-6">
+          <div className="space-y-2">
+            <Label htmlFor="details-title">Title</Label>
+            <Input id="details-title" value={title} onChange={(e) => setTitle(e.target.value)} data-testid="input-details-title" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="details-description">Description</Label>
+            <Textarea id="details-description" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} data-testid="input-details-description" />
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                Impact
+                <FieldHint label="Critères d'impact">{IMPACT_HINT}</FieldHint>
+              </Label>
+              <Select value={impact} onValueChange={(v) => setImpact(v as typeof impact)}>
+                <SelectTrigger data-testid="select-details-impact"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">1 — Faible</SelectItem>
+                  <SelectItem value="medium">2 — Moyen</SelectItem>
+                  <SelectItem value="high">3 — Fort</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                Probabilité d'échec
+                <FieldHint label="Critères de probabilité d'échec">{PROBABILITY_HINT}</FieldHint>
+              </Label>
+              <Select value={risk} onValueChange={(v) => setRisk(v as typeof risk)}>
+                <SelectTrigger data-testid="select-details-risk"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">1 — Faible</SelectItem>
+                  <SelectItem value="medium">2 — Moyenne</SelectItem>
+                  <SelectItem value="high">3 — Forte</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                Priority
+                <FieldHint label="À propos de la priorité">{PRIORITY_HINT}</FieldHint>
+              </Label>
+              <Select value={priority} onValueChange={(v) => setPriority(v as typeof priority)}>
+                <SelectTrigger data-testid="select-details-priority"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div
+            className="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3"
+            data-testid="details-risk-score-panel"
+          >
+            <div>
+              <p className="text-sm font-medium">Score de risque (auto-évalué)</p>
+              <p className="text-xs text-muted-foreground">
+                Calculé selon la matrice de décision : Impact × Probabilité d'échec.
+              </p>
+            </div>
+            <RiskScoreBadge impact={impact} probability={risk} className="px-3 py-1 text-sm" />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1.5">
+              Category
+              <FieldHint label="À propos de la catégorie">{CATEGORY_HINT}</FieldHint>
+            </Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger data-testid="select-details-category"><SelectValue placeholder="Select a category…" /></SelectTrigger>
+              <SelectContent>
+                {(categoriesQ.data ?? []).filter((cat) => cat.isActive !== false).map((cat) => (
+                  <SelectItem key={cat.key} value={cat.key}>{cat.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Change Owner</Label>
+            <Select value={assigneeId} onValueChange={setAssigneeId}>
+              <SelectTrigger data-testid="select-details-assignee"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Unassigned</SelectItem>
+                {(usersQ.data ?? []).filter((u) => u.isActive).map((u) => (
+                  <SelectItem key={u.id} value={String(u.id)}>{u.fullName} ({u.username})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {change.track === "normal" && (
+            <div className="rounded-md border border-border p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Pre-production testing environment</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Adds a "Pre-prod testing" stage to the lifecycle (between Approved and Scheduled).
+                  </p>
+                </div>
+                <Switch checked={hasPreprodEnv} onCheckedChange={setHasPreprodEnv} data-testid="switch-details-has-preprod" />
+              </div>
+              {hasPreprodEnv && (
+                <div className="space-y-2">
+                  <Label htmlFor="details-preprod-url">Pre-prod environment URL</Label>
+                  <Input
+                    id="details-preprod-url"
+                    value={preprodEnvUrl}
+                    onChange={(e) => setPreprodEnvUrl(e.target.value)}
+                    placeholder="https://preprod.example.com"
+                    data-testid="input-details-preprod-url"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end border-t border-border pt-4">
+            <Button onClick={() => save.mutate()} disabled={!dirty || !title.trim() || save.isPending} data-testid="button-save-details">
+              {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save details
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </TooltipProvider>
   );
 }
 

@@ -85,6 +85,7 @@ export type ChangeRequest = {
   risk: "low" | "medium" | "high";
   impact: "low" | "medium" | "high";
   priority: "low" | "medium" | "high" | "critical";
+  category: string | null;
   ownerId: number;
   ownerName?: string;
   assigneeId: number | null;
