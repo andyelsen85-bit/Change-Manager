@@ -1,2 +1,3 @@
 - [db dist rebuild](db-dist-rebuild.md) — api-server resolves @workspace/db types from dist/, not src; rebuild after any schema change or tsc fails on missing tables/columns.
 - [PenTest notification routing](pentest-notification-routing.md) — pentest.* routing rules are constrained server-side (kinds, role allowlist, no track) for need-to-know, even though routing is admin-editable.
+- [API CORS allowlist & deployment](cors-allowlist-deployment.md) — credentialed-CORS allowlist auto-derives from REPLIT_DOMAINS (+ optional ALLOWED_ORIGINS); never require a hand-set CORS env var or use origin:true.
