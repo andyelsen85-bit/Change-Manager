@@ -1,0 +1,34 @@
+Add a new function. Handly this on a seperate page called PenTesting
+I need to handle and track pen tests, but without everyone can see them. so we need to create a new rôle called PenTestMgmt
+Only users in this rôle can add a request for PenTesting
+By openeing a new PenTest Request. The creator can add other users to the request, so they will have the permission to view the requested pentest. without beeing added to the request, or not beein member of the PenTestMgmt, the list of the PenTest Requests will be empty. So no visibility. Neither on guessing an id for URL. Permissions needed to be checked accordingly.
+For the request propose me a short workflow and standard fields to be filled out. with the option to upload after the pentest results as document, and some text fields what actions should be done..
+On Pentest creation, Members of the role PenTestMgmt should be notified by mail including the users added for the specific pentest. And only these users, no other members. The PenTest function needs to be TopSecret.
+
+Rename the Application to "Change-it"
+
+On a change request, add some informations at the creation form for the selection fields as tips or  hints or (?) mouse over..
+
+Impact
+Niveau	Critères (un seul critère suffit pour relever le niveau)
+1 — Low		"Un seul poste ou service isolé · aucun système critique · pas de données de santé · indisponibilité hors heures de soin · retour arrière immédiat."
+2 — Medium	"Plusieurs services · système important mais non vital · indisponibilité courte et planifiée · plan de retour arrière testé."
+3 — High	"Système clinique ou vital · sécurité du patient ou continuité des soins en jeu · données de santé sensibles · indisponibilité pendant les heures de soin · retour arrière complexe ou incertain."
+
+change risk selection field to Probabilité d’échec, also with mouse over hints.
+Probabilité d’échec
+Niveau	Critères
+1 — Low		Geste routinier, déjà réalisé, procédure éprouvée.
+2 — Medium	Non routinier mais documenté et testé.
+3 — High	Complexe ou nouveau, peu testé, dépendances multiples ou intervention d’un prestataire externe.
+
+And show with these two informations a auto risk evalution Score:
+Matrice de décision (Impact × Probabilité)
+	Proba. Faible	Proba. Moyenne	Proba. Forte
+Impact Fort	Moyen	Élevé	Élevé
+Impact Moyen	Faible	Moyen	Élevé
+Impact Faible	Faible	Faible	Moyen
+
+This Score should be shown in the change list on Changes page as well. The old "Risk" colomn is replaced by the risk evaluation score.
+
+Everything clear for you?
