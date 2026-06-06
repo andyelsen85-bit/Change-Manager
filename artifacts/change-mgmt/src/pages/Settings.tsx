@@ -1060,7 +1060,7 @@ function NotificationsBatchPanel() {
 type RoutingRule = {
   id?: number;
   eventKey: string;
-  kind: "owner" | "assignee" | "role" | "per_change_role";
+  kind: "owner" | "assignee" | "role" | "per_change_role" | "collaborator";
   roleKey: string | null;
   trackFilter: string | null;
   excludeActor: boolean;
@@ -1104,14 +1104,42 @@ const ROUTABLE_EVENT_META: Record<string, { label: string; hint: string }> = {
     label: "PIR due",
     hint: "Automated reminder when a post-implementation review is overdue.",
   },
+  "pentest.requested": {
+    label: "PenTest request opened",
+    hint: "Fires when a new penetration-test request is created. Emails stay minimal — no scope or findings — because pentest data is TopSecret.",
+  },
+  "pentest.status_changed": {
+    label: "PenTest status changed",
+    hint: "Fires when a pentest request moves to a new status (e.g. scheduled, reported, closed). The person who made the change is automatically excluded by default.",
+  },
 };
 
-const RECIPIENT_KIND_OPTIONS: Array<{ value: RoutingRule["kind"]; label: string; needsRole: boolean }> = [
+// Pentest events route off a different context than changes: there is no
+// assignee, per-change role, or track — recipients are the request creator
+// ("owner"), its collaborators, or a global role pool.
+const PENTEST_ROUTABLE_EVENTS = new Set(["pentest.requested", "pentest.status_changed"]);
+const isPentestEvent = (evt: string) => PENTEST_ROUTABLE_EVENTS.has(evt);
+
+const CHANGE_KIND_OPTIONS: Array<{ value: RoutingRule["kind"]; label: string; needsRole: boolean }> = [
   { value: "owner", label: "Change owner", needsRole: false },
   { value: "assignee", label: "Change assignee", needsRole: false },
   { value: "role", label: "Role pool", needsRole: true },
   { value: "per_change_role", label: "Per-change role (with role-pool fallback)", needsRole: true },
 ];
+
+const PENTEST_KIND_OPTIONS: Array<{ value: RoutingRule["kind"]; label: string; needsRole: boolean }> = [
+  { value: "owner", label: "Request creator", needsRole: false },
+  { value: "collaborator", label: "Request collaborators", needsRole: false },
+  { value: "role", label: "Role pool", needsRole: true },
+];
+
+const kindOptionsFor = (evt: string) => (isPentestEvent(evt) ? PENTEST_KIND_OPTIONS : CHANGE_KIND_OPTIONS);
+
+const defaultRoleKeyFor = (evt: string) => (isPentestEvent(evt) ? "pentest_mgmt" : "change_manager");
+
+// PenTest data is need-to-know; pentest role-pool rules may only target this
+// allowlist. Mirrors the server-side guard in routes/notification-routing.ts.
+const PENTEST_ALLOWED_ROLE_KEYS = new Set(["pentest_mgmt"]);
 
 const TRACK_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "__all__", label: "All tracks" },
@@ -1194,7 +1222,7 @@ function NotificationRoutingEditor() {
               kind: "owner",
               roleKey: null,
               trackFilter: null,
-              excludeActor: eventKey === "comment.added",
+              excludeActor: eventKey === "comment.added" || eventKey === "pentest.status_changed",
               isActive: true,
               sortOrder: prev.length,
             },
@@ -1235,8 +1263,9 @@ function NotificationRoutingEditor() {
       </div>
       <p className="mb-4 text-xs text-muted-foreground">
         Define exactly which users get an email for each lifecycle event. Each event can have any number of
-        recipient rules — they are unioned together. Email subjects always open with{" "}
-        <span className="font-mono">[CHG &lt;ref&gt;]</span> plus the change title. Anything not configured here is
+        recipient rules — they are unioned together. Change subjects open with{" "}
+        <span className="font-mono">[CHG &lt;ref&gt;]</span> and pentest subjects with{" "}
+        <span className="font-mono">[PenTest &lt;ref&gt;]</span>. Anything not configured here is
         recorded in the audit log but does not produce email. The batch schedule below only controls digest
         cadence, not the recipient list.
       </p>
@@ -1266,7 +1295,8 @@ function NotificationRoutingEditor() {
               ) : (
                 <div className="space-y-2">
                   {rules.map(({ rule, idx }) => {
-                    const meta = RECIPIENT_KIND_OPTIONS.find((k) => k.value === rule.kind);
+                    const kindOptions = kindOptionsFor(evt);
+                    const meta = kindOptions.find((k) => k.value === rule.kind);
                     return (
                       <div
                         key={idx}
@@ -1281,7 +1311,7 @@ function NotificationRoutingEditor() {
                                 v === "per_change_role"
                                   ? "implementer"
                                   : v === "role"
-                                    ? rule.roleKey ?? "change_manager"
+                                    ? rule.roleKey ?? defaultRoleKeyFor(evt)
                                     : null,
                             })
                           }
@@ -1290,7 +1320,7 @@ function NotificationRoutingEditor() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {RECIPIENT_KIND_OPTIONS.map((k) => (
+                            {kindOptions.map((k) => (
                               <SelectItem key={k.value} value={k.value} className="text-xs">
                                 {k.label}
                               </SelectItem>
@@ -1312,11 +1342,17 @@ function NotificationRoutingEditor() {
                                       {rolesByKey.get(rk) ?? rk}
                                     </SelectItem>
                                   ))
-                                : (rolesQ.data ?? []).map((r) => (
-                                    <SelectItem key={r.key} value={r.key} className="text-xs">
-                                      {r.name}
-                                    </SelectItem>
-                                  ))}
+                                : (rolesQ.data ?? [])
+                                    .filter(
+                                      (r) =>
+                                        !isPentestEvent(evt) ||
+                                        PENTEST_ALLOWED_ROLE_KEYS.has(r.key),
+                                    )
+                                    .map((r) => (
+                                      <SelectItem key={r.key} value={r.key} className="text-xs">
+                                        {r.name}
+                                      </SelectItem>
+                                    ))}
                             </SelectContent>
                           </Select>
                         ) : (
@@ -1324,23 +1360,29 @@ function NotificationRoutingEditor() {
                             (no role needed)
                           </div>
                         )}
-                        <Select
-                          value={rule.trackFilter ?? "__all__"}
-                          onValueChange={(v) =>
-                            updateRule(idx, { trackFilter: v === "__all__" ? null : v })
-                          }
-                        >
-                          <SelectTrigger className="h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TRACK_OPTIONS.map((t) => (
-                              <SelectItem key={t.value} value={t.value} className="text-xs">
-                                {t.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {isPentestEvent(evt) ? (
+                          <div className="self-center text-[11px] italic text-muted-foreground">
+                            (all requests)
+                          </div>
+                        ) : (
+                          <Select
+                            value={rule.trackFilter ?? "__all__"}
+                            onValueChange={(v) =>
+                              updateRule(idx, { trackFilter: v === "__all__" ? null : v })
+                            }
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TRACK_OPTIONS.map((t) => (
+                                <SelectItem key={t.value} value={t.value} className="text-xs">
+                                  {t.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
                         <label className="flex items-center gap-1 text-[11px] text-muted-foreground self-center">
                           <Switch
                             checked={rule.excludeActor}

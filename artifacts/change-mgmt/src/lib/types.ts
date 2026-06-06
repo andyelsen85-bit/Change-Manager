@@ -335,6 +335,8 @@ export const NOTIFICATION_EVENTS: { key: string; label: string; group: string }[
   { key: "test.signed_off", label: "Production testing passed", group: "Testing & PIR" },
   { key: "pir.due", label: "PIR due", group: "Testing & PIR" },
   { key: "comment.added", label: "Comment added", group: "Collaboration" },
+  { key: "pentest.requested", label: "PenTest request opened", group: "PenTesting" },
+  { key: "pentest.status_changed", label: "PenTest status changed", group: "PenTesting" },
 ];
 
 export const TRACK_OPTIONS: { value: ChangeTrack; label: string; description: string }[] = [

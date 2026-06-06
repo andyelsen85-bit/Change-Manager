@@ -11,8 +11,18 @@ import { audit } from "../lib/audit";
 
 const router: IRouter = Router();
 
-const VALID_KINDS = new Set(["owner", "assignee", "role", "per_change_role"]);
+const VALID_KINDS = new Set(["owner", "assignee", "role", "per_change_role", "collaborator"]);
 const VALID_TRACKS = new Set(["normal", "emergency", "standard"]);
+
+// PenTest data is TopSecret/need-to-know. Even admins may not freely route
+// pentest notifications to arbitrary audiences. Constrain pentest.* rules to a
+// fixed set of recipient kinds, an allowlisted role pool, and no track filter
+// (pentest requests have no change track, so a filter would silently suppress
+// every recipient). These constraints are enforced server-side regardless of
+// what the UI submits.
+const PENTEST_ALLOWED_KINDS = new Set(["owner", "collaborator", "role"]);
+const PENTEST_ALLOWED_ROLE_KEYS = new Set(["pentest_mgmt"]);
+const isPentestEvent = (eventKey: string): boolean => eventKey.startsWith("pentest.");
 
 router.get("/notification-routing", requireAuth, async (_req, res): Promise<void> => {
   const rows = await db
@@ -60,12 +70,27 @@ router.put(
         res.status(400).json({ error: `Unknown kind: ${kind}` });
         return;
       }
+      const pentest = isPentestEvent(eventKey);
+      if (pentest && !PENTEST_ALLOWED_KINDS.has(kind)) {
+        res.status(400).json({
+          error: `Recipient kind '${kind}' is not permitted for pentest events.`,
+        });
+        return;
+      }
       const roleKey = raw.roleKey ? String(raw.roleKey) : null;
-      const trackFilter = raw.trackFilter ? String(raw.trackFilter) : null;
+      // PenTest requests carry no change track, so any track filter would
+      // silently drop every recipient. Force it null regardless of input.
+      const trackFilter = pentest ? null : raw.trackFilter ? String(raw.trackFilter) : null;
       if ((kind === "role" || kind === "per_change_role") && !roleKey) {
         res
           .status(400)
           .json({ error: `Rule of kind '${kind}' requires a roleKey.` });
+        return;
+      }
+      if (pentest && kind === "role" && roleKey && !PENTEST_ALLOWED_ROLE_KEYS.has(roleKey)) {
+        res.status(400).json({
+          error: `Role '${roleKey}' is not permitted for pentest events (need-to-know).`,
+        });
         return;
       }
       if (trackFilter && !VALID_TRACKS.has(trackFilter)) {

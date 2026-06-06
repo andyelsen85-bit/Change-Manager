@@ -4,6 +4,7 @@ import {
   notificationRoutingRulesTable,
   roleAssignmentsTable,
   changeAssigneesTable,
+  pentestCollaboratorsTable,
   type NotificationRoutingRule,
 } from "@workspace/db";
 import { getUserEmails, type NotifyTarget } from "./email";
@@ -20,10 +21,15 @@ export const ROUTABLE_EVENTS = [
   "test.signed_off",
   "comment.added",
   "pir.due",
+  "pentest.requested",
+  "pentest.status_changed",
 ] as const;
 export type RoutableEvent = (typeof ROUTABLE_EVENTS)[number];
 
-export type RoutingKind = "owner" | "assignee" | "role" | "per_change_role";
+// owner/assignee/per_change_role come from the change context; "collaborator"
+// is pentest-specific (the per-request collaborator list). "role" works for
+// both (a global role pool such as change_manager or pentest_mgmt).
+export type RoutingKind = "owner" | "assignee" | "role" | "per_change_role" | "collaborator";
 
 export type RoutingContext = {
   changeId?: number;
@@ -31,6 +37,9 @@ export type RoutingContext = {
   assigneeId?: number | null;
   track?: string;
   actorUserId?: number;
+  // PenTest context: the request id, used to expand "collaborator" rules.
+  // For pentest events "ownerId" carries the request creator's id.
+  pentestId?: number;
 };
 
 export const DEFAULT_ROUTING_RULES: Array<{
@@ -62,6 +71,16 @@ export const DEFAULT_ROUTING_RULES: Array<{
 
   { eventKey: "pir.due", kind: "owner", sortOrder: 10 },
   { eventKey: "pir.due", kind: "assignee", sortOrder: 20 },
+
+  // PenTesting (TopSecret) — defaults preserve the original fixed audience:
+  // the request creator, its collaborators, and the pentest_mgmt role pool.
+  { eventKey: "pentest.requested", kind: "owner", sortOrder: 10 },
+  { eventKey: "pentest.requested", kind: "collaborator", sortOrder: 20 },
+  { eventKey: "pentest.requested", kind: "role", roleKey: "pentest_mgmt", sortOrder: 30 },
+
+  { eventKey: "pentest.status_changed", kind: "owner", excludeActor: true, sortOrder: 10 },
+  { eventKey: "pentest.status_changed", kind: "collaborator", excludeActor: true, sortOrder: 20 },
+  { eventKey: "pentest.status_changed", kind: "role", roleKey: "pentest_mgmt", excludeActor: true, sortOrder: 30 },
 ];
 
 async function expandRule(
@@ -98,6 +117,14 @@ async function expandRule(
         .from(roleAssignmentsTable)
         .where(eq(roleAssignmentsTable.roleKey, rule.roleKey));
       return fallback.map((r) => r.userId);
+    }
+    case "collaborator": {
+      if (!ctx.pentestId) return [];
+      const rows = await db
+        .select({ userId: pentestCollaboratorsTable.userId })
+        .from(pentestCollaboratorsTable)
+        .where(eq(pentestCollaboratorsTable.pentestId, ctx.pentestId));
+      return rows.map((r) => r.userId);
     }
     default:
       return [];
@@ -137,10 +164,17 @@ export async function resolveRecipients(
   return getUserEmails(ids);
 }
 
+// Idempotent seed that tops up defaults per event. An event's default rules are
+// only inserted when that event currently has zero rules, so admin edits to
+// existing events are never overwritten, while newly added routable events
+// (e.g. pentest.*) get their defaults on the next restart of an existing install.
 export async function seedDefaultRoutingRules(): Promise<void> {
-  const existing = await db.select().from(notificationRoutingRulesTable);
-  if (existing.length > 0) return;
+  const existing = await db
+    .select({ eventKey: notificationRoutingRulesTable.eventKey })
+    .from(notificationRoutingRulesTable);
+  const eventsWithRules = new Set(existing.map((r) => r.eventKey));
   for (const r of DEFAULT_ROUTING_RULES) {
+    if (eventsWithRules.has(r.eventKey)) continue;
     await db.insert(notificationRoutingRulesTable).values({
       eventKey: r.eventKey,
       kind: r.kind,

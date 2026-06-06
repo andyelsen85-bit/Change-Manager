@@ -24,20 +24,20 @@ export function FieldHint({ children, label }: { children: React.ReactNode; labe
   );
 }
 
-export const IMPACT_HINT = `1 — Faible : Un seul poste ou service isolé · aucun système critique · pas de données de santé · indisponibilité hors heures de soin · retour arrière immédiat.
+export const IMPACT_HINT = `1 — Low: A single workstation or isolated service · no critical system · no health data · downtime outside care hours · immediate rollback.
 
-2 — Moyen : Plusieurs services · système important mais non vital · indisponibilité courte et planifiée · plan de retour arrière testé.
+2 — Medium: Several services · important but non-vital system · short, planned downtime · tested rollback plan.
 
-3 — Fort : Système clinique ou vital · sécurité du patient ou continuité des soins en jeu · données de santé sensibles · indisponibilité pendant les heures de soin · retour arrière complexe ou incertain.`;
+3 — High: Clinical or vital system · patient safety or continuity of care at stake · sensitive health data · downtime during care hours · complex or uncertain rollback.`;
 
-export const PROBABILITY_HINT = `1 — Faible : Geste routinier, déjà réalisé, procédure éprouvée.
+export const PROBABILITY_HINT = `1 — Low: Routine action, already performed, proven procedure.
 
-2 — Moyenne : Non routinier mais documenté et testé.
+2 — Medium: Non-routine but documented and tested.
 
-3 — Forte : Complexe ou nouveau, peu testé, dépendances multiples ou intervention d'un prestataire externe.`;
+3 — High: Complex or new, lightly tested, multiple dependencies or involvement of an external provider.`;
 
-export const PRIORITY_HINT = `Combien cette demande est urgente à traiter. Détermine l'ordre de prise en charge — indépendamment du score de risque.`;
+export const PRIORITY_HINT = `How urgent this request is to handle. Determines the order in which it is taken on — independently of the risk score.`;
 
-export const CATEGORY_HINT = `Le domaine fonctionnel de la demande (réseau, application, infrastructure…). Utilisé pour le classement et les tableaux de bord.`;
+export const CATEGORY_HINT = `The functional domain of the request (network, application, infrastructure…). Used for classification and dashboards.`;
 
-export const TRACK_HINT = `Standard : pré-approuvé, faible risque, sans CAB. Normal : revue complète (planning, approbations, CAB, tests, PIR). Emergency : voie accélérée avec eCAB.`;
+export const TRACK_HINT = `Standard: pre-approved, low risk, no CAB. Normal: full review (planning, approvals, CAB, testing, PIR). Emergency: expedited path with eCAB.`;

@@ -79,31 +79,31 @@ export function riskColor(risk: string): string {
   return "text-success";
 }
 
-// Auto risk-evaluation score derived from Impact × Probabilité d'échec, per
-// the "Matrice de décision". Both axes are stored as low/medium/high.
-//   impact:  low=Faible, medium=Moyen, high=Fort
-//   proba:   low=Faible, medium=Moyenne, high=Forte
-// Result is one of Faible / Moyen / Élevé.
-export type RiskScore = "Faible" | "Moyen" | "Élevé";
+// Auto risk-evaluation score derived from Impact × Probability of failure, per
+// the decision matrix. Both axes are stored as low/medium/high.
+//   impact:  low=Low, medium=Medium, high=High
+//   proba:   low=Low, medium=Medium, high=High
+// Result is one of Low / Medium / High.
+export type RiskScore = "Low" | "Medium" | "High";
 
 const RISK_MATRIX: Record<"low" | "medium" | "high", Record<"low" | "medium" | "high", RiskScore>> = {
-  high: { low: "Moyen", medium: "Élevé", high: "Élevé" },
-  medium: { low: "Faible", medium: "Moyen", high: "Élevé" },
-  low: { low: "Faible", medium: "Faible", high: "Moyen" },
+  high: { low: "Medium", medium: "High", high: "High" },
+  medium: { low: "Low", medium: "Medium", high: "High" },
+  low: { low: "Low", medium: "Low", high: "Medium" },
 };
 
 export function computeRiskScore(
   impact: "low" | "medium" | "high",
   probability: "low" | "medium" | "high",
 ): RiskScore {
-  return RISK_MATRIX[impact]?.[probability] ?? "Faible";
+  return RISK_MATRIX[impact]?.[probability] ?? "Low";
 }
 
 export function riskScoreVariant(
   score: RiskScore,
 ): "success" | "warning" | "destructive" {
-  if (score === "Élevé") return "destructive";
-  if (score === "Moyen") return "warning";
+  if (score === "High") return "destructive";
+  if (score === "Medium") return "warning";
   return "success";
 }
 

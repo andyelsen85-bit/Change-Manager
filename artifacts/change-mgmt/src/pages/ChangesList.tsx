@@ -131,7 +131,7 @@ export function ChangesListPage() {
                     <TableHead>Title</TableHead>
                     <TableHead>Track</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Score de risque</TableHead>
+                    <TableHead>Risk score</TableHead>
                     <TableHead>Owner</TableHead>
                     <TableHead>Planned start</TableHead>
                     <TableHead>Updated</TableHead>

@@ -12,4 +12,6 @@ export const NOTIFICATION_EVENTS: Array<{ key: string; label: string; descriptio
   { key: "comment.added", label: "Comment added", description: "Someone commented on a change you watch." },
   { key: "pir.due", label: "PIR due", description: "A post-implementation review is due for a change." },
   { key: "test.signed_off", label: "Production testing passed", description: "Production testing was signed off as passed." },
+  { key: "pentest.requested", label: "PenTest request opened", description: "A new penetration-test request was opened." },
+  { key: "pentest.status_changed", label: "PenTest status changed", description: "A penetration-test request moved to a new status." },
 ];
