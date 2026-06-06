@@ -78,8 +78,8 @@ export function PentestStatusBadge({ status }: { status: PentestStatus }) {
   );
 }
 
-// Auto risk-evaluation score (Impact × Probabilité d'échec) rendered as a
-// colour-coded badge: Faible (success), Moyen (warning), Élevé (destructive).
+// Auto risk-evaluation score (Impact × Probability of failure) rendered as a
+// colour-coded badge: Low (success), Medium (warning), High (destructive).
 export function RiskScoreBadge({
   impact,
   probability,

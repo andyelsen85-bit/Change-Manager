@@ -276,35 +276,35 @@ export function NewChangePage() {
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 Impact <span className="text-destructive">*</span>
-                <FieldHint label="Critères d'impact">{IMPACT_HINT}</FieldHint>
+                <FieldHint label="Impact criteria">{IMPACT_HINT}</FieldHint>
               </Label>
               <Select value={impact} onValueChange={(v) => setImpact(v as typeof impact)}>
                 <SelectTrigger data-testid="select-impact"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">1 — Faible</SelectItem>
-                  <SelectItem value="medium">2 — Moyen</SelectItem>
-                  <SelectItem value="high">3 — Fort</SelectItem>
+                  <SelectItem value="low">1 — Low</SelectItem>
+                  <SelectItem value="medium">2 — Medium</SelectItem>
+                  <SelectItem value="high">3 — High</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
-                Probabilité d'échec <span className="text-destructive">*</span>
-                <FieldHint label="Critères de probabilité d'échec">{PROBABILITY_HINT}</FieldHint>
+                Probability of failure <span className="text-destructive">*</span>
+                <FieldHint label="Failure probability criteria">{PROBABILITY_HINT}</FieldHint>
               </Label>
               <Select value={risk} onValueChange={(v) => setRisk(v as typeof risk)}>
                 <SelectTrigger data-testid="select-risk"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">1 — Faible</SelectItem>
-                  <SelectItem value="medium">2 — Moyenne</SelectItem>
-                  <SelectItem value="high">3 — Forte</SelectItem>
+                  <SelectItem value="low">1 — Low</SelectItem>
+                  <SelectItem value="medium">2 — Medium</SelectItem>
+                  <SelectItem value="high">3 — High</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 Priority <span className="text-destructive">*</span>
-                <FieldHint label="À propos de la priorité">{PRIORITY_HINT}</FieldHint>
+                <FieldHint label="About priority">{PRIORITY_HINT}</FieldHint>
               </Label>
               <Select value={priority} onValueChange={(v) => setPriority(v as typeof priority)}>
                 <SelectTrigger data-testid="select-priority"><SelectValue /></SelectTrigger>
@@ -323,9 +323,9 @@ export function NewChangePage() {
             data-testid="risk-score-panel"
           >
             <div>
-              <p className="text-sm font-medium">Score de risque (auto-évalué)</p>
+              <p className="text-sm font-medium">Risk score (auto-assessed)</p>
               <p className="text-xs text-muted-foreground">
-                Calculé selon la matrice de décision : Impact × Probabilité d'échec.
+                Calculated from the decision matrix: Impact × Probability of failure.
               </p>
             </div>
             <span
@@ -353,7 +353,7 @@ export function NewChangePage() {
           <div className="space-y-2">
             <Label className="flex items-center gap-1.5">
               Category <span className="text-destructive">*</span>
-              <FieldHint label="À propos de la catégorie">{CATEGORY_HINT}</FieldHint>
+              <FieldHint label="About category">{CATEGORY_HINT}</FieldHint>
             </Label>
             <Select value={category} onValueChange={setCategory}>
               <SelectTrigger data-testid="select-category"><SelectValue placeholder="Select a category…" /></SelectTrigger>
