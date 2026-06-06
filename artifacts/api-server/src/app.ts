@@ -8,6 +8,64 @@ import { requireCsrf } from "./lib/auth";
 
 const app: Express = express();
 
+// Build the set of origins that may make credentialed cross-origin requests to
+// this API. In production, ALLOWED_ORIGINS must be set to the exact frontend
+// origin(s) (comma-separated, no wildcards). In development we fall back to
+// common localhost ports so the dev workflow keeps working without extra
+// configuration. Reflecting arbitrary request origins (`origin: true`) is
+// explicitly forbidden: it would let any malicious site read authenticated
+// API responses via `fetch(..., { credentials: "include" })`.
+const NODE_ENV_APP = process.env["NODE_ENV"] ?? "development";
+const rawAllowedOrigins = process.env["ALLOWED_ORIGINS"] ?? "";
+const configuredOrigins: Set<string> = new Set(
+  rawAllowedOrigins
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean),
+);
+
+// Warn loudly in production when no explicit list was provided, then refuse
+// to start — a missing allowlist in production means no CORS isolation at all.
+if (NODE_ENV_APP === "production" && configuredOrigins.size === 0) {
+  throw new Error(
+    "ALLOWED_ORIGINS environment variable is required in production. " +
+      "Set it to the frontend origin(s) (comma-separated) to enable CORS. " +
+      "Refusing to start with an open CORS policy.",
+  );
+}
+
+// In development, supplement whatever is in ALLOWED_ORIGINS with the standard
+// localhost ports used by Vite / the front-end dev server.
+const DEV_LOCALHOST_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:4000",
+  "http://localhost:5173",
+  "http://localhost:8080",
+  "http://127.0.0.1:3000",
+  "http://127.0.0.1:5173",
+];
+const allowedOrigins: Set<string> =
+  NODE_ENV_APP !== "production"
+    ? new Set([...configuredOrigins, ...DEV_LOCALHOST_ORIGINS])
+    : configuredOrigins;
+
+function corsOriginCheck(
+  origin: string | undefined,
+  callback: (err: Error | null, allow?: boolean) => void,
+): void {
+  // Non-browser callers (curl, server-to-server) send no Origin header — allow
+  // them through so CLI tooling and internal services are not blocked.
+  if (!origin) {
+    callback(null, true);
+    return;
+  }
+  if (allowedOrigins.has(origin)) {
+    callback(null, true);
+  } else {
+    callback(new Error(`CORS: origin '${origin}' is not allowed`));
+  }
+}
+
 // We sit behind the Replit edge / preview proxy, which terminates TLS and
 // forwards over HTTP with `X-Forwarded-Proto: https`. Trusting that header
 // lets `req.secure` reflect the original scheme so we can correctly emit
@@ -33,7 +91,7 @@ app.use(
     },
   }),
 );
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ origin: corsOriginCheck, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true }));
