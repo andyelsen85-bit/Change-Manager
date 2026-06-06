@@ -9,45 +9,62 @@ import { requireCsrf } from "./lib/auth";
 const app: Express = express();
 
 // Build the set of origins that may make credentialed cross-origin requests to
-// this API. In production, ALLOWED_ORIGINS must be set to the exact frontend
-// origin(s) (comma-separated, no wildcards). In development we fall back to
-// common localhost ports so the dev workflow keeps working without extra
-// configuration. Reflecting arbitrary request origins (`origin: true`) is
-// explicitly forbidden: it would let any malicious site read authenticated
-// API responses via `fetch(..., { credentials: "include" })`.
+// this API. The allowlist is built from two sources:
+//   1. ALLOWED_ORIGINS — an optional, explicit comma-separated override (e.g.
+//      a custom frontend domain that differs from the Replit-served domain).
+//   2. REPLIT_DOMAINS — the platform-provided domain(s) that actually serve
+//      this app in both development and production. Deriving from this means
+//      the deployment is self-configuring: the app's own origin is always
+//      trusted without anyone having to hand-set ALLOWED_ORIGINS.
+// In development we additionally allow the standard localhost dev-server ports.
+// Reflecting arbitrary request origins (`origin: true`) is explicitly forbidden:
+// it would let any malicious site read authenticated API responses via
+// `fetch(..., { credentials: "include" })`.
 const NODE_ENV_APP = process.env["NODE_ENV"] ?? "development";
 const rawAllowedOrigins = process.env["ALLOWED_ORIGINS"] ?? "";
-const configuredOrigins: Set<string> = new Set(
-  rawAllowedOrigins
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean),
-);
+const configuredOrigins: string[] = rawAllowedOrigins
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 
-// Warn loudly in production when no explicit list was provided, then refuse
-// to start — a missing allowlist in production means no CORS isolation at all.
-if (NODE_ENV_APP === "production" && configuredOrigins.size === 0) {
+// REPLIT_DOMAINS is a comma-separated list of bare hostnames (no scheme). The
+// platform serves the app over HTTPS, so each becomes an https:// origin.
+const platformOrigins: string[] = (process.env["REPLIT_DOMAINS"] ?? "")
+  .split(",")
+  .map((d) => d.trim())
+  .filter(Boolean)
+  .map((d) => `https://${d}`);
+
+// In development, supplement with the standard localhost ports used by Vite /
+// the front-end dev server.
+const DEV_LOCALHOST_ORIGINS =
+  NODE_ENV_APP !== "production"
+    ? [
+        "http://localhost:3000",
+        "http://localhost:4000",
+        "http://localhost:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+      ]
+    : [];
+
+const allowedOrigins: Set<string> = new Set([
+  ...configuredOrigins,
+  ...platformOrigins,
+  ...DEV_LOCALHOST_ORIGINS,
+]);
+
+// Refuse to start in production with no allowlist at all — that would mean no
+// CORS isolation. Normally REPLIT_DOMAINS supplies the app's own origin; this
+// guard only trips if neither REPLIT_DOMAINS nor ALLOWED_ORIGINS is available.
+if (NODE_ENV_APP === "production" && allowedOrigins.size === 0) {
   throw new Error(
-    "ALLOWED_ORIGINS environment variable is required in production. " +
-      "Set it to the frontend origin(s) (comma-separated) to enable CORS. " +
-      "Refusing to start with an open CORS policy.",
+    "No CORS allowlist could be determined in production. " +
+      "Set ALLOWED_ORIGINS (comma-separated frontend origin[s]) or ensure " +
+      "REPLIT_DOMAINS is present. Refusing to start with an open CORS policy.",
   );
 }
-
-// In development, supplement whatever is in ALLOWED_ORIGINS with the standard
-// localhost ports used by Vite / the front-end dev server.
-const DEV_LOCALHOST_ORIGINS = [
-  "http://localhost:3000",
-  "http://localhost:4000",
-  "http://localhost:5173",
-  "http://localhost:8080",
-  "http://127.0.0.1:3000",
-  "http://127.0.0.1:5173",
-];
-const allowedOrigins: Set<string> =
-  NODE_ENV_APP !== "production"
-    ? new Set([...configuredOrigins, ...DEV_LOCALHOST_ORIGINS])
-    : configuredOrigins;
 
 function corsOriginCheck(
   origin: string | undefined,
