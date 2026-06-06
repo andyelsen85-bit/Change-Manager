@@ -81,7 +81,7 @@ function ProtectedRoutes() {
         <Route path="/pentests" component={user.canAccessPentest ? PentestListPage : ForbiddenPage} />
         <Route
           path="/pentests/new"
-          component={user.isAdmin || user.roles.includes("pentest_mgmt") ? NewPentestPage : ForbiddenPage}
+          component={user.roles.includes("pentest_mgmt") ? NewPentestPage : ForbiddenPage}
         />
         <Route path="/pentests/:id" component={user.canAccessPentest ? PentestDetailPage : ForbiddenPage} />
         <Route path="/cab" component={CabCalendarPage} />

@@ -9,7 +9,7 @@ export const smtpSettingsTable = pgTable("smtp_settings", {
   username: text("username").notNull().default(""),
   passwordEnc: text("password_enc"),
   fromAddress: text("from_address").notNull().default(""),
-  fromName: text("from_name").notNull().default("Change Management"),
+  fromName: text("from_name").notNull().default("Change-it"),
   enabled: boolean("enabled").notNull().default(false),
   // When false, skip TLS certificate validation when sending mail. Useful
   // for internal/legacy SMTP relays with self-signed certificates.
