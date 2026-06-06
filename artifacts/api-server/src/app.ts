@@ -1,5 +1,5 @@
 import express, { type Express, type ErrorRequestHandler, type RequestHandler } from "express";
-import cors from "cors";
+import cors, { type CorsOptions, type CorsRequest } from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
@@ -72,20 +72,65 @@ if (NODE_ENV_APP === "production" && allowedOrigins.size === 0) {
   );
 }
 
-function corsOriginCheck(
-  origin: string | undefined,
-  callback: (err: Error | null, allow?: boolean) => void,
+// Normalise a possibly-array header value to its first non-empty string.
+function firstHeaderValue(value: string | string[] | undefined): string | null {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const trimmed = raw?.split(",")[0]?.trim();
+  return trimmed ? trimmed : null;
+}
+
+// The public host the request actually arrived on. Behind a reverse proxy
+// (Replit edge, or the hospital infra proxy) the original host is in
+// X-Forwarded-Host; fall back to the Host header for direct connections.
+function inboundHost(headers: CorsRequest["headers"]): string | null {
+  return (
+    firstHeaderValue(headers["x-forwarded-host"]) ??
+    firstHeaderValue(headers["host"])
+  );
+}
+
+function originToHost(origin: string): string | null {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return null;
+  }
+}
+
+// Per-request CORS decision. We allow a request when EITHER:
+//   - it is genuinely same-origin: the Origin's host equals the host the
+//     request arrived on (covers every deployment alias — test/prod/custom
+//     domains — with zero configuration), OR
+//   - its Origin is in the explicit allowlist (ALLOWED_ORIGINS / REPLIT_DOMAINS),
+//     for a separate frontend origin that must call this API cross-site.
+// Otherwise no Access-Control-Allow-Origin header is emitted and the browser
+// blocks the response. We never reflect arbitrary origins (`origin: true`).
+//
+// Why same-origin must be matched explicitly: browsers attach an Origin header
+// to same-origin *mutating* requests (POST/PUT/PATCH/DELETE), so logins and
+// saves on a custom domain would otherwise be rejected even though they are not
+// cross-site. A real cross-site attacker's request carries its own Origin (e.g.
+// evil.example) while the inbound Host still resolves to THIS API — origin and
+// host differ, so it is denied. Those headers are set by the browser/edge for
+// browser-mediated requests and are not attacker-controllable in that context.
+function corsOptionsDelegate(
+  req: CorsRequest,
+  callback: (err: Error | null, options?: CorsOptions) => void,
 ): void {
-  // Non-browser callers (curl, server-to-server) send no Origin header — allow
-  // them through so CLI tooling and internal services are not blocked.
+  const origin = req.headers.origin;
+  // Non-browser callers (curl, server-to-server) send no Origin header — let
+  // them through; no CORS headers are required.
   if (!origin) {
-    callback(null, true);
+    callback(null, { origin: false, credentials: true });
     return;
   }
-  if (allowedOrigins.has(origin)) {
-    callback(null, true);
+  const oHost = originToHost(origin);
+  const hHost = inboundHost(req.headers);
+  const sameOrigin = !!oHost && !!hHost && oHost === hHost;
+  if (sameOrigin || allowedOrigins.has(origin)) {
+    callback(null, { origin, credentials: true });
   } else {
-    callback(new Error(`CORS: origin '${origin}' is not allowed`));
+    callback(null, { origin: false, credentials: true });
   }
 }
 
@@ -114,7 +159,7 @@ app.use(
     },
   }),
 );
-app.use(cors({ origin: corsOriginCheck, credentials: true }));
+app.use(cors(corsOptionsDelegate));
 app.use(cookieParser());
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true }));
