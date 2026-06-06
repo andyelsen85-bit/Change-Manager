@@ -25,7 +25,7 @@ export function buildCabIcs(
     method: "REQUEST",
     organizer: organizer
       ? { name: organizer.name, email: organizer.email }
-      : { name: "Change Management", email: "no-reply@change-mgmt.local" },
+      : { name: "Change-it", email: "no-reply@change-mgmt.local" },
     attendees: members.map((m) => ({
       name: m.fullName,
       email: m.email,

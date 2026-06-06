@@ -217,7 +217,7 @@ function buildDigestHtml(opts: {
             </tr>
             <tr>
               <td style="background:${BRAND_GREEN_DARK};padding:14px 24px;text-align:center;font-size:11px;color:#cfdcd6;letter-spacing:0.04em;">
-                ${escapeHtml(opts.fromName)} &middot; Change Management
+                ${escapeHtml(opts.fromName)} &middot; Change-it
               </td>
             </tr>
           </table>
