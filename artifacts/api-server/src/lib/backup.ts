@@ -30,6 +30,10 @@ const TABLES = [
   "pir_records",
   "approvals",
   "comments",
+  "pentest_test_types",
+  "pentest_requests",
+  "pentest_collaborators",
+  "pentest_attachments",
   "notification_preferences",
   "ref_counters",
   "smtp_settings",
@@ -50,6 +54,10 @@ const TABLES_OPTIONAL = new Set<string>([
   "notification_settings",
   "notification_queue",
   "notification_routing_rules",
+  "pentest_test_types",
+  "pentest_requests",
+  "pentest_collaborators",
+  "pentest_attachments",
 ]);
 
 export type BackupPayload = {

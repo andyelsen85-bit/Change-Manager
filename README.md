@@ -1,14 +1,16 @@
-# IT Change Management
+# Change-it
 
-A production-ready, **ITIL v4-aligned IT Change Management** web application.
-Self-hostable in a single `docker compose up`, with PostgreSQL, an Express 5
-API, a React + Vite SPA, and an Nginx reverse proxy that auto-provisions a
-self-signed TLS certificate on first boot.
+A production-ready, **ITIL v4-aligned IT Change Management** web application
+("Change-it"). Self-hostable in a single `docker compose up`, with PostgreSQL,
+an Express 5 API, a React + Vite SPA, and an Nginx reverse proxy that
+auto-provisions a self-signed TLS certificate on first boot.
 
 > Normal / Standard / Emergency change tracks · Role-based approvals with
 > deputies · CAB / eCAB calendar with email agendas · Planning, Testing and
-> Post-Implementation Review phases · Immutable audit log · Local + LDAP auth ·
-> SMTP, LDAP, SSL settings managed in-app · Full-database backup & restore.
+> Post-Implementation Review phases · **Penetration-testing engagements** with
+> their own status workflow · **Failure-probability risk matrix** · Immutable
+> audit log · Local + LDAP auth · SMTP, LDAP, SSL settings managed in-app ·
+> Full-database backup & restore.
 
 ---
 
@@ -101,6 +103,40 @@ but not required to reach the Post-Implementation Review phase.
 - **Backup & Restore** — single-file JSON dump of every table, restored
   inside one transaction with FK-safe ordering and automatic sequence reset.
 
+### Penetration-testing engagements
+
+- **Dedicated PenTest module** — security-engagement requests tracked
+  independently of changes, each carrying a ref number, classification
+  (e.g. `TopSecret`), test type, scope, objective, authorised-by signatory,
+  a requested test window, findings summary and remediation actions.
+- **Status workflow** — `requested → scheduled → in_progress → reported →
+  remediation → closed`, with `cancelled` as a terminal off-ramp. The detail
+  page shows a **horizontal status stepper** (completed steps ticked, current
+  highlighted, future muted; cancelled rendered as a red stop-tile) plus an
+  **"Advance to <next status>"** button and a **Cancel** action for managers.
+- **Editable engagement fields** — managers can edit the title, test type,
+  scope, objective, authorised-by, status and the requested start/end window
+  inline; non-managers see a read-only view.
+- **Collaborators & attachments** — per-engagement collaborator list and
+  file attachments.
+- **List filtering** — the PenTest list defaults to showing only active
+  (running) engagements, hiding `closed` and `cancelled`, with a status
+  filter to opt back into any state or view all.
+
+### Failure-probability risk matrix
+
+- Every change carries a **probability of failure** ("Probabilité d'échec")
+  alongside its impact; the two combine into a **live risk score** surfaced
+  as a colour-coded badge on the change list, detail header and the editable
+  Details tab so reviewers see risk update as they edit.
+
+### Editable change Details tab
+
+- The change detail page leads with an editable **Details** tab exposing the
+  creation-form fields (title, description, impact, probability/risk,
+  priority, category, assignee, pre-prod environment + URL). Saving issues a
+  `PATCH /api/changes/:id` and the header reflects the changes immediately.
+
 ---
 
 ## Technology stack
@@ -150,7 +186,7 @@ artifacts/
   mockup-sandbox/    # internal canvas helper for design exploration
 lib/
   db/                # Drizzle schema + drizzle-kit migrations
-    src/schema/      # 16 tables across 13 schema files
+    src/schema/      # Drizzle tables across modular schema files (changes, pentest, cab, …)
   api-spec/          # OpenAPI YAML, single source of truth
   api-zod/           # generated Zod schemas + React Query hooks
 docker/
@@ -296,7 +332,7 @@ The Vite dev server proxies `/api/*` to the API automatically, so visiting
 ## Domain model
 
 The schema lives in [`lib/db/src/schema/`](lib/db/src/schema/) and is the
-single source of truth for tables and types. The 16 tables are:
+single source of truth for tables and types. The core tables are:
 
 | Table                       | Purpose                                                         |
 | --------------------------- | --------------------------------------------------------------- |
@@ -316,6 +352,10 @@ single source of truth for tables and types. The 16 tables are:
 | `change_categories`         | Lookup table for the Category dropdown on every change          |
 | `change_assignees`          | Per-change override of Tech Reviewer / Implementer / Tester     |
 | `standard_templates`        | Pre-approved Standard change templates                          |
+| `pentest_requests`          | Penetration-testing engagement (ref, classification, scope, status, requested window) |
+| `pentest_test_types`        | Lookup catalogue for the PenTest "test type" dropdown           |
+| `pentest_collaborators`     | Many-to-many: users collaborating on a PenTest engagement       |
+| `pentest_attachments`       | File attachments uploaded against a PenTest engagement          |
 | `ref_counters`              | Per-prefix sequence for ref numbers (e.g. `CHG-0001`)           |
 | `audit_log`                 | Immutable JSONB before/after snapshots (DB-trigger enforced)    |
 | `smtp_settings`             | Singleton SMTP configuration (password encrypted at rest)       |
@@ -565,8 +605,9 @@ Settings → **Backup & Restore** tab (admin-only).
 
 `GET /api/backup` returns a single JSON file containing every table in the
 database (users, roles, change requests, approvals, CAB meetings, comments,
-audit log, **and** all system settings including encrypted SMTP/LDAP
-secrets). The export reads inside one
+**penetration-testing engagements** — requests, test types, collaborators and
+attachments — audit log, **and** all system settings including encrypted
+SMTP/LDAP secrets). The export reads inside one
 `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` transaction so the
 snapshot is logically consistent across tables even under heavy concurrent
 writes.
