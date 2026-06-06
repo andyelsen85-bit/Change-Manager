@@ -16,6 +16,7 @@ import {
 } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { authenticateLdap, getLdap } from "../lib/ldap";
+import { userCanAccessPentest } from "./pentest";
 
 const router: IRouter = Router();
 
@@ -84,6 +85,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       roles,
       isAdmin: existing.isAdmin,
       mustChangePassword: existing.mustChangePassword,
+      canAccessPentest: await userCanAccessPentest(existing.id, existing.isAdmin, roles),
     });
     return;
   }
@@ -150,6 +152,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
         roles,
         isAdmin: userRow.isAdmin,
         mustChangePassword: false,
+        canAccessPentest: await userCanAccessPentest(userRow.id, userRow.isAdmin, roles),
       });
       return;
     }
@@ -216,6 +219,7 @@ router.get("/auth/me", async (req, res): Promise<void> => {
     roles,
     isAdmin: u.isAdmin,
     mustChangePassword: u.mustChangePassword,
+    canAccessPentest: await userCanAccessPentest(u.id, u.isAdmin, roles),
   });
 });
 
@@ -288,6 +292,7 @@ router.post("/auth/setup", async (req, res): Promise<void> => {
     roles,
     isAdmin: admin.isAdmin,
     mustChangePassword: false,
+    canAccessPentest: await userCanAccessPentest(admin.id, admin.isAdmin, roles),
   });
 });
 

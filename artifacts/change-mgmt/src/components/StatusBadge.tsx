@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
-import { STATUS_LABELS, type ChangeStatus } from "@/lib/types";
-import { statusVariant } from "@/lib/format";
+import { PENTEST_STATUS_LABELS, STATUS_LABELS, type ChangeStatus, type PentestStatus } from "@/lib/types";
+import { computeRiskScore, riskScoreVariant, statusVariant } from "@/lib/format";
 
 const VARIANT_CLASSES: Record<string, string> = {
   default: "bg-muted text-foreground border-border",
@@ -49,6 +49,58 @@ export function RiskBadge({ risk }: { risk: "low" | "medium" | "high" }) {
       className={cn("inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium capitalize", VARIANT_CLASSES[v])}
     >
       {risk} risk
+    </span>
+  );
+}
+
+const PENTEST_VARIANT: Record<PentestStatus, string> = {
+  requested: "secondary",
+  scheduled: "info",
+  in_progress: "info",
+  reported: "warning",
+  remediation: "warning",
+  closed: "success",
+  cancelled: "destructive",
+};
+
+export function PentestStatusBadge({ status }: { status: PentestStatus }) {
+  const v = PENTEST_VARIANT[status] ?? "default";
+  return (
+    <span
+      data-testid={`badge-pentest-status-${status}`}
+      className={cn(
+        "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium",
+        VARIANT_CLASSES[v],
+      )}
+    >
+      {PENTEST_STATUS_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+// Auto risk-evaluation score (Impact × Probabilité d'échec) rendered as a
+// colour-coded badge: Faible (success), Moyen (warning), Élevé (destructive).
+export function RiskScoreBadge({
+  impact,
+  probability,
+  className,
+}: {
+  impact: "low" | "medium" | "high";
+  probability: "low" | "medium" | "high";
+  className?: string;
+}) {
+  const score = computeRiskScore(impact, probability);
+  const v = riskScoreVariant(score);
+  return (
+    <span
+      data-testid={`badge-risk-score-${score}`}
+      className={cn(
+        "inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium",
+        VARIANT_CLASSES[v],
+        className,
+      )}
+    >
+      {score}
     </span>
   );
 }

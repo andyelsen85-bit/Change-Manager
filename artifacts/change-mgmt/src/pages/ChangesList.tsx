@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RiskBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
+import { RiskScoreBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
 import { fmtDateShort, fmtDateTime } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -131,7 +131,7 @@ export function ChangesListPage() {
                     <TableHead>Title</TableHead>
                     <TableHead>Track</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Risk</TableHead>
+                    <TableHead>Score de risque</TableHead>
                     <TableHead>Owner</TableHead>
                     <TableHead>Planned start</TableHead>
                     <TableHead>Updated</TableHead>
@@ -151,7 +151,7 @@ export function ChangesListPage() {
                       </TableCell>
                       <TableCell><TrackBadge track={c.track} /></TableCell>
                       <TableCell><StatusBadge status={c.status} /></TableCell>
-                      <TableCell><RiskBadge risk={c.risk} /></TableCell>
+                      <TableCell><RiskScoreBadge impact={c.impact} probability={c.risk} /></TableCell>
                       <TableCell className="text-sm">{c.ownerName ?? "—"}</TableCell>
                       <TableCell className="text-sm whitespace-nowrap">{fmtDateShort(c.plannedStart)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">

@@ -17,6 +17,7 @@ import categoriesRouter from "./categories";
 import assigneesRouter from "./assignees";
 import attachmentsRouter from "./attachments";
 import notificationRoutingRouter from "./notification-routing";
+import pentestRouter from "./pentest";
 
 const router: IRouter = Router();
 
@@ -38,5 +39,6 @@ router.use(categoriesRouter);
 router.use(assigneesRouter);
 router.use(attachmentsRouter);
 router.use(notificationRoutingRouter);
+router.use(pentestRouter);
 
 export default router;

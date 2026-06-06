@@ -65,7 +65,7 @@ export function LoginPage() {
         </div>
         <div className="brand-wave" />
         <CardHeader className="space-y-1 text-center">
-          <CardTitle className="text-xl">Change Management</CardTitle>
+          <CardTitle className="text-xl">Change-it</CardTitle>
           <CardDescription>Sign in to your account</CardDescription>
         </CardHeader>
         <CardContent>

@@ -7,6 +7,7 @@ import {
   FileText,
   Users,
   ShieldCheck,
+  ShieldAlert,
   Settings,
   ScrollText,
   LogOut,
@@ -33,13 +34,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-type NavItem = { label: string; path: string; icon: typeof LayoutDashboard; adminOnly?: boolean };
+type NavItem = {
+  label: string;
+  path: string;
+  icon: typeof LayoutDashboard;
+  adminOnly?: boolean;
+  pentestOnly?: boolean;
+};
 
 const NAV: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Changes", path: "/changes", icon: ClipboardList },
   { label: "CAB Calendar", path: "/cab", icon: CalendarDays },
   { label: "Templates", path: "/templates", icon: FileText },
+  { label: "PenTesting", path: "/pentests", icon: ShieldAlert, pentestOnly: true },
   { label: "Users", path: "/users", icon: Users, adminOnly: true },
   { label: "Roles", path: "/roles", icon: ShieldCheck, adminOnly: true },
   { label: "Audit Log", path: "/admin/audit-log", icon: ScrollText, adminOnly: true },
@@ -52,7 +60,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const visibleNav = NAV.filter((n) => !n.adminOnly || user?.isAdmin);
+  const visibleNav = NAV.filter((n) => {
+    if (n.adminOnly && !user?.isAdmin) return false;
+    if (n.pentestOnly && !user?.canAccessPentest) return false;
+    return true;
+  });
 
   const handleLogout = async () => {
     await logout();
@@ -95,9 +107,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <div className="flex flex-col leading-tight">
               <span className="text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/60">
-                Change
+                CHdN
               </span>
-              <span className="text-sm font-semibold">Management</span>
+              <span className="text-base font-semibold">Change-it</span>
             </div>
           </Link>
           <Button
@@ -227,11 +239,13 @@ function titleFor(path: string): string {
   if (path.startsWith("/changes")) return "Change Requests";
   if (path.startsWith("/cab")) return "CAB Calendar";
   if (path.startsWith("/templates")) return "Standard Templates";
+  if (path.startsWith("/pentests/new")) return "New PenTest Request";
+  if (path.startsWith("/pentests")) return "PenTesting";
   if (path.startsWith("/users")) return "Users";
   if (path.startsWith("/roles")) return "Roles & Assignments";
   if (path.startsWith("/admin/audit-log") || path.startsWith("/audit")) return "Audit Log";
   if (path.startsWith("/settings")) return "System Settings";
   if (path.startsWith("/notifications")) return "Notification Preferences";
   if (path.startsWith("/profile")) return "My Profile";
-  return "Change Management";
+  return "Change-it";
 }

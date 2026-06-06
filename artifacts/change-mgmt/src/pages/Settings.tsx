@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Sa
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import type { CategoryItem, LdapSettings, LdapTestResult, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
+import type { CategoryItem, LdapSettings, LdapTestResult, PentestTestType, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -62,6 +62,7 @@ export function SettingsPage() {
           <TabsTrigger value="timeouts" data-testid="tab-timeouts">Workflow timeouts</TabsTrigger>
           <TabsTrigger value="notifications" data-testid="tab-notifications">Notifications</TabsTrigger>
           <TabsTrigger value="categories" data-testid="tab-categories">Categories</TabsTrigger>
+          <TabsTrigger value="pentest-types" data-testid="tab-pentest-types">PenTest types</TabsTrigger>
           <TabsTrigger value="backup" data-testid="tab-backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="smtp"><SmtpPanel /></TabsContent>
@@ -70,6 +71,7 @@ export function SettingsPage() {
         <TabsContent value="timeouts"><TimeoutsPanel /></TabsContent>
         <TabsContent value="notifications"><NotificationsBatchPanel /></TabsContent>
         <TabsContent value="categories"><CategoriesPanel /></TabsContent>
+        <TabsContent value="pentest-types"><PentestTypesPanel /></TabsContent>
         <TabsContent value="backup"><BackupPanel /></TabsContent>
       </Tabs>
     </div>
@@ -1667,6 +1669,130 @@ function CategoriesPanel() {
                   }}
                   disabled={save.isPending}
                   data-testid="button-save-category"
+                >
+                  {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+function PentestTypesPanel() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["pentest-test-types"], queryFn: () => api.get<PentestTestType[]>("/pentest-test-types") });
+  const [editing, setEditing] = useState<Partial<PentestTestType> | null>(null);
+
+  const save = useMutation({
+    mutationFn: async (t: Partial<PentestTestType>) => {
+      if (t.id) return api.patch<PentestTestType>(`/pentest-test-types/${t.id}`, { name: t.name, sortOrder: t.sortOrder, isActive: t.isActive });
+      return api.post<PentestTestType>("/pentest-test-types", { name: t.name, sortOrder: t.sortOrder ?? 100, isActive: t.isActive ?? true });
+    },
+    onSuccess: () => {
+      toast.success("Test type saved");
+      qc.invalidateQueries({ queryKey: ["pentest-test-types"] });
+      setEditing(null);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
+  });
+
+  const del = useMutation({
+    mutationFn: (id: number) => api.delete(`/pentest-test-types/${id}`),
+    onSuccess: () => {
+      toast.success("Test type removed");
+      qc.invalidateQueries({ queryKey: ["pentest-test-types"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Delete failed"),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Penetration-test types</CardTitle>
+            <CardDescription>Engagement types selectable when opening a confidential PenTest request.</CardDescription>
+          </div>
+          <Button onClick={() => setEditing({ name: "", sortOrder: 100, isActive: true })} data-testid="button-new-pentest-type">
+            New test type
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {q.isLoading ? (
+          <Skeleton className="h-32" />
+        ) : (
+          <div className="divide-y divide-border rounded-md border border-border">
+            {(q.data ?? []).length === 0 && (
+              <p className="p-4 text-sm text-muted-foreground">No test types defined yet.</p>
+            )}
+            {(q.data ?? []).map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-3 px-3 py-2" data-testid={`row-pentest-type-${t.id}`}>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono text-xs text-muted-foreground">{t.key}</span>
+                  <span className="text-sm">{t.name}</span>
+                  <span className="text-xs text-muted-foreground">order {t.sortOrder}</span>
+                  {!t.isActive && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase">inactive</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="ghost" onClick={() => setEditing({ ...t })} data-testid={`button-edit-pentest-type-${t.id}`}>Edit</Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { if (confirm(`Remove "${t.name}"? In-use types will be deactivated.`)) del.mutate(t.id); }}
+                    data-testid={`button-delete-pentest-type-${t.id}`}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+      <Dialog open={editing != null} onOpenChange={(o) => !o && setEditing(null)}>
+        <DialogContent>
+          {editing && (
+            <>
+              <DialogHeader><DialogTitle>{editing.id ? "Edit test type" : "New test type"}</DialogTitle></DialogHeader>
+              <div className="grid gap-3 py-2">
+                <div className="space-y-2">
+                  <Label>Name <span className="text-destructive">*</span></Label>
+                  <Input
+                    value={editing.name ?? ""}
+                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    data-testid="input-pentest-type-name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Sort order</Label>
+                  <Input
+                    type="number"
+                    value={editing.sortOrder ?? 100}
+                    onChange={(e) => setEditing({ ...editing, sortOrder: Number(e.target.value) })}
+                    data-testid="input-pentest-type-sort"
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-md border border-border p-3">
+                  <Label>Active</Label>
+                  <Switch
+                    checked={editing.isActive ?? true}
+                    onCheckedChange={(v) => setEditing({ ...editing, isActive: v })}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+                <Button
+                  onClick={() => {
+                    if (!editing.name?.trim()) { toast.error("Name is required"); return; }
+                    save.mutate(editing);
+                  }}
+                  disabled={save.isPending}
+                  data-testid="button-save-pentest-type"
                 >
                   {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save
                 </Button>

@@ -79,6 +79,34 @@ export function riskColor(risk: string): string {
   return "text-success";
 }
 
+// Auto risk-evaluation score derived from Impact × Probabilité d'échec, per
+// the "Matrice de décision". Both axes are stored as low/medium/high.
+//   impact:  low=Faible, medium=Moyen, high=Fort
+//   proba:   low=Faible, medium=Moyenne, high=Forte
+// Result is one of Faible / Moyen / Élevé.
+export type RiskScore = "Faible" | "Moyen" | "Élevé";
+
+const RISK_MATRIX: Record<"low" | "medium" | "high", Record<"low" | "medium" | "high", RiskScore>> = {
+  high: { low: "Moyen", medium: "Élevé", high: "Élevé" },
+  medium: { low: "Faible", medium: "Moyen", high: "Élevé" },
+  low: { low: "Faible", medium: "Faible", high: "Moyen" },
+};
+
+export function computeRiskScore(
+  impact: "low" | "medium" | "high",
+  probability: "low" | "medium" | "high",
+): RiskScore {
+  return RISK_MATRIX[impact]?.[probability] ?? "Faible";
+}
+
+export function riskScoreVariant(
+  score: RiskScore,
+): "success" | "warning" | "destructive" {
+  if (score === "Élevé") return "destructive";
+  if (score === "Moyen") return "warning";
+  return "success";
+}
+
 export function toLocalDateTimeInput(value: string | Date | null | undefined): string {
   if (!value) return "";
   const d = typeof value === "string" ? new Date(value) : value;

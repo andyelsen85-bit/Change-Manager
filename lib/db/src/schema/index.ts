@@ -16,3 +16,4 @@ export * from "./change_assignees";
 export * from "./attachments";
 export * from "./notification_queue";
 export * from "./notification_routing";
+export * from "./pentest";

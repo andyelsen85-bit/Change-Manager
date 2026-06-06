@@ -22,9 +22,50 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertTriangle } from "lucide-react";
-import { fromLocalDateTimeInput } from "@/lib/format";
+import { AlertTriangle, HelpCircle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { computeRiskScore, riskScoreVariant, fromLocalDateTimeInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
+
+// Small inline "(?)" hint shown next to a field label. Renders a tooltip on
+// hover/focus with the supplied criteria text.
+function FieldHint({ children, label }: { children: React.ReactNode; label?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label ?? "More information"}
+          className="text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:text-foreground"
+          data-testid="field-hint"
+        >
+          <HelpCircle className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs whitespace-pre-line text-left leading-relaxed">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+const IMPACT_HINT = `1 — Faible : Un seul poste ou service isolé · aucun système critique · pas de données de santé · indisponibilité hors heures de soin · retour arrière immédiat.
+
+2 — Moyen : Plusieurs services · système important mais non vital · indisponibilité courte et planifiée · plan de retour arrière testé.
+
+3 — Fort : Système clinique ou vital · sécurité du patient ou continuité des soins en jeu · données de santé sensibles · indisponibilité pendant les heures de soin · retour arrière complexe ou incertain.`;
+
+const PROBABILITY_HINT = `1 — Faible : Geste routinier, déjà réalisé, procédure éprouvée.
+
+2 — Moyenne : Non routinier mais documenté et testé.
+
+3 — Forte : Complexe ou nouveau, peu testé, dépendances multiples ou intervention d'un prestataire externe.`;
+
+const PRIORITY_HINT = `Combien cette demande est urgente à traiter. Détermine l'ordre de prise en charge — indépendamment du score de risque.`;
+
+const CATEGORY_HINT = `Le domaine fonctionnel de la demande (réseau, application, infrastructure…). Utilisé pour le classement et les tableaux de bord.`;
+
+const TRACK_HINT = `Standard : pré-approuvé, faible risque, sans CAB. Normal : revue complète (planning, approbations, CAB, tests, PIR). Emergency : voie accélérée avec eCAB.`;
 
 export function NewChangePage() {
   const [, setLocation] = useLocation();
@@ -126,7 +167,15 @@ export function NewChangePage() {
     create.mutate();
   };
 
+  const riskScore = computeRiskScore(impact, risk);
+  const riskScoreClasses: Record<string, string> = {
+    destructive: "bg-destructive/10 text-destructive border-destructive/30",
+    warning: "bg-warning/10 text-warning border-warning/30",
+    success: "bg-success/10 text-success border-success/30",
+  };
+
   return (
+    <TooltipProvider delayDuration={150}>
     <form className="mx-auto max-w-4xl space-y-6" onSubmit={onSubmit} data-testid="form-new-change">
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">New change request</h2>
@@ -135,7 +184,10 @@ export function NewChangePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Track</CardTitle>
+          <CardTitle className="text-base flex items-center gap-1.5">
+            Track
+            <FieldHint label="About tracks">{TRACK_HINT}</FieldHint>
+          </CardTitle>
           <CardDescription>Determines workflow, approvers, and CAB review.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -254,29 +306,38 @@ export function NewChangePage() {
 
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2">
-              <Label>Risk <span className="text-destructive">*</span></Label>
-              <Select value={risk} onValueChange={(v) => setRisk(v as typeof risk)}>
-                <SelectTrigger data-testid="select-risk"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Impact <span className="text-destructive">*</span></Label>
+              <Label className="flex items-center gap-1.5">
+                Impact <span className="text-destructive">*</span>
+                <FieldHint label="Critères d'impact">{IMPACT_HINT}</FieldHint>
+              </Label>
               <Select value={impact} onValueChange={(v) => setImpact(v as typeof impact)}>
                 <SelectTrigger data-testid="select-impact"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="low">1 — Faible</SelectItem>
+                  <SelectItem value="medium">2 — Moyen</SelectItem>
+                  <SelectItem value="high">3 — Fort</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Priority <span className="text-destructive">*</span></Label>
+              <Label className="flex items-center gap-1.5">
+                Probabilité d'échec <span className="text-destructive">*</span>
+                <FieldHint label="Critères de probabilité d'échec">{PROBABILITY_HINT}</FieldHint>
+              </Label>
+              <Select value={risk} onValueChange={(v) => setRisk(v as typeof risk)}>
+                <SelectTrigger data-testid="select-risk"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">1 — Faible</SelectItem>
+                  <SelectItem value="medium">2 — Moyenne</SelectItem>
+                  <SelectItem value="high">3 — Forte</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                Priority <span className="text-destructive">*</span>
+                <FieldHint label="À propos de la priorité">{PRIORITY_HINT}</FieldHint>
+              </Label>
               <Select value={priority} onValueChange={(v) => setPriority(v as typeof priority)}>
                 <SelectTrigger data-testid="select-priority"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -287,6 +348,27 @@ export function NewChangePage() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div
+            className="flex items-center justify-between rounded-md border border-border bg-muted/30 p-3"
+            data-testid="risk-score-panel"
+          >
+            <div>
+              <p className="text-sm font-medium">Score de risque (auto-évalué)</p>
+              <p className="text-xs text-muted-foreground">
+                Calculé selon la matrice de décision : Impact × Probabilité d'échec.
+              </p>
+            </div>
+            <span
+              data-testid="risk-score-value"
+              className={cn(
+                "inline-flex items-center rounded-md border px-3 py-1 text-sm font-semibold",
+                riskScoreClasses[riskScoreVariant(riskScore)],
+              )}
+            >
+              {riskScore}
+            </span>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -301,7 +383,10 @@ export function NewChangePage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Category <span className="text-destructive">*</span></Label>
+            <Label className="flex items-center gap-1.5">
+              Category <span className="text-destructive">*</span>
+              <FieldHint label="À propos de la catégorie">{CATEGORY_HINT}</FieldHint>
+            </Label>
             <Select value={category} onValueChange={setCategory}>
               <SelectTrigger data-testid="select-category"><SelectValue placeholder="Select a category…" /></SelectTrigger>
               <SelectContent>
@@ -393,5 +478,6 @@ export function NewChangePage() {
         </DialogContent>
       </Dialog>
     </form>
+    </TooltipProvider>
   );
 }
