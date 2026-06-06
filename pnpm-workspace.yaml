@@ -43,6 +43,15 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  'brace-expansion@<2.0.3': '2.0.3'
+  'fast-uri@<3.1.2': '3.1.2'
+  'lodash@<4.18.1': '4.18.1'
+  'path-to-regexp@<8.4.0': '8.4.0'
+  'picomatch@<2.3.2': '2.3.2'
+  'picomatch@>=4.0.0 <4.0.4': '4.0.4'
+  'postcss@<8.5.10': '8.5.10'
+  'qs@<6.15.2': '6.15.2'
+  'yaml@<2.8.3': '2.8.3'
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
