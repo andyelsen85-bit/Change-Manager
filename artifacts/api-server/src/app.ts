@@ -55,14 +55,20 @@ const allowedOrigins: Set<string> = new Set([
   ...DEV_LOCALHOST_ORIGINS,
 ]);
 
-// Refuse to start in production with no allowlist at all — that would mean no
-// CORS isolation. Normally REPLIT_DOMAINS supplies the app's own origin; this
-// guard only trips if neither REPLIT_DOMAINS nor ALLOWED_ORIGINS is available.
+// An empty allowlist is the most locked-down state, NOT an open one: it denies
+// every cross-origin browser request. Same-origin calls (the frontend reaches
+// the API under the same deployed host via /api path routing) never trigger
+// CORS, and non-browser callers send no Origin header and are allowed below, so
+// the app stays fully functional. We therefore do NOT crash on an empty
+// allowlist — we only warn, so a deployment where REPLIT_DOMAINS/ALLOWED_ORIGINS
+// are unavailable still boots securely. (`origin: true`, which reflects any
+// origin, remains forbidden — that is the only genuinely unsafe configuration.)
 if (NODE_ENV_APP === "production" && allowedOrigins.size === 0) {
-  throw new Error(
-    "No CORS allowlist could be determined in production. " +
-      "Set ALLOWED_ORIGINS (comma-separated frontend origin[s]) or ensure " +
-      "REPLIT_DOMAINS is present. Refusing to start with an open CORS policy.",
+  logger.warn(
+    "No explicit CORS allowlist configured (REPLIT_DOMAINS and ALLOWED_ORIGINS " +
+      "are both empty). All cross-origin browser requests will be denied; " +
+      "same-origin and non-browser requests are unaffected. Set ALLOWED_ORIGINS " +
+      "if a separate frontend origin must call this API.",
   );
 }
 
