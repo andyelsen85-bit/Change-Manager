@@ -78,12 +78,19 @@ function ProtectedRoutes() {
         <Route path="/changes" component={ChangesListPage} />
         <Route path="/changes/new" component={NewChangePage} />
         <Route path="/changes/:id" component={ChangeDetailPage} />
-        <Route path="/pentests" component={user.canAccessPentest ? PentestListPage : ForbiddenPage} />
+        {/*
+         * The list and detail pages are open to every authenticated user; the
+         * API enforces need-to-know server-side (the list is scoped to the
+         * caller's assigned requests, and an unauthorised detail returns 404).
+         * This lets a plain user added to a pentest reach it without holding the
+         * pentest_mgmt role. Creating a request still requires the role.
+         */}
+        <Route path="/pentests" component={PentestListPage} />
         <Route
           path="/pentests/new"
           component={user.roles.includes("pentest_mgmt") ? NewPentestPage : ForbiddenPage}
         />
-        <Route path="/pentests/:id" component={user.canAccessPentest ? PentestDetailPage : ForbiddenPage} />
+        <Route path="/pentests/:id" component={PentestDetailPage} />
         <Route path="/cab" component={CabCalendarPage} />
         <Route path="/cab/:id" component={CabDetailPage} />
         <Route path="/templates" component={TemplatesPage} />

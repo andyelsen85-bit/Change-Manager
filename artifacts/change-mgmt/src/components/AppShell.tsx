@@ -39,7 +39,6 @@ type NavItem = {
   path: string;
   icon: typeof LayoutDashboard;
   adminOnly?: boolean;
-  pentestOnly?: boolean;
 };
 
 const NAV: NavItem[] = [
@@ -47,7 +46,9 @@ const NAV: NavItem[] = [
   { label: "Changes", path: "/changes", icon: ClipboardList },
   { label: "CAB Calendar", path: "/cab", icon: CalendarDays },
   { label: "Templates", path: "/templates", icon: FileText },
-  { label: "PenTesting", path: "/pentests", icon: ShieldAlert, pentestOnly: true },
+  // Always visible: a plain user added to a pentest must be able to reach it.
+  // The page/API scope what they actually see to their assigned requests.
+  { label: "PenTesting", path: "/pentests", icon: ShieldAlert },
   { label: "Users", path: "/users", icon: Users, adminOnly: true },
   { label: "Roles", path: "/roles", icon: ShieldCheck, adminOnly: true },
   { label: "Audit Log", path: "/admin/audit-log", icon: ScrollText, adminOnly: true },
@@ -62,7 +63,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const visibleNav = NAV.filter((n) => {
     if (n.adminOnly && !user?.isAdmin) return false;
-    if (n.pentestOnly && !user?.canAccessPentest) return false;
     return true;
   });
 
