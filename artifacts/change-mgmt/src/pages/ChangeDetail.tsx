@@ -38,7 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   FieldHint,
@@ -49,6 +49,18 @@ import {
 } from "@/components/FieldHint";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
+
+const IMPACT_OPTIONS: ComboboxOption[] = [
+  { value: "low", label: "1 — Low" },
+  { value: "medium", label: "2 — Medium" },
+  { value: "high", label: "3 — High" },
+];
+const PRIORITY_OPTIONS: ComboboxOption[] = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "critical", label: "Critical" },
+];
 
 // Lifecycle steps shown on the visual progress timeline. Mirrors the
 // allowed-status graph in api-server/src/lib/state-machine.ts but flattened
@@ -471,6 +483,30 @@ export function ChangeDetailPage() {
               <div className="flex flex-col items-end gap-2">
                 <div className="text-xs text-muted-foreground">Owner: {c.ownerName ?? "—"}</div>
                 <div className="text-xs text-muted-foreground">Assignee: {c.assigneeName ?? "Unassigned"}</div>
+                {c.requesterName && (
+                  <div className="text-xs text-muted-foreground">
+                    Requester: {c.requesterName}
+                    {c.requesterType && (
+                      <span className="ml-1 rounded bg-muted px-1 py-0.5 text-[10px] uppercase tracking-wide">
+                        {c.requesterType}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {c.ticketLink && (
+                  <div className="text-xs text-muted-foreground">
+                    Ticket:{" "}
+                    <a
+                      href={c.ticketLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline"
+                      data-testid="link-ticket"
+                    >
+                      {c.ticketLink}
+                    </a>
+                  </div>
+                )}
                 <div className="text-xs text-muted-foreground">Updated {fmtAgo(c.updatedAt)}</div>
               </div>
             </div>
@@ -549,16 +585,17 @@ export function ChangeDetailPage() {
             <div className="space-y-3 py-2">
               <div className="space-y-1.5">
                 <Label htmlFor="revert-to">Revert to</Label>
-                <Select value={revertTo} onValueChange={(v) => setRevertTo(v as ChangeStatus)}>
-                  <SelectTrigger id="revert-to" data-testid="select-revert-to">
-                    <SelectValue placeholder="Choose target status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REVERSIONS_BY_TRACK[c.track][c.status].map((s) => (
-                      <SelectItem key={s} value={s}>{STATUS_LABELS[s] ?? s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  options={REVERSIONS_BY_TRACK[c.track][c.status].map((s) => ({
+                    value: s,
+                    label: STATUS_LABELS[s] ?? s,
+                  }))}
+                  value={revertTo}
+                  onChange={(v) => setRevertTo(v as ChangeStatus)}
+                  placeholder="Choose target status"
+                  searchPlaceholder="Search statuses…"
+                  data-testid="select-revert-to"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="revert-reason">Reason (required, min 5 chars)</Label>
@@ -660,20 +697,18 @@ function AssigneesTab({ id }: { id: number }) {
         {(["implementer", "tester"] as const).map((role) => (
           <div key={role} className="grid items-center gap-2 md:grid-cols-[200px_1fr]">
             <Label>{ASSIGNABLE_ROLE_LABELS[role]}</Label>
-            <Select
+            <Combobox
+              options={[
+                { value: "__none__", label: "Unassigned (use role pool)" },
+                ...activeUsers.map((u) => ({ value: String(u.id), label: u.fullName, hint: u.username })),
+              ]}
               value={current(role) ? String(current(role)) : "__none__"}
-              onValueChange={(v) => save.mutate({ [role]: v === "__none__" ? null : Number(v) })}
-            >
-              <SelectTrigger data-testid={`select-assignee-${role}`}>
-                <SelectValue placeholder="Unassigned (use role pool)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">Unassigned (use role pool)</SelectItem>
-                {activeUsers.map((u) => (
-                  <SelectItem key={u.id} value={String(u.id)}>{u.fullName} ({u.username})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              onChange={(v) => save.mutate({ [role]: v === "__none__" ? null : Number(v) })}
+              placeholder="Unassigned (use role pool)"
+              searchPlaceholder="Search users…"
+              emptyText="No users found."
+              data-testid={`select-assignee-${role}`}
+            />
           </div>
         ))}
       </CardContent>
@@ -783,43 +818,36 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
                 Impact
                 <FieldHint label="Impact criteria">{IMPACT_HINT}</FieldHint>
               </Label>
-              <Select value={impact} onValueChange={(v) => setImpact(v as typeof impact)}>
-                <SelectTrigger data-testid="select-details-impact"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">1 — Low</SelectItem>
-                  <SelectItem value="medium">2 — Medium</SelectItem>
-                  <SelectItem value="high">3 — High</SelectItem>
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={IMPACT_OPTIONS}
+                value={impact}
+                onChange={(v) => setImpact(v as typeof impact)}
+                data-testid="select-details-impact"
+              />
             </div>
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 Probability of failure
                 <FieldHint label="Failure probability criteria">{PROBABILITY_HINT}</FieldHint>
               </Label>
-              <Select value={risk} onValueChange={(v) => setRisk(v as typeof risk)}>
-                <SelectTrigger data-testid="select-details-risk"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">1 — Low</SelectItem>
-                  <SelectItem value="medium">2 — Medium</SelectItem>
-                  <SelectItem value="high">3 — High</SelectItem>
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={IMPACT_OPTIONS}
+                value={risk}
+                onChange={(v) => setRisk(v as typeof risk)}
+                data-testid="select-details-risk"
+              />
             </div>
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 Priority
                 <FieldHint label="About priority">{PRIORITY_HINT}</FieldHint>
               </Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as typeof priority)}>
-                <SelectTrigger data-testid="select-details-priority"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={PRIORITY_OPTIONS}
+                value={priority}
+                onChange={(v) => setPriority(v as typeof priority)}
+                data-testid="select-details-priority"
+              />
             </div>
           </div>
 
@@ -841,27 +869,35 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
               Category
               <FieldHint label="About category">{CATEGORY_HINT}</FieldHint>
             </Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger data-testid="select-details-category"><SelectValue placeholder="Select a category…" /></SelectTrigger>
-              <SelectContent>
-                {(categoriesQ.data ?? []).filter((cat) => cat.isActive !== false).map((cat) => (
-                  <SelectItem key={cat.key} value={cat.key}>{cat.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={(categoriesQ.data ?? [])
+                .filter((cat) => cat.isActive !== false)
+                .map((cat) => ({ value: cat.key, label: cat.name }))}
+              value={category}
+              onChange={setCategory}
+              placeholder="Select a category…"
+              searchPlaceholder="Search categories…"
+              emptyText="No categories found."
+              data-testid="select-details-category"
+            />
           </div>
 
           <div className="space-y-2">
             <Label>Change Owner</Label>
-            <Select value={assigneeId} onValueChange={setAssigneeId}>
-              <SelectTrigger data-testid="select-details-assignee"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {(usersQ.data ?? []).filter((u) => u.isActive).map((u) => (
-                  <SelectItem key={u.id} value={String(u.id)}>{u.fullName} ({u.username})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={[
+                { value: "none", label: "Unassigned" },
+                ...(usersQ.data ?? [])
+                  .filter((u) => u.isActive)
+                  .map((u) => ({ value: String(u.id), label: u.fullName, hint: u.username })),
+              ]}
+              value={assigneeId}
+              onChange={setAssigneeId}
+              placeholder="Unassigned"
+              searchPlaceholder="Search users…"
+              emptyText="No users found."
+              data-testid="select-details-assignee"
+            />
           </div>
 
           {change.track === "normal" && (
@@ -1140,14 +1176,16 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label>Overall result</Label>
-            <Select value={form.overallResult} onValueChange={(v) => setForm({ ...form, overallResult: v as TestRecord["overallResult"] })}>
-              <SelectTrigger data-testid="select-overall"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="passed">Passed</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={[
+                { value: "pending", label: "Pending" },
+                { value: "passed", label: "Passed" },
+                { value: "failed", label: "Failed" },
+              ]}
+              value={form.overallResult}
+              onChange={(v) => setForm({ ...form, overallResult: v as TestRecord["overallResult"] })}
+              data-testid="select-overall"
+            />
           </div>
         </div>
         <div className="space-y-2">
@@ -1173,15 +1211,16 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
               <div key={i} className="rounded-md border border-border p-3 space-y-2" data-testid={`testcase-${i}`}>
                 <div className="grid gap-2 md:grid-cols-2">
                   <Input placeholder="Case name" value={tc.name} onChange={(e) => updateCase(form, setForm, i, { name: e.target.value })} />
-                  <Select value={tc.status} onValueChange={(v) => updateCase(form, setForm, i, { status: v as typeof tc.status })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="passed">Passed</SelectItem>
-                      <SelectItem value="failed">Failed</SelectItem>
-                      <SelectItem value="blocked">Blocked</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Combobox
+                    options={[
+                      { value: "pending", label: "Pending" },
+                      { value: "passed", label: "Passed" },
+                      { value: "failed", label: "Failed" },
+                      { value: "blocked", label: "Blocked" },
+                    ]}
+                    value={tc.status}
+                    onChange={(v) => updateCase(form, setForm, i, { status: v as typeof tc.status })}
+                  />
                 </div>
                 <Textarea placeholder="Steps" rows={2} value={tc.steps} onChange={(e) => updateCase(form, setForm, i, { steps: e.target.value })} />
                 <div className="grid gap-2 md:grid-cols-2">
@@ -1246,15 +1285,17 @@ function PirTab({ id }: { id: number }) {
       <CardContent className="space-y-4 p-6">
         <div className="space-y-2">
           <Label>Outcome</Label>
-          <Select value={form.outcome} onValueChange={(v) => setForm({ ...form, outcome: v as PirRecord["outcome"] })}>
-            <SelectTrigger data-testid="select-outcome"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="successful">Successful</SelectItem>
-              <SelectItem value="successful_with_issues">Successful with issues</SelectItem>
-              <SelectItem value="failed">Failed</SelectItem>
-              <SelectItem value="rolled_back">Rolled back</SelectItem>
-            </SelectContent>
-          </Select>
+          <Combobox
+            options={[
+              { value: "successful", label: "Successful" },
+              { value: "successful_with_issues", label: "Successful with issues" },
+              { value: "failed", label: "Failed" },
+              { value: "rolled_back", label: "Rolled back" },
+            ]}
+            value={form.outcome}
+            onChange={(v) => setForm({ ...form, outcome: v as PirRecord["outcome"] })}
+            data-testid="select-outcome"
+          />
         </div>
         <div className="space-y-2">
           <Label>Objectives met</Label>

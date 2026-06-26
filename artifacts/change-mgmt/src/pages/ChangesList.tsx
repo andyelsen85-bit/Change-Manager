@@ -7,7 +7,7 @@ import type { ChangeRequest, ChangeStatus, ChangeTrack } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RiskScoreBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
 import { fmtDateShort, fmtDateTime } from "@/lib/format";
@@ -51,6 +51,16 @@ export function ChangesListPage() {
 
   const { data, isLoading } = useQuery({ queryKey: [path], queryFn: () => api.get<ChangeRequest[]>(path) });
 
+  const trackOptions: ComboboxOption[] = [
+    { value: "all", label: "All tracks" },
+    ...TRACKS.map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) })),
+  ];
+  const statusOptions: ComboboxOption[] = [
+    { value: "active", label: "All active" },
+    { value: "all", label: "All statuses" },
+    ...STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, " ") })),
+  ];
+
   const filtered = useMemo(() => {
     const list = data ?? [];
     if (!search.trim()) return list;
@@ -90,27 +100,22 @@ export function ChangesListPage() {
                 data-testid="input-search-changes"
               />
             </div>
-            <Select value={trackFilter} onValueChange={setTrackFilter}>
-              <SelectTrigger data-testid="select-track-filter"><SelectValue placeholder="Track" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All tracks</SelectItem>
-                {TRACKS.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger data-testid="select-status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">All active</SelectItem>
-                <SelectItem value="all">All statuses</SelectItem>
-                {STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{s.replace(/_/g, " ")}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={trackOptions}
+              value={trackFilter}
+              onChange={setTrackFilter}
+              placeholder="Track"
+              searchPlaceholder="Search tracks…"
+              data-testid="select-track-filter"
+            />
+            <Combobox
+              options={statusOptions}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              placeholder="Status"
+              searchPlaceholder="Search statuses…"
+              data-testid="select-status-filter"
+            />
           </div>
 
           {isLoading ? (

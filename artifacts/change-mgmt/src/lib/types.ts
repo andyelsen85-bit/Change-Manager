@@ -94,6 +94,9 @@ export type ChangeRequest = {
   cabMeetingId: number | null;
   hasPreprodEnv?: boolean;
   preprodEnvUrl?: string | null;
+  ticketLink?: string | null;
+  requesterType?: "internal" | "external" | null;
+  requesterName?: string | null;
   plannedStart: string | null;
   plannedEnd: string | null;
   actualStart: string | null;
@@ -104,6 +107,15 @@ export type ChangeRequest = {
 
 export type ChangeDetail = ChangeRequest & {
   template?: StandardTemplate | null;
+};
+
+// Directory (LDAP) search hit returned by GET /users/ldap-search. Used by the
+// change "Requester" picker to attribute a change to an internal AD account.
+export type LdapSearchUser = {
+  username: string;
+  email: string;
+  fullName: string;
+  userDn: string;
 };
 
 export type PlanningRecord = {

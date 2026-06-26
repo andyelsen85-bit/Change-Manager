@@ -9,7 +9,7 @@ import {
 import { hashPassword, requireAuth, requireAdmin } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { NOTIFICATION_EVENTS } from "../lib/events";
-import { lookupLdapUser } from "../lib/ldap";
+import { lookupLdapUser, searchLdapUsers } from "../lib/ldap";
 
 const router: IRouter = Router();
 
@@ -111,6 +111,25 @@ router.post("/users/ldap-lookup", requireAdmin, async (req, res): Promise<void> 
     return;
   }
   res.json({ username: r.username, email: r.email, fullName: r.fullName, userDn: r.userDn });
+});
+
+// Directory search for the change "Requester" picker. Any authenticated user
+// may search by name fragment (min 2 chars) to attribute a change to an
+// internal AD account. Service-bind only. When LDAP is unconfigured/unreachable
+// we return an empty list (plus a non-fatal note) so the picker degrades to
+// "no matches" rather than surfacing an error.
+router.get("/users/ldap-search", requireAuth, async (req, res): Promise<void> => {
+  const q = typeof req.query["q"] === "string" ? req.query["q"] : "";
+  if (q.trim().length < 2) {
+    res.json({ users: [] });
+    return;
+  }
+  const r = await searchLdapUsers(q, 20);
+  if (!r.ok) {
+    res.json({ users: [], note: r.reason });
+    return;
+  }
+  res.json({ users: r.users });
 });
 
 router.post("/users", requireAdmin, async (req, res): Promise<void> => {

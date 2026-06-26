@@ -1,10 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { CategoryItem, ChangeRequest, ChangeTrack, StandardTemplate, User } from "@/lib/types";
+import type {
+  CategoryItem,
+  ChangeRequest,
+  ChangeTrack,
+  LdapSearchUser,
+  StandardTemplate,
+  User,
+} from "@/lib/types";
 import { Switch } from "@/components/ui/switch";
 import { TRACK_OPTIONS } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -13,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +42,19 @@ import {
   TRACK_HINT,
 } from "@/components/FieldHint";
 
+const IMPACT_OPTIONS: ComboboxOption[] = [
+  { value: "low", label: "1 — Low" },
+  { value: "medium", label: "2 — Medium" },
+  { value: "high", label: "3 — High" },
+];
+const PROBABILITY_OPTIONS = IMPACT_OPTIONS;
+const PRIORITY_OPTIONS: ComboboxOption[] = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "critical", label: "Critical" },
+];
+
 export function NewChangePage() {
   const [, setLocation] = useLocation();
   const [track, setTrack] = useState<ChangeTrack>("normal");
@@ -54,6 +74,9 @@ export function NewChangePage() {
   const [category, setCategory] = useState<string>("");
   const [hasPreprodEnv, setHasPreprodEnv] = useState(false);
   const [preprodEnvUrl, setPreprodEnvUrl] = useState("");
+  const [ticketLink, setTicketLink] = useState("");
+  const [requesterType, setRequesterType] = useState<"internal" | "external">("internal");
+  const [requesterName, setRequesterName] = useState("");
   const [emergencyConfirmOpen, setEmergencyConfirmOpen] = useState(false);
 
   const templatesQ = useQuery({ queryKey: ["templates"], queryFn: () => api.get<StandardTemplate[]>("/templates") });
@@ -81,6 +104,32 @@ export function NewChangePage() {
     }
   }, [categoriesQ.data, category]);
 
+  const templateOptions: ComboboxOption[] = useMemo(
+    () => [
+      { value: "none", label: "— Select a template —" },
+      ...(templatesQ.data ?? [])
+        .filter((t) => t.isActive)
+        .map((t) => ({ value: String(t.id), label: t.name })),
+    ],
+    [templatesQ.data],
+  );
+  const categoryOptions: ComboboxOption[] = useMemo(
+    () =>
+      (categoriesQ.data ?? [])
+        .filter((c) => c.isActive !== false)
+        .map((c) => ({ value: c.key, label: c.name })),
+    [categoriesQ.data],
+  );
+  const ownerOptions: ComboboxOption[] = useMemo(
+    () => [
+      { value: "none", label: "Unassigned" },
+      ...(usersQ.data ?? [])
+        .filter((u) => u.isActive)
+        .map((u) => ({ value: String(u.id), label: u.fullName, hint: u.username })),
+    ],
+    [usersQ.data],
+  );
+
   const create = useMutation({
     mutationFn: async () => {
       return api.post<ChangeRequest>("/changes", {
@@ -97,6 +146,9 @@ export function NewChangePage() {
         templateId: templateId === "none" ? null : Number(templateId),
         hasPreprodEnv,
         preprodEnvUrl: hasPreprodEnv ? preprodEnvUrl.trim() || null : null,
+        ticketLink: ticketLink.trim() || null,
+        requesterType: requesterName.trim() ? requesterType : null,
+        requesterName: requesterName.trim() || null,
       });
     },
     onSuccess: (c) => {
@@ -231,17 +283,15 @@ export function NewChangePage() {
             <CardDescription>Standard changes must use a pre-approved template.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Select value={templateId} onValueChange={setTemplateId}>
-              <SelectTrigger data-testid="select-template"><SelectValue placeholder="Select a template" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— Select a template —</SelectItem>
-                {(templatesQ.data ?? []).filter((t) => t.isActive).map((t) => (
-                  <SelectItem key={t.id} value={String(t.id)}>
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={templateOptions}
+              value={templateId}
+              onChange={setTemplateId}
+              placeholder="Select a template"
+              searchPlaceholder="Search templates…"
+              emptyText="No templates found."
+              data-testid="select-template"
+            />
             {selectedTemplate && (
               <div className="mt-4 space-y-2 rounded-md border border-dashed border-border bg-muted/40 p-4 text-sm">
                 <p className="text-muted-foreground">{selectedTemplate.description}</p>
@@ -278,43 +328,36 @@ export function NewChangePage() {
                 Impact <span className="text-destructive">*</span>
                 <FieldHint label="Impact criteria">{IMPACT_HINT}</FieldHint>
               </Label>
-              <Select value={impact} onValueChange={(v) => setImpact(v as typeof impact)}>
-                <SelectTrigger data-testid="select-impact"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">1 — Low</SelectItem>
-                  <SelectItem value="medium">2 — Medium</SelectItem>
-                  <SelectItem value="high">3 — High</SelectItem>
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={IMPACT_OPTIONS}
+                value={impact}
+                onChange={(v) => setImpact(v as typeof impact)}
+                data-testid="select-impact"
+              />
             </div>
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 Probability of failure <span className="text-destructive">*</span>
                 <FieldHint label="Failure probability criteria">{PROBABILITY_HINT}</FieldHint>
               </Label>
-              <Select value={risk} onValueChange={(v) => setRisk(v as typeof risk)}>
-                <SelectTrigger data-testid="select-risk"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">1 — Low</SelectItem>
-                  <SelectItem value="medium">2 — Medium</SelectItem>
-                  <SelectItem value="high">3 — High</SelectItem>
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={PROBABILITY_OPTIONS}
+                value={risk}
+                onChange={(v) => setRisk(v as typeof risk)}
+                data-testid="select-risk"
+              />
             </div>
             <div className="space-y-2">
               <Label className="flex items-center gap-1.5">
                 Priority <span className="text-destructive">*</span>
                 <FieldHint label="About priority">{PRIORITY_HINT}</FieldHint>
               </Label>
-              <Select value={priority} onValueChange={(v) => setPriority(v as typeof priority)}>
-                <SelectTrigger data-testid="select-priority"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={PRIORITY_OPTIONS}
+                value={priority}
+                onChange={(v) => setPriority(v as typeof priority)}
+                data-testid="select-priority"
+              />
             </div>
           </div>
 
@@ -355,15 +398,42 @@ export function NewChangePage() {
               Category <span className="text-destructive">*</span>
               <FieldHint label="About category">{CATEGORY_HINT}</FieldHint>
             </Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger data-testid="select-category"><SelectValue placeholder="Select a category…" /></SelectTrigger>
-              <SelectContent>
-                {(categoriesQ.data ?? []).filter((c) => c.isActive !== false).map((c) => (
-                  <SelectItem key={c.key} value={c.key}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={categoryOptions}
+              value={category}
+              onChange={setCategory}
+              placeholder="Select a category…"
+              searchPlaceholder="Search categories…"
+              emptyText="No categories found."
+              data-testid="select-category"
+            />
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ticket-link">Link to Ticket</Label>
+            <Input
+              id="ticket-link"
+              type="url"
+              inputMode="url"
+              placeholder="https://… (optional reference to an external ticket)"
+              value={ticketLink}
+              onChange={(e) => setTicketLink(e.target.value)}
+              data-testid="input-ticket-link"
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional link to the originating ticket (e.g. ServiceNow, Jira, GLPI).
+            </p>
+          </div>
+
+          <RequesterField
+            type={requesterType}
+            name={requesterName}
+            onTypeChange={(t) => {
+              setRequesterType(t);
+              setRequesterName("");
+            }}
+            onNameChange={setRequesterName}
+          />
 
           {track === "normal" && (
             <div className="rounded-md border border-border p-3 space-y-3">
@@ -385,15 +455,15 @@ export function NewChangePage() {
 
           <div className="space-y-2">
             <Label>Change Owner <span className="text-destructive">*</span></Label>
-            <Select value={assigneeId} onValueChange={setAssigneeId}>
-              <SelectTrigger data-testid="select-assignee"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {(usersQ.data ?? []).filter((u) => u.isActive).map((u) => (
-                  <SelectItem key={u.id} value={String(u.id)}>{u.fullName} ({u.username})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={ownerOptions}
+              value={assigneeId}
+              onChange={setAssigneeId}
+              placeholder="Unassigned"
+              searchPlaceholder="Search users…"
+              emptyText="No users found."
+              data-testid="select-assignee"
+            />
           </div>
         </CardContent>
       </Card>
@@ -447,5 +517,109 @@ export function NewChangePage() {
       </Dialog>
     </form>
     </TooltipProvider>
+  );
+}
+
+// Requester selector. Internal requesters are looked up live from the Active
+// Directory directory (service-bind search); external requesters are captured
+// as free text. Optional — leaving it blank stores no requester.
+function RequesterField({
+  type,
+  name,
+  onTypeChange,
+  onNameChange,
+}: {
+  type: "internal" | "external";
+  name: string;
+  onTypeChange: (t: "internal" | "external") => void;
+  onNameChange: (name: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const h = setTimeout(() => setDebounced(query), 250);
+    return () => clearTimeout(h);
+  }, [query]);
+
+  const searchQ = useQuery({
+    queryKey: ["ldap-search", debounced],
+    queryFn: () => api.get<{ users: LdapSearchUser[]; note?: string }>(`/users/ldap-search?q=${encodeURIComponent(debounced)}`),
+    enabled: type === "internal" && debounced.trim().length >= 2,
+  });
+
+  const options: ComboboxOption[] = useMemo(() => {
+    const base = (searchQ.data?.users ?? []).map((u) => ({
+      value: u.fullName || u.username,
+      label: u.fullName || u.username,
+      hint: [u.username, u.email].filter(Boolean).join(" · "),
+    }));
+    // Keep the current selection visible even after the result list changes.
+    if (name && !base.some((o) => o.value === name)) {
+      base.unshift({ value: name, label: name, hint: "" });
+    }
+    return base;
+  }, [searchQ.data, name]);
+
+  const note = searchQ.data?.note;
+
+  return (
+    <div className="space-y-2">
+      <Label>Requester</Label>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-md border border-border p-0.5">
+          <Button
+            type="button"
+            size="sm"
+            variant={type === "internal" ? "default" : "ghost"}
+            className="h-7"
+            onClick={() => onTypeChange("internal")}
+            data-testid="button-requester-internal"
+          >
+            Internal
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={type === "external" ? "default" : "ghost"}
+            className="h-7"
+            onClick={() => onTypeChange("external")}
+            data-testid="button-requester-external"
+          >
+            External
+          </Button>
+        </div>
+        <div className="min-w-[240px] flex-1">
+          {type === "internal" ? (
+            <Combobox
+              options={options}
+              value={name}
+              onChange={onNameChange}
+              placeholder="Search the directory…"
+              searchPlaceholder="Type a name (min 2 chars)…"
+              emptyText={
+                debounced.trim().length < 2
+                  ? "Type at least 2 characters."
+                  : note || "No directory matches."
+              }
+              onSearchChange={setQuery}
+              loading={searchQ.isFetching}
+              data-testid="select-requester-internal"
+            />
+          ) : (
+            <Input
+              placeholder="Requester name (external)"
+              value={name}
+              onChange={(e) => onNameChange(e.target.value)}
+              data-testid="input-requester-external"
+            />
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {type === "internal"
+          ? "Pick an internal staff member from the Active Directory directory."
+          : "Enter the name of an external requester (vendor, partner, etc.)."}
+      </p>
+    </div>
   );
 }

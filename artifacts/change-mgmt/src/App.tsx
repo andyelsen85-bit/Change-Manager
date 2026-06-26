@@ -10,6 +10,7 @@ import { DashboardPage } from "@/pages/Dashboard";
 import { ChangesListPage } from "@/pages/ChangesList";
 import { NewChangePage } from "@/pages/NewChange";
 import { ChangeDetailPage } from "@/pages/ChangeDetail";
+import { ChangePlanningsPage } from "@/pages/ChangePlannings";
 import { PentestListPage } from "@/pages/PentestList";
 import { NewPentestPage } from "@/pages/NewPentest";
 import { PentestDetailPage } from "@/pages/PentestDetail";
@@ -76,6 +77,7 @@ function ProtectedRoutes() {
       <Switch>
         <Route path="/" component={DashboardPage} />
         <Route path="/changes" component={ChangesListPage} />
+        <Route path="/plannings" component={ChangePlanningsPage} />
         <Route path="/changes/new" component={NewChangePage} />
         <Route path="/changes/:id" component={ChangeDetailPage} />
         {/*
