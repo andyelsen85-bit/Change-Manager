@@ -237,6 +237,9 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
       templateId,
       hasPreprodEnv: !!b.hasPreprodEnv,
       preprodEnvUrl: typeof b.preprodEnvUrl === "string" ? b.preprodEnvUrl : null,
+      ticketLink: typeof b.ticketLink === "string" && b.ticketLink.trim() ? b.ticketLink.trim() : null,
+      requesterType: b.requesterType === "internal" || b.requesterType === "external" ? b.requesterType : null,
+      requesterName: typeof b.requesterName === "string" && b.requesterName.trim() ? b.requesterName.trim() : null,
       plannedStart: b.plannedStart ? new Date(b.plannedStart) : null,
       plannedEnd: b.plannedEnd ? new Date(b.plannedEnd) : null,
     })
@@ -367,6 +370,12 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   for (const k of ["title", "description", "risk", "impact", "priority", "category", "preprodEnvUrl"] as const) {
     if (typeof b[k] === "string") (updates as Record<string, unknown>)[k] = b[k];
   }
+  if (b.ticketLink === null) updates.ticketLink = null;
+  else if (typeof b.ticketLink === "string") updates.ticketLink = b.ticketLink.trim() || null;
+  if (b.requesterType === null) updates.requesterType = null;
+  else if (b.requesterType === "internal" || b.requesterType === "external") updates.requesterType = b.requesterType;
+  if (b.requesterName === null) updates.requesterName = null;
+  else if (typeof b.requesterName === "string") updates.requesterName = b.requesterName.trim() || null;
   if (typeof b.hasPreprodEnv === "boolean") updates.hasPreprodEnv = b.hasPreprodEnv;
   if (b.assigneeId === null) updates.assigneeId = null;
   else if (typeof b.assigneeId === "number") updates.assigneeId = b.assigneeId;

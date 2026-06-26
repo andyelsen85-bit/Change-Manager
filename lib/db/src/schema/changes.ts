@@ -16,6 +16,13 @@ export const changeRequestsTable = pgTable("change_requests", {
   // Implementer drives.
   hasPreprodEnv: boolean("has_preprod_env").notNull().default(false),
   preprodEnvUrl: text("preprod_env_url"),
+  // Optional free-text link to an external ticket (e.g. ServiceNow / Jira / GLPI).
+  ticketLink: text("ticket_link"),
+  // Who requested the change. requesterType is 'internal' (picked from the AD
+  // directory) or 'external' (free-text). requesterName holds the chosen
+  // directory display name or the free-text value. Both nullable — optional.
+  requesterType: text("requester_type"),
+  requesterName: text("requester_name"),
   ownerId: integer("owner_id").notNull(),
   assigneeId: integer("assignee_id"),
   templateId: integer("template_id"),

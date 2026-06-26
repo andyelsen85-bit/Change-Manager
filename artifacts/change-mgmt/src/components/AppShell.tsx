@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   ClipboardList,
   CalendarDays,
+  CalendarRange,
   FileText,
   Users,
   ShieldCheck,
@@ -44,6 +45,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Changes", path: "/changes", icon: ClipboardList },
+  { label: "Change Plannings", path: "/plannings", icon: CalendarRange },
   { label: "CAB Calendar", path: "/cab", icon: CalendarDays },
   { label: "Templates", path: "/templates", icon: FileText },
   // Always visible: a plain user added to a pentest must be able to reach it.
@@ -237,6 +239,7 @@ function titleFor(path: string): string {
   if (path === "/" || path === "") return "Dashboard";
   if (path.startsWith("/changes/new")) return "New Change Request";
   if (path.startsWith("/changes")) return "Change Requests";
+  if (path.startsWith("/plannings")) return "Change Plannings";
   if (path.startsWith("/cab")) return "CAB Calendar";
   if (path.startsWith("/templates")) return "Standard Templates";
   if (path.startsWith("/pentests/new")) return "New PenTest Request";

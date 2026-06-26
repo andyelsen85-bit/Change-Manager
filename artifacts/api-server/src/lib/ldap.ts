@@ -292,6 +292,128 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
   });
 }
 
+// Directory search by name fragment. Used by the change "Requester" picker to
+// let any authenticated user find an Active Directory account by typing part of
+// their display name. Service-bind only (never asks for the user password) and
+// returns up to `limit` matches. Degrades gracefully: when LDAP is disabled or
+// unreachable we resolve { ok:false } so the caller can show an empty list
+// instead of erroring out.
+export type LdapSearchUser = { username: string; email: string; fullName: string; userDn: string };
+export type LdapSearchResult =
+  | { ok: true; users: LdapSearchUser[] }
+  | { ok: false; stage: LdapStage; reason: string; code?: string; details?: string };
+
+export async function searchLdapUsers(query: string, limit = 20): Promise<LdapSearchResult> {
+  const cfg = await getLdap();
+  if (!cfg || !cfg.enabled) {
+    return { ok: false, stage: "config", reason: "LDAP disabled" };
+  }
+  if (!cfg.url || !cfg.baseDn) {
+    return { ok: false, stage: "config", reason: "LDAP not configured (URL and Base DN required)" };
+  }
+  const trimmed = query.trim();
+  if (trimmed.length < 2) {
+    return { ok: true, users: [] };
+  }
+  let ldap: typeof import("ldapjs");
+  try {
+    ldap = await import("ldapjs");
+  } catch {
+    return { ok: false, stage: "config", reason: "LDAP library missing" };
+  }
+  return new Promise<LdapSearchResult>((resolve) => {
+    const rejectUnauthorized = cfg.tlsRejectUnauthorized !== false;
+    const isLdaps = cfg.url.toLowerCase().startsWith("ldaps:");
+    const cas: string[] = [];
+    if (cfg.caCertPem && cfg.caCertPem.trim()) cas.push(cfg.caCertPem);
+    if (cfg.issuerCertPem && cfg.issuerCertPem.trim()) cas.push(cfg.issuerCertPem);
+    const tlsOptions = (isLdaps || cfg.tls)
+      ? { rejectUnauthorized, ...(cas.length ? { ca: cas } : {}) }
+      : undefined;
+    let client: import("ldapjs").Client;
+    try {
+      client = ldap.createClient({ url: cfg.url, tlsOptions, timeout: 5000, connectTimeout: 5000 });
+    } catch (err) {
+      const { code, details } = extractLdapError(err);
+      return resolve({ ok: false, stage: "connect", reason: "Could not initialise LDAP client", code, details });
+    }
+    let resolved = false;
+    const finish = (r: LdapSearchResult) => {
+      if (resolved) return;
+      resolved = true;
+      try { client.unbind(); } catch { /* ignore */ }
+      if (!r.ok) {
+        logger.warn({ url: cfg.url, baseDn: cfg.baseDn, stage: r.stage, reason: r.reason, code: r.code }, "LDAP search failed");
+      } else {
+        logger.info({ url: cfg.url, baseDn: cfg.baseDn, count: r.users.length }, "LDAP user search ok");
+      }
+      resolve(r);
+    };
+    client.on("error", (err) => {
+      const { code, details } = extractLdapError(err);
+      finish({ ok: false, stage: "connect", reason: "Could not reach LDAP server", code, details });
+    });
+    const doSearch = () => {
+      // Substring match across the common name attributes. The query is escaped
+      // per RFC 4515 first, then wrapped in our own wildcards so the user's
+      // input is treated literally (no filter injection).
+      const q = escapeLdapFilter(trimmed);
+      const sub = `*${q}*`;
+      const filter =
+        `(&(|(objectClass=person)(objectClass=user)(objectClass=inetOrgPerson))` +
+        `(|(displayName=${sub})(cn=${sub})(${cfg.usernameAttr}=${sub})(sAMAccountName=${sub})(mail=${sub})(givenName=${sub})(sn=${sub})))`;
+      const wanted = Array.from(new Set([
+        cfg.usernameAttr, cfg.emailAttr, cfg.nameAttr,
+        "displayName", "cn", "name", "givenName", "sn",
+        "mail", "userPrincipalName", "sAMAccountName", "uid",
+      ]));
+      const opts = { filter, scope: "sub" as const, attributes: wanted, sizeLimit: limit };
+      client.search(cfg.baseDn, opts, (searchErr, searchRes) => {
+        if (searchErr) {
+          const { code, details } = extractLdapError(searchErr);
+          return finish({ ok: false, stage: "search", reason: "LDAP search failed", code, details });
+        }
+        const users: LdapSearchUser[] = [];
+        searchRes.on("searchEntry", (e: unknown) => {
+          const entry = parseLdapEntry(e);
+          const entryDn = extractEntryDn(e);
+          const fullName = pickAttr(entry, [cfg.nameAttr, "displayName", "cn", "name"])
+            || `${pickAttr(entry, ["givenName"])} ${pickAttr(entry, ["sn"])}`.trim();
+          const email = pickAttr(entry, [cfg.emailAttr, "mail", "userPrincipalName"]);
+          const uname = pickAttr(entry, [cfg.usernameAttr, "sAMAccountName", "uid"]);
+          if (fullName || uname) {
+            users.push({ username: uname, email, fullName: fullName || uname, userDn: entryDn });
+          }
+        });
+        // ldapjs emits a "Size Limit Exceeded" error when more than sizeLimit
+        // entries match. That's expected for a broad query — we keep the
+        // entries we already collected rather than treating it as a failure.
+        searchRes.on("error", (e) => {
+          const { code } = extractLdapError(e);
+          if (code === "4" || code === "SizeLimitExceededError") {
+            return finish({ ok: true, users });
+          }
+          const { details } = extractLdapError(e);
+          finish({ ok: false, stage: "search", reason: "LDAP search returned an error", code, details });
+        });
+        searchRes.on("end", () => finish({ ok: true, users }));
+      });
+    };
+    if (cfg.bindDn && cfg.bindPasswordEnc) {
+      const bindPassword = decryptSecret(cfg.bindPasswordEnc);
+      client.bind(cfg.bindDn, bindPassword, (err) => {
+        if (err) {
+          const { code, details } = extractLdapError(err);
+          return finish({ ok: false, stage: "service-bind", reason: "Service bind failed", code, details });
+        }
+        doSearch();
+      });
+    } else {
+      doSearch();
+    }
+  });
+}
+
 // LDAP authenticate: bind as service account, search user, bind as user.
 // We import ldapjs lazily so projects without LDAP configured don't pay the load cost.
 export async function authenticateLdap(username: string, password: string): Promise<LdapAuthResult> {
