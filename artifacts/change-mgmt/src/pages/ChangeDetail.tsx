@@ -48,6 +48,7 @@ import {
   CATEGORY_HINT,
 } from "@/components/FieldHint";
 import { useAuth } from "@/lib/auth-context";
+import { RequesterField } from "@/components/RequesterField";
 import { cn } from "@/lib/utils";
 
 const IMPACT_OPTIONS: ComboboxOption[] = [
@@ -767,6 +768,9 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
   const [assigneeId, setAssigneeId] = useState<string>(change.assigneeId ? String(change.assigneeId) : "none");
   const [hasPreprodEnv, setHasPreprodEnv] = useState<boolean>(change.hasPreprodEnv ?? false);
   const [preprodEnvUrl, setPreprodEnvUrl] = useState<string>(change.preprodEnvUrl ?? "");
+  const [ticketLink, setTicketLink] = useState<string>(change.ticketLink ?? "");
+  const [requesterType, setRequesterType] = useState<"internal" | "external">(change.requesterType ?? "internal");
+  const [requesterName, setRequesterName] = useState<string>(change.requesterName ?? "");
 
   const save = useMutation({
     mutationFn: () =>
@@ -780,6 +784,9 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
         assigneeId: assigneeId === "none" ? null : Number(assigneeId),
         hasPreprodEnv,
         preprodEnvUrl: hasPreprodEnv ? preprodEnvUrl.trim() : "",
+        ticketLink: ticketLink.trim() || null,
+        requesterType: requesterName.trim() ? requesterType : null,
+        requesterName: requesterName.trim() || null,
       }),
     onSuccess: () => {
       toast.success("Details updated");
@@ -797,7 +804,10 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
     (category ?? "") !== (change.category ?? "") ||
     assigneeId !== (change.assigneeId ? String(change.assigneeId) : "none") ||
     hasPreprodEnv !== (change.hasPreprodEnv ?? false) ||
-    preprodEnvUrl !== (change.preprodEnvUrl ?? "");
+    preprodEnvUrl !== (change.preprodEnvUrl ?? "") ||
+    (ticketLink.trim() || null) !== (change.ticketLink ?? null) ||
+    (requesterName.trim() || null) !== (change.requesterName ?? null) ||
+    (requesterName.trim() ? requesterType : null) !== (change.requesterType ?? null);
 
   return (
     <TooltipProvider>
@@ -881,6 +891,32 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
               data-testid="select-details-category"
             />
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="details-ticket-link">Link to Ticket</Label>
+            <Input
+              id="details-ticket-link"
+              type="url"
+              inputMode="url"
+              placeholder="https://… (optional reference to an external ticket)"
+              value={ticketLink}
+              onChange={(e) => setTicketLink(e.target.value)}
+              data-testid="input-details-ticket-link"
+            />
+            <p className="text-xs text-muted-foreground">
+              Optional link to the originating ticket (e.g. ServiceNow, Jira, GLPI).
+            </p>
+          </div>
+
+          <RequesterField
+            type={requesterType}
+            name={requesterName}
+            onTypeChange={(t) => {
+              setRequesterType(t);
+              setRequesterName("");
+            }}
+            onNameChange={setRequesterName}
+          />
 
           <div className="space-y-2">
             <Label>Change Owner</Label>
