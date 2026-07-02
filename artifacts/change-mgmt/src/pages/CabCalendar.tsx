@@ -14,6 +14,7 @@ import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Combobox } from "@/components/ui/combobox";
 import { fmtDateTime, fromLocalDateTimeInput, toLocalDateTimeInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -297,15 +298,18 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
         </div>
         <div className="space-y-2">
           <Label>Chair</Label>
-          <Select value={chairUserId} onValueChange={setChairUserId}>
-            <SelectTrigger><SelectValue placeholder="No chair" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No chair</SelectItem>
-              {(usersQ.data ?? []).map((u) => (
-                <SelectItem key={u.id} value={String(u.id)}>{u.fullName}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Combobox
+            options={[
+              { value: "none", label: "No chair" },
+              ...(usersQ.data ?? []).map((u) => ({ value: String(u.id), label: u.fullName, hint: u.username })),
+            ]}
+            value={chairUserId}
+            onChange={setChairUserId}
+            placeholder="No chair"
+            searchPlaceholder="Search users…"
+            emptyText="No users found."
+            data-testid="select-cab-chair"
+          />
         </div>
         <div className="space-y-2">
           <Label>Changes on agenda ({changeIds.length})</Label>
