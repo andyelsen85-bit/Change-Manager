@@ -6,7 +6,7 @@ import {
   changeRequestsTable,
   usersTable,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess } from "../lib/auth";
+import { requireAuth, getChangeAccess, getChangeViewAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 
 // Roles that can be assigned per-change. Mirrors the seeded role keys but
@@ -28,7 +28,7 @@ router.get("/changes/:id/assignees", requireAuth, async (req, res): Promise<void
     res.status(404).json({ error: "Not found" });
     return;
   }
-  if (!(await getChangeAccess(req.session!, chg))) {
+  if (!(await getChangeViewAccess(req.session!, chg))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

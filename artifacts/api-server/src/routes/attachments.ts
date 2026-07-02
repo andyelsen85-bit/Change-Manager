@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db, attachmentsTable, usersTable, changeRequestsTable } from "@workspace/db";
-import { requireAuth, getChangeAccess } from "../lib/auth";
+import { requireAuth, getChangeAccess, getChangeViewAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 
 const router: IRouter = Router();
@@ -21,7 +21,7 @@ router.get("/changes/:id/attachments", requireAuth, async (req, res): Promise<vo
     res.status(404).json({ error: "Change not found" });
     return;
   }
-  if (!(await getChangeAccess(req.session!, c))) {
+  if (!(await getChangeViewAccess(req.session!, c))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -125,7 +125,7 @@ router.get("/attachments/:id/download", requireAuth, async (req, res): Promise<v
     return;
   }
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, row.changeId));
-  if (!c || !(await getChangeAccess(req.session!, c))) {
+  if (!c || !(await getChangeViewAccess(req.session!, c))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

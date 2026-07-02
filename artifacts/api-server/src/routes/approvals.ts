@@ -9,7 +9,7 @@ import {
   usersTable,
   roleAssignmentsTable,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess } from "../lib/auth";
+import { requireAuth, getChangeViewAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify } from "../lib/email";
 import { resolveRecipients } from "../lib/notification-routing";
@@ -27,7 +27,7 @@ router.get("/changes/:id/approvals", requireAuth, async (req, res): Promise<void
     res.status(404).json({ error: "Change not found" });
     return;
   }
-  if (!(await getChangeAccess(req.session!, chg))) {
+  if (!(await getChangeViewAccess(req.session!, chg))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

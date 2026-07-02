@@ -12,6 +12,7 @@ import {
 
 const dbMock = new DbMock();
 const getChangeAccessMock = vi.fn();
+const getChangeViewAccessMock = vi.fn();
 
 vi.mock("@workspace/db", () => ({
   db: dbMock,
@@ -44,6 +45,7 @@ vi.mock("../lib/auth", async () => {
     ...actual,
     requireAuth: (req: unknown, _res: unknown, next: () => void) => next(),
     getChangeAccess: getChangeAccessMock,
+    getChangeViewAccess: getChangeViewAccessMock,
   };
 });
 
@@ -91,19 +93,20 @@ describe("changes.ts authorization gates", () => {
   beforeEach(() => {
     dbMock.reset();
     getChangeAccessMock.mockReset();
+    getChangeViewAccessMock.mockReset();
   });
 
   describe("GET /changes/:id", () => {
-    it("returns 403 when getChangeAccess returns null", async () => {
+    it("returns 403 when the caller has no view access", async () => {
       dbMock.enqueue("select", [sampleChange]); // change lookup
-      getChangeAccessMock.mockResolvedValueOnce(null);
+      getChangeViewAccessMock.mockResolvedValueOnce(null);
       const app = buildTestApp(changesRouter, STRANGER_SESSION);
       const res = await request(app).get("/api/changes/1");
       expect(res.status).toBe(403);
-      expect(getChangeAccessMock).toHaveBeenCalledOnce();
+      expect(getChangeViewAccessMock).toHaveBeenCalledOnce();
     });
 
-    it("allows owner to read (auth gate passes)", async () => {
+    it("allows a viewer (e.g. CAB member) to read (auth gate passes)", async () => {
       dbMock.enqueue("select", [sampleChange]); // change lookup
       // After auth passes the handler does many more lookups; queue dummies
       // so the handler doesn't crash. We only assert it didn't 403.
@@ -114,7 +117,7 @@ describe("changes.ts authorization gates", () => {
       dbMock.enqueue("select", []); // pir
       dbMock.enqueue("select", []); // approvals
       dbMock.enqueue("select", []); // comments
-      getChangeAccessMock.mockResolvedValueOnce("owner");
+      getChangeViewAccessMock.mockResolvedValueOnce("cab_member");
       const app = buildTestApp(changesRouter, OWNER_SESSION);
       const res = await request(app).get("/api/changes/1");
       expect(res.status).not.toBe(403);

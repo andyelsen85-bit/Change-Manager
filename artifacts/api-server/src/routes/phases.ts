@@ -8,7 +8,7 @@ import {
   changeRequestsTable,
   type TestCase,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess, isPrivilegedAccess } from "../lib/auth";
+import { requireAuth, getChangeAccess, getChangeViewAccess, isPrivilegedAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify } from "../lib/email";
 import { resolveRecipients } from "../lib/notification-routing";
@@ -16,10 +16,13 @@ import { resolveRecipients } from "../lib/notification-routing";
 const router: IRouter = Router();
 
 // Ownership/role gate shared by every phase endpoint. Returns the change row when the
-// caller is allowed to read it, otherwise writes 403/404 and returns null.
+// caller is allowed to access it, otherwise writes 403/404 and returns null.
+// `view: true` widens the gate to change viewers (e.g. CAB members / deputies) for
+// READ handlers; write handlers keep the stricter getChangeAccess gate.
 async function loadChangeForCaller(
   req: Request,
   res: Response,
+  opts: { view?: boolean } = {},
 ): Promise<typeof changeRequestsTable.$inferSelect | null> {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
@@ -31,7 +34,9 @@ async function loadChangeForCaller(
     res.status(404).json({ error: "Change not found" });
     return null;
   }
-  const access = await getChangeAccess(req.session!, c);
+  const access = opts.view
+    ? await getChangeViewAccess(req.session!, c)
+    : await getChangeAccess(req.session!, c);
   if (!access) {
     res.status(403).json({ error: "Forbidden" });
     return null;
@@ -41,7 +46,7 @@ async function loadChangeForCaller(
 
 // PLANNING
 router.get("/changes/:id/planning", requireAuth, async (req, res): Promise<void> => {
-  const c = await loadChangeForCaller(req, res);
+  const c = await loadChangeForCaller(req, res, { view: true });
   if (!c) return;
   const id = c.id;
   const [row] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
@@ -194,7 +199,7 @@ async function putTesting(req: Request, res: Response, kind: "production" | "pre
 }
 
 router.get("/changes/:id/testing", requireAuth, async (req, res): Promise<void> => {
-  const c = await loadChangeForCaller(req, res);
+  const c = await loadChangeForCaller(req, res, { view: true });
   if (!c) return;
   const row = await getTestingRow(c.id, "production");
   res.json(row ?? emptyTestRow(c.id, "production"));
@@ -205,7 +210,7 @@ router.put("/changes/:id/testing", requireAuth, async (req, res): Promise<void> 
 });
 
 router.get("/changes/:id/preprod-testing", requireAuth, async (req, res): Promise<void> => {
-  const c = await loadChangeForCaller(req, res);
+  const c = await loadChangeForCaller(req, res, { view: true });
   if (!c) return;
   const row = await getTestingRow(c.id, "preprod");
   res.json(row ?? emptyTestRow(c.id, "preprod"));
@@ -217,7 +222,7 @@ router.put("/changes/:id/preprod-testing", requireAuth, async (req, res): Promis
 
 // PIR
 router.get("/changes/:id/pir", requireAuth, async (req, res): Promise<void> => {
-  const c = await loadChangeForCaller(req, res);
+  const c = await loadChangeForCaller(req, res, { view: true });
   if (!c) return;
   const id = c.id;
   const [row] = await db.select().from(pirRecordsTable).where(eq(pirRecordsTable.changeId, id));

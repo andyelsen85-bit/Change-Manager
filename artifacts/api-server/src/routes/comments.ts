@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db, commentsTable, usersTable, changeRequestsTable } from "@workspace/db";
-import { requireAuth, getChangeAccess } from "../lib/auth";
+import { requireAuth, getChangeAccess, getChangeViewAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify } from "../lib/email";
 import { resolveRecipients } from "../lib/notification-routing";
@@ -19,7 +19,7 @@ router.get("/changes/:id/comments", requireAuth, async (req, res): Promise<void>
     res.status(404).json({ error: "Change not found" });
     return;
   }
-  if (!(await getChangeAccess(req.session!, c))) {
+  if (!(await getChangeViewAccess(req.session!, c))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

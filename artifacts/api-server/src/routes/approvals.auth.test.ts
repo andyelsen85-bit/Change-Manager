@@ -10,6 +10,7 @@ import {
 
 const dbMock = new DbMock();
 const getChangeAccessMock = vi.fn();
+const getChangeViewAccessMock = vi.fn();
 
 vi.mock("@workspace/db", () => ({
   db: dbMock,
@@ -30,6 +31,7 @@ vi.mock("../lib/auth", async () => {
     ...actual,
     requireAuth: (req: unknown, _res: unknown, next: () => void) => next(),
     getChangeAccess: getChangeAccessMock,
+    getChangeViewAccess: getChangeViewAccessMock,
   };
 });
 
@@ -56,20 +58,21 @@ describe("approvals.ts authorization gates", () => {
   beforeEach(() => {
     dbMock.reset();
     getChangeAccessMock.mockReset();
+    getChangeViewAccessMock.mockReset();
   });
 
-  it("GET /changes/:id/approvals returns 403 when getChangeAccess returns null", async () => {
+  it("GET /changes/:id/approvals returns 403 when the caller has no view access", async () => {
     dbMock.enqueue("select", [sampleChange]);
-    getChangeAccessMock.mockResolvedValueOnce(null);
+    getChangeViewAccessMock.mockResolvedValueOnce(null);
     const app = buildTestApp(approvalsRouter, STRANGER_SESSION);
     const res = await request(app).get("/api/changes/1/approvals");
     expect(res.status).toBe(403);
   });
 
-  it("GET /changes/:id/approvals allows owner", async () => {
+  it("GET /changes/:id/approvals allows a viewer (e.g. CAB member)", async () => {
     dbMock.enqueue("select", [sampleChange]);
     dbMock.enqueue("select", []);
-    getChangeAccessMock.mockResolvedValueOnce("owner");
+    getChangeViewAccessMock.mockResolvedValueOnce("cab_member");
     const app = buildTestApp(approvalsRouter, OWNER_SESSION);
     const res = await request(app).get("/api/changes/1/approvals");
     expect(res.status).toBe(200);
