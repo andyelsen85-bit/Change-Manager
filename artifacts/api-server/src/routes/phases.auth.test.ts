@@ -11,6 +11,7 @@ import {
 
 const dbMock = new DbMock();
 const getChangeAccessMock = vi.fn();
+const getChangeViewAccessMock = vi.fn();
 
 vi.mock("@workspace/db", () => ({
   db: dbMock,
@@ -20,7 +21,7 @@ vi.mock("@workspace/db", () => ({
   changeRequestsTable: { _t: "change_requests" },
 }));
 
-vi.mock("drizzle-orm", () => ({ eq: () => ({}) }));
+vi.mock("drizzle-orm", () => ({ eq: () => ({}), and: () => ({}) }));
 
 vi.mock("../lib/auth", async () => {
   const actual =
@@ -29,6 +30,7 @@ vi.mock("../lib/auth", async () => {
     ...actual,
     requireAuth: (req: unknown, _res: unknown, next: () => void) => next(),
     getChangeAccess: getChangeAccessMock,
+    getChangeViewAccess: getChangeViewAccessMock,
   };
 });
 
@@ -52,6 +54,7 @@ describe("phases.ts authorization gates", () => {
   beforeEach(() => {
     dbMock.reset();
     getChangeAccessMock.mockReset();
+    getChangeViewAccessMock.mockReset();
   });
 
   describe.each([
@@ -59,18 +62,18 @@ describe("phases.ts authorization gates", () => {
     ["testing", "/api/changes/1/testing"],
     ["pir", "/api/changes/1/pir"],
   ])("%s endpoints", (_name, url) => {
-    it(`GET ${url} returns 403 when getChangeAccess returns null`, async () => {
+    it(`GET ${url} returns 403 when the caller has no view access`, async () => {
       dbMock.enqueue("select", [sampleChange]);
-      getChangeAccessMock.mockResolvedValueOnce(null);
+      getChangeViewAccessMock.mockResolvedValueOnce(null);
       const app = buildTestApp(phasesRouter, STRANGER_SESSION);
       const res = await request(app).get(url);
       expect(res.status).toBe(403);
     });
 
-    it(`GET ${url} allows the owner`, async () => {
+    it(`GET ${url} allows a viewer (e.g. CAB member)`, async () => {
       dbMock.enqueue("select", [sampleChange]); // change lookup
       dbMock.enqueue("select", []); // record lookup
-      getChangeAccessMock.mockResolvedValueOnce("owner");
+      getChangeViewAccessMock.mockResolvedValueOnce("cab_member");
       const app = buildTestApp(phasesRouter, OWNER_SESSION);
       const res = await request(app).get(url);
       expect(res.status).not.toBe(403);

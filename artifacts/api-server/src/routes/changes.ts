@@ -13,7 +13,7 @@ import {
   rolesTable,
   roleAssignmentsTable,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
+import { requireAuth, getChangeAccess, getChangeViewAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
 import { notify, getUserEmail, getUserEmails } from "../lib/email";
@@ -294,7 +294,7 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  if (!(await getChangeAccess(req.session!, row))) {
+  if (!(await getChangeViewAccess(req.session!, row))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }

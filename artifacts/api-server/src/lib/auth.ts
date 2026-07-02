@@ -275,11 +275,22 @@ export function requireRole(roles: string[]) {
 export const GOVERNANCE_ROLES = ["change_manager", "ecab_member", "cab_chair"] as const;
 export type GovernanceRole = (typeof GOVERNANCE_ROLES)[number];
 
+// Roles that may VIEW any change so they can take part in the CAB process —
+// read the request, its planning / approvals, and cast their approval vote —
+// but are NOT authorised to edit, delete, or transition it. Standing CAB
+// members fall here: they need to open a change to review and vote on it, yet
+// they are not change owners. Deputies of these roles get the same visibility
+// automatically because loadUserRoles ignores the is_deputy flag (a deputy
+// carries the same roleKey, hence the same access, as the primary member).
+export const CHANGE_VIEWER_ROLES = ["cab_member"] as const;
+export type ChangeViewerRole = (typeof CHANGE_VIEWER_ROLES)[number];
+
 export type ChangeAccessReason =
   | "owner"
   | "assignee"
   | "admin"
   | GovernanceRole
+  | ChangeViewerRole
   | null;
 
 export async function getChangeAccess(
@@ -291,6 +302,26 @@ export async function getChangeAccess(
   if (change.assigneeId === session.uid) return "assignee";
   const userRoles = await loadUserRoles(session.uid);
   for (const role of GOVERNANCE_ROLES) {
+    if (userRoles.includes(role)) return role;
+  }
+  return null;
+}
+
+// Read-only access gate. Grants everything getChangeAccess grants (owner,
+// assignee, admin, governance) PLUS the view-only CAB roles, so standing CAB
+// members — and their deputies — can open a change to review and vote on it.
+// Used by every READ endpoint. WRITE endpoints keep using getChangeAccess so a
+// viewer role can never edit / delete / transition a change. This split is
+// intentionally fail-closed: a missed read endpoint just leaves a viewer
+// unable to see something, never able to mutate it.
+export async function getChangeViewAccess(
+  session: SessionPayload,
+  change: { ownerId: number; assigneeId: number | null },
+): Promise<ChangeAccessReason> {
+  const acting = await getChangeAccess(session, change);
+  if (acting) return acting;
+  const userRoles = await loadUserRoles(session.uid);
+  for (const role of CHANGE_VIEWER_ROLES) {
     if (userRoles.includes(role)) return role;
   }
   return null;
