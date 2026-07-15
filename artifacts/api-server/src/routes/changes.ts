@@ -398,11 +398,55 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   if (b.plannedEnd) updates.plannedEnd = new Date(b.plannedEnd);
   if (b.plannedEnd === null) updates.plannedEnd = null;
 
+  // Template selection for standard changes still in draft (e.g. drafts
+  // created from ServiceDesk Plus without a template). Only active templates
+  // may be linked; prefills are applied like at creation time. The template
+  // cannot be changed after the change has left draft.
+  let linkedTemplate: typeof standardTemplatesTable.$inferSelect | undefined;
+  if (typeof b.templateId === "number") {
+    if (before.track !== "standard" || before.status !== "draft") {
+      res.status(400).json({ error: "A template can only be set on a standard change while it is in draft." });
+      return;
+    }
+    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, b.templateId));
+    if (!t || !t.isActive) {
+      res.status(400).json({ error: "Selected template is unknown or inactive." });
+      return;
+    }
+    if (before.templateId !== t.id) {
+      updates.templateId = t.id;
+      linkedTemplate = t;
+    }
+  }
+
   const [updated] = await db
     .update(changeRequestsTable)
     .set(updates)
     .where(eq(changeRequestsTable.id, id))
     .returning();
+  if (linkedTemplate) {
+    await db
+      .update(standardTemplatesTable)
+      .set({ usageCount: sql`${standardTemplatesTable.usageCount} + 1` })
+      .where(eq(standardTemplatesTable.id, linkedTemplate.id));
+    // Prefill planning/test plan only when still empty so a template picked
+    // later never overwrites work the owner already did.
+    if (linkedTemplate.prefilledPlanning) {
+      const [p] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
+      if (p && !p.implementationPlan) {
+        await db
+          .update(planningRecordsTable)
+          .set({ implementationPlan: linkedTemplate.prefilledPlanning })
+          .where(eq(planningRecordsTable.changeId, id));
+      }
+    }
+    if (linkedTemplate.prefilledTestPlan) {
+      await db
+        .insert(testRecordsTable)
+        .values({ changeId: id, testPlan: linkedTemplate.prefilledTestPlan })
+        .onConflictDoNothing();
+    }
+  }
   await audit(req, {
     action: "change.updated",
     entityType: "change",
@@ -574,6 +618,15 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     res.status(400).json({
       error: `Transition ${fromStatus} → ${targetStatus} is not allowed for ${track} changes.`,
       allowed: listAllowedTransitions(track, fromStatus),
+    });
+    return;
+  }
+  // Standard changes created without a template (e.g. via the SD+ webhook)
+  // must have one linked before leaving draft — templates are what authorise
+  // the standard track to skip the approval pipeline.
+  if (track === "standard" && fromStatus === "draft" && targetStatus !== "cancelled" && !before.templateId) {
+    res.status(400).json({
+      error: "A standard template must be selected before this change can leave draft. Pick one in the Details tab.",
     });
     return;
   }

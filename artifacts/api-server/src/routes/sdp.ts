@@ -139,9 +139,11 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
   const cats = await db.select().from(changeCategoriesTable).where(eq(changeCategoriesTable.isActive, true));
   if (!cats.some((c) => c.key === "general") && cats.length > 0) category = cats[0]!.key;
 
-  // Standard changes require an active template — the webhook may name one.
-  // If none matches, fall back to a normal change and record why, so nothing
-  // silently bypasses the approval pipeline.
+  // Standard changes: the webhook may name a template. If it matches an
+  // active template it is linked immediately; otherwise the draft is created
+  // WITHOUT a template and the owner must pick one in Change-it before the
+  // change can leave draft (enforced by the transition endpoint), so nothing
+  // bypasses the approval pipeline.
   let templateId: number | null = null;
   let trackNote = "";
   if (track === "standard") {
@@ -155,10 +157,9 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
     if (match) {
       templateId = match.id;
     } else {
-      track = "normal";
       trackNote = templateName
-        ? `\n\nNote: requested as a Standard change, but no active template named “${templateName}” exists — created as a Normal change instead.`
-        : `\n\nNote: requested as a Standard change, but no template was specified — created as a Normal change instead.`;
+        ? `\n\nNote: no active standard template named “${templateName}” exists — select a template in Change-it before submitting this change.`
+        : `\n\nNote: select a standard template in Change-it before submitting this change.`;
     }
   }
 
@@ -245,7 +246,7 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
     changeId: created.id,
     ref,
     url: appBaseUrl() ? `${appBaseUrl()}/changes/${created.id}` : null,
-    message: `Draft ${track} change ${ref} created for SD+ request ${requestId}.${trackNote ? " (Standard fallback: see change description.)" : ""}`,
+    message: `Draft ${track} change ${ref} created for SD+ request ${requestId}.${trackNote ? " Select a standard template in Change-it before submitting." : ""}`,
   });
 });
 
