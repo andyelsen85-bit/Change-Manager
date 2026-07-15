@@ -96,6 +96,7 @@ export type ChangeRequest = {
   hasPreprodEnv?: boolean;
   preprodEnvUrl?: string | null;
   ticketLink?: string | null;
+  sdpRequestId?: string | null;
   requesterType?: "internal" | "external" | null;
   requesterName?: string | null;
   plannedStart: string | null;
@@ -293,6 +294,17 @@ export type SmtpSettings = {
   enabled: boolean;
   tlsRejectUnauthorized: boolean;
   caCertInstalled: boolean;
+};
+
+export type SdpSettings = {
+  enabled: boolean;
+  baseUrl: string;
+  technicianKeySet: boolean;
+  webhookSecret: string;
+  tlsRejectUnauthorized: boolean;
+  lastWebhookAt: string | null;
+  lastWebhookRequestId: string | null;
+  lastWebhookStatus: string | null;
 };
 
 export type LdapSettings = {

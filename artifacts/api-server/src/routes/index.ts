@@ -19,6 +19,7 @@ import attachmentsRouter from "./attachments";
 import notificationRoutingRouter from "./notification-routing";
 import pentestRouter from "./pentest";
 import discussionsRouter from "./discussions";
+import sdpRouter from "./sdp";
 
 const router: IRouter = Router();
 
@@ -42,5 +43,6 @@ router.use(attachmentsRouter);
 router.use(notificationRoutingRouter);
 router.use(pentestRouter);
 router.use(discussionsRouter);
+router.use(sdpRouter);
 
 export default router;

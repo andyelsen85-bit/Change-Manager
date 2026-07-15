@@ -18,6 +18,10 @@ export const changeRequestsTable = pgTable("change_requests", {
   preprodEnvUrl: text("preprod_env_url"),
   // Optional free-text link to an external ticket (e.g. ServiceNow / Jira / GLPI).
   ticketLink: text("ticket_link"),
+  // ServiceDesk Plus request ID when the change was opened from an SD+ RFC
+  // ticket (via the inbound webhook). Drives the automatic resolve/reject
+  // write-back when the change reaches a terminal state.
+  sdpRequestId: text("sdp_request_id"),
   // Who requested the change. requesterType is 'internal' (picked from the AD
   // directory) or 'external' (free-text). requesterName holds the chosen
   // directory display name or the free-text value. Both nullable — optional.

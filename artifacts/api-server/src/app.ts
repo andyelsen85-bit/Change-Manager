@@ -176,6 +176,10 @@ const CSRF_EXEMPT_POST_PATHS = new Set([
   "/auth/login/",
   "/auth/setup",
   "/auth/setup/",
+  // ServiceDesk Plus inbound webhook: authenticated by a shared secret
+  // header, called server-to-server by SD+ (no browser session/cookie).
+  "/integrations/sdp/create-change",
+  "/integrations/sdp/create-change/",
 ]);
 const csrfGate: RequestHandler = (req, res, next) => {
   if (req.method === "POST" && CSRF_EXEMPT_POST_PATHS.has(req.path)) {

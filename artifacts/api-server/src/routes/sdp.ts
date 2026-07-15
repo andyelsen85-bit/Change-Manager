@@ -1,0 +1,196 @@
+// Inbound webhook from ManageEngine ServiceDesk Plus (on-premises).
+//
+// A technician clicks a "Create Change" custom action on an RFC ticket in
+// SD+; the custom trigger fires a webhook to this endpoint. Authentication
+// is a shared secret configured in the Change-it Settings page and sent as
+// the `X-Webhook-Secret` header (or `secret` query parameter for SD+ setups
+// that cannot set custom headers).
+//
+// The endpoint is idempotent per SD+ request: if an active (non-deleted)
+// change already exists for the request ID, it is returned instead of
+// creating a duplicate draft.
+import { Router, type IRouter } from "express";
+import { and, eq, isNull } from "drizzle-orm";
+import crypto from "node:crypto";
+import {
+  db,
+  changeRequestsTable,
+  planningRecordsTable,
+  usersTable,
+  sdpSettingsTable,
+  changeCategoriesTable,
+} from "@workspace/db";
+import { audit } from "../lib/audit";
+import { nextRef } from "../lib/ref";
+import { getSdpConfig, sdpAddBackLinkNote, sdpRequestUrl, appBaseUrl } from "../lib/sdp";
+import { logger } from "../lib/logger";
+
+const router: IRouter = Router();
+const KEY = "global";
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+async function recordWebhook(requestId: string | null, status: string): Promise<void> {
+  await db
+    .update(sdpSettingsTable)
+    .set({ lastWebhookAt: new Date(), lastWebhookRequestId: requestId, lastWebhookStatus: status })
+    .where(eq(sdpSettingsTable.key, KEY));
+}
+
+router.post("/integrations/sdp/create-change", async (req, res): Promise<void> => {
+  const cfg = await getSdpConfig();
+  if (!cfg?.enabled || !cfg.webhookSecret) {
+    res.status(503).json({ error: "ServiceDesk Plus integration is not enabled." });
+    return;
+  }
+  // Header-only on purpose: a query-parameter secret would leak into proxy
+  // and access logs. SD+ webhooks support custom headers.
+  const provided =
+    typeof req.headers["x-webhook-secret"] === "string" ? req.headers["x-webhook-secret"] : "";
+  if (!provided || !timingSafeEqual(provided, cfg.webhookSecret)) {
+    logger.warn({ ip: req.ip }, "SD+ webhook rejected: bad secret");
+    res.status(401).json({ error: "Invalid webhook secret." });
+    return;
+  }
+
+  // Accept both snake_case (SD+ webhook payload placeholders) and camelCase.
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string => (typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "");
+  const requestId = str(b.request_id ?? b.requestId ?? b.id ?? b.woid ?? b.WOID);
+  const subject = str(b.subject ?? b.title);
+  const description = str(b.description);
+  const requesterName = str(b.requester_name ?? b.requesterName ?? b.requester);
+  const technicianEmail = str(b.technician_email ?? b.technicianEmail).toLowerCase();
+  const requesterEmail = str(b.requester_email ?? b.requesterEmail).toLowerCase();
+
+  if (!requestId) {
+    await recordWebhook(null, "error: missing request id");
+    res.status(400).json({ error: "Missing request id. Send request_id (or id) in the JSON body." });
+    return;
+  }
+
+  // Idempotency: one active change per SD+ request.
+  const [existing] = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(and(eq(changeRequestsTable.sdpRequestId, requestId), isNull(changeRequestsTable.deletedAt)));
+  if (existing) {
+    await recordWebhook(requestId, `ok: already linked to ${existing.ref}`);
+    res.json({
+      ok: true,
+      created: false,
+      changeId: existing.id,
+      ref: existing.ref,
+      url: appBaseUrl() ? `${appBaseUrl()}/changes/${existing.id}` : null,
+      message: `A change (${existing.ref}) already exists for SD+ request ${requestId}.`,
+    });
+    return;
+  }
+
+  // Owner: prefer the SD+ technician (matched by email), then the requester,
+  // then fall back to the first active admin so the draft is never orphaned.
+  let owner: typeof usersTable.$inferSelect | undefined;
+  for (const email of [technicianEmail, requesterEmail]) {
+    if (!email) continue;
+    const [u] = await db
+      .select()
+      .from(usersTable)
+      .where(and(eq(usersTable.email, email), eq(usersTable.isActive, true)));
+    if (u) {
+      owner = u;
+      break;
+    }
+  }
+  if (!owner) {
+    const admins = await db
+      .select()
+      .from(usersTable)
+      .where(and(eq(usersTable.isAdmin, true), eq(usersTable.isActive, true)));
+    owner = admins[0];
+  }
+  if (!owner) {
+    await recordWebhook(requestId, "error: no owner available");
+    res.status(500).json({ error: "No matching user or active admin found to own the change." });
+    return;
+  }
+
+  // Category: keep 'general' when it is active, otherwise first active category.
+  let category = "general";
+  const cats = await db.select().from(changeCategoriesTable).where(eq(changeCategoriesTable.isActive, true));
+  if (!cats.some((c) => c.key === "general") && cats.length > 0) category = cats[0]!.key;
+
+  const ref = await nextRef("normal");
+  let created: typeof changeRequestsTable.$inferSelect;
+  try {
+    [created] = (await db
+      .insert(changeRequestsTable)
+      .values({
+      ref,
+      title: subject || `SD+ request ${requestId}`,
+      description:
+        (description || "(no description provided by ServiceDesk Plus)") +
+        `\n\n— Created from ServiceDesk Plus request #${requestId}.`,
+      track: "normal",
+      status: "draft",
+      risk: "low",
+      impact: "low",
+      priority: "medium",
+      category,
+      ownerId: owner.id,
+      sdpRequestId: requestId,
+      ticketLink: sdpRequestUrl(cfg, requestId),
+      requesterType: requesterName ? "external" : null,
+      requesterName: requesterName || null,
+      })
+      .returning()) as [typeof changeRequestsTable.$inferSelect];
+  } catch (err) {
+    // Unique-index race: a concurrent webhook for the same SD+ request won
+    // the insert. Return the winner instead of failing.
+    const [winner] = await db
+      .select()
+      .from(changeRequestsTable)
+      .where(and(eq(changeRequestsTable.sdpRequestId, requestId), isNull(changeRequestsTable.deletedAt)));
+    if (winner) {
+      await recordWebhook(requestId, `ok: already linked to ${winner.ref}`);
+      res.json({
+        ok: true,
+        created: false,
+        changeId: winner.id,
+        ref: winner.ref,
+        url: appBaseUrl() ? `${appBaseUrl()}/changes/${winner.id}` : null,
+        message: `A change (${winner.ref}) already exists for SD+ request ${requestId}.`,
+      });
+      return;
+    }
+    throw err;
+  }
+  await db.insert(planningRecordsTable).values({ changeId: created.id }).onConflictDoNothing();
+
+  await audit(req, {
+    action: "integration.sdp_change_created",
+    entityType: "change",
+    entityId: created.id,
+    summary: `${ref}: draft created from ServiceDesk Plus request #${requestId}`,
+    after: { sdpRequestId: requestId, subject, owner: owner.username },
+  }, { id: null, name: "sdp-webhook" });
+  await recordWebhook(requestId, `ok: created ${ref}`);
+
+  // Best-effort back-link note into the SD+ ticket (never blocks the response).
+  void sdpAddBackLinkNote(requestId, created).catch(() => {});
+
+  res.status(201).json({
+    ok: true,
+    created: true,
+    changeId: created.id,
+    ref,
+    url: appBaseUrl() ? `${appBaseUrl()}/changes/${created.id}` : null,
+    message: `Draft change ${ref} created for SD+ request ${requestId}.`,
+  });
+});
+
+export default router;

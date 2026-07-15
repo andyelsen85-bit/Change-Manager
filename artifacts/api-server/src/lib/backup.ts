@@ -41,6 +41,7 @@ const TABLES = [
   "ssl_settings",
   "workflow_timeouts",
   "notification_settings",
+  "sdp_settings",
   "notification_queue",
   "notification_routing_rules",
   "audit_log",
@@ -49,6 +50,7 @@ const TABLES = [
 // Tables that are new in the current backup version. Older backups (v1)
 // don't include these — that's fine, we leave them empty after restore.
 const TABLES_OPTIONAL = new Set<string>([
+  "sdp_settings",
   "change_categories",
   "change_assignees",
   "notification_settings",
