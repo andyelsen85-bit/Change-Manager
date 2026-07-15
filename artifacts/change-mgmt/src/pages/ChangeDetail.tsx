@@ -536,6 +536,13 @@ export function ChangeDetailPage() {
                     )}
                   </div>
                 )}
+                {c.sdpRequestId && (
+                  <div className="text-xs text-muted-foreground" data-testid="text-sdp-request">
+                    ServiceDesk+ request:{" "}
+                    <span className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">#{c.sdpRequestId}</span>
+                    <span className="ml-1 text-[10px] uppercase tracking-wide">auto-resolves on completion</span>
+                  </div>
+                )}
                 {c.ticketLink && (
                   <div className="text-xs text-muted-foreground">
                     Ticket:{" "}

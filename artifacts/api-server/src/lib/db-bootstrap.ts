@@ -77,6 +77,26 @@ CREATE TABLE IF NOT EXISTS discussion_reads (
   last_read_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, change_id)
 );
+
+-- ServiceDesk Plus (on-premises) integration: connection settings + link
+-- column on change_requests. The webhook secret authenticates inbound
+-- "Create Change" calls from SD+ custom triggers.
+CREATE TABLE IF NOT EXISTS sdp_settings (
+  key                      text PRIMARY KEY DEFAULT 'global',
+  enabled                  boolean NOT NULL DEFAULT false,
+  base_url                 text NOT NULL DEFAULT '',
+  technician_key_enc       text,
+  webhook_secret           text NOT NULL DEFAULT '',
+  tls_reject_unauthorized  boolean NOT NULL DEFAULT true,
+  last_webhook_at          timestamptz,
+  last_webhook_request_id  text,
+  last_webhook_status      text
+);
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS sdp_request_id text;
+-- At most ONE active (non-deleted) change per SD+ request — makes the
+-- webhook idempotent even under concurrent replay delivery.
+CREATE UNIQUE INDEX IF NOT EXISTS change_requests_sdp_request_id_active_uq
+  ON change_requests (sdp_request_id) WHERE deleted_at IS NULL AND sdp_request_id IS NOT NULL;
 `;
 
 // Cleanup: per policy update, Technical Reviewer and Business Owner are no longer

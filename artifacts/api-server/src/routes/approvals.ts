@@ -13,6 +13,7 @@ import { requireAuth, getChangeViewAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { notify } from "../lib/email";
 import { resolveRecipients } from "../lib/notification-routing";
+import { sdpSyncTerminalState } from "../lib/sdp";
 
 const router: IRouter = Router();
 
@@ -218,6 +219,21 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
         text: `${change.ref} ${change.title}\n\nYour change has been rejected by ${ap.roleKey.replace(/_/g, " ")}${me?.isDeputy ? " (deputy)" : ""}.\n\nRejection reason:\n${comment}`,
       });
     }
+  }
+  // ServiceDesk Plus write-back: a rejection vote that flipped the change to
+  // "rejected" also rejects the originating SD+ ticket (fire-and-forget).
+  if (change && newStatus === "rejected" && change.sdpRequestId) {
+    void sdpSyncTerminalState(change, "Rejected", typeof comment === "string" ? comment : null).then(
+      async (r) => {
+        await audit(req, {
+          action: r.success ? "integration.sdp_synced" : "integration.sdp_sync_failed",
+          entityType: "change",
+          entityId: change.id,
+          summary: `${change.ref}: SD+ request #${change.sdpRequestId} → Rejected: ${r.message}`,
+          after: r,
+        });
+      },
+    );
   }
   if (change && ap.roleKey === "change_manager" && decision === "approved") {
     const targets = await resolveRecipients("approval.granted", {

@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Sa
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import type { CategoryItem, LdapSettings, LdapTestResult, PentestTestType, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
+import type { CategoryItem, LdapSettings, LdapTestResult, PentestTestType, SdpSettings, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -63,6 +63,7 @@ export function SettingsPage() {
           <TabsTrigger value="notifications" data-testid="tab-notifications">Notifications</TabsTrigger>
           <TabsTrigger value="categories" data-testid="tab-categories">Categories</TabsTrigger>
           <TabsTrigger value="pentest-types" data-testid="tab-pentest-types">PenTest types</TabsTrigger>
+          <TabsTrigger value="sdp" data-testid="tab-sdp">ServiceDesk+</TabsTrigger>
           <TabsTrigger value="backup" data-testid="tab-backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="smtp"><SmtpPanel /></TabsContent>
@@ -72,8 +73,129 @@ export function SettingsPage() {
         <TabsContent value="notifications"><NotificationsBatchPanel /></TabsContent>
         <TabsContent value="categories"><CategoriesPanel /></TabsContent>
         <TabsContent value="pentest-types"><PentestTypesPanel /></TabsContent>
+        <TabsContent value="sdp"><SdpPanel /></TabsContent>
         <TabsContent value="backup"><BackupPanel /></TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function SdpPanel() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["settings.sdp"], queryFn: () => api.get<SdpSettings>("/settings/sdp") });
+  const [form, setForm] = useState<(SdpSettings & { technicianKey: string }) | null>(null);
+  useEffect(() => {
+    if (q.data && !form) setForm({ ...q.data, technicianKey: "" });
+  }, [q.data, form]);
+  const save = useMutation({
+    mutationFn: () => api.put<SdpSettings>("/settings/sdp", form),
+    onSuccess: (row) => {
+      toast.success("ServiceDesk+ settings saved");
+      setForm({ ...row, technicianKey: "" });
+      qc.invalidateQueries({ queryKey: ["settings.sdp"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
+  });
+  const test = useMutation({
+    mutationFn: () => api.post<{ success: boolean; message: string }>("/settings/sdp/test", {}),
+    onSuccess: (r) => (r.success ? toast.success(r.message) : toast.error(r.message)),
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Test failed"),
+  });
+  const rotate = useMutation({
+    mutationFn: () => api.post<SdpSettings>("/settings/sdp/rotate-secret", {}),
+    onSuccess: (row) => {
+      toast.success("Webhook secret rotated — update the SD+ custom trigger");
+      setForm({ ...row, technicianKey: "" });
+      qc.invalidateQueries({ queryKey: ["settings.sdp"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Rotation failed"),
+  });
+  if (!form) return <Skeleton className="mt-4 h-72 w-full" />;
+  const webhookUrl = `${window.location.origin}/api/integrations/sdp/create-change`;
+  const curlExample = `curl -X POST "${webhookUrl}" \\\n  -H "Content-Type: application/json" \\\n  -H "X-Webhook-Secret: ${form.webhookSecret || "<secret>"}" \\\n  -d '{"request_id": "1234", "subject": "Test RFC", "description": "Test from curl", "technician_email": "tech@example.org"}'`;
+  return (
+    <div className="mt-4 space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">ManageEngine ServiceDesk Plus (on-premises)</CardTitle>
+          <CardDescription>
+            A technician opens a change from an RFC ticket via a custom trigger in SD+. When the change completes
+            or is rejected here, the SD+ request is automatically set to Resolved or Rejected with the full change
+            history in the resolution field.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Switch checked={form.enabled} onCheckedChange={(v) => setForm({ ...form, enabled: v })} data-testid="switch-sdp-enabled" />
+            <Label>Integration enabled</Label>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>SD+ base URL</Label>
+              <Input value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} placeholder="https://sdp.chdn.lu:8080" data-testid="input-sdp-baseurl" />
+            </div>
+            <div className="space-y-2">
+              <Label>Technician API key {form.technicianKeySet && <span className="text-xs text-muted-foreground">(saved — leave blank to keep)</span>}</Label>
+              <Input type="password" value={form.technicianKey} onChange={(e) => setForm({ ...form, technicianKey: e.target.value })} placeholder={form.technicianKeySet ? "••••••••" : "Technician key from SD+ admin"} data-testid="input-sdp-key" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch checked={!form.tlsRejectUnauthorized} onCheckedChange={(v) => setForm({ ...form, tlsRejectUnauthorized: !v })} data-testid="switch-sdp-tls" />
+            <div>
+              <Label>Allow self-signed certificate</Label>
+              <p className="text-xs text-muted-foreground">Skip TLS verification for internal SD+ servers with self-signed certificates.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="button-sdp-save">
+              {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save
+            </Button>
+            <Button variant="outline" onClick={() => test.mutate()} disabled={test.isPending} data-testid="button-sdp-test">
+              {test.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}Test connection
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Inbound webhook (SD+ → Change-it)</CardTitle>
+          <CardDescription>
+            Configure a Custom Trigger in SD+ (Admin → Custom Triggers → Requests) with a webhook action calling the
+            URL below, executed manually via a &quot;Create Change&quot; button on the request.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Webhook URL</Label>
+            <div className="flex gap-2">
+              <Input readOnly value={webhookUrl} className="font-mono text-xs" data-testid="input-sdp-webhook-url" />
+              <Button variant="outline" size="icon" onClick={() => { navigator.clipboard.writeText(webhookUrl); toast.success("Copied"); }}><Copy className="h-4 w-4" /></Button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Webhook secret (send as X-Webhook-Secret header)</Label>
+            <div className="flex gap-2">
+              <Input readOnly value={form.webhookSecret || "(save settings once to generate)"} className="font-mono text-xs" data-testid="input-sdp-webhook-secret" />
+              <Button variant="outline" size="icon" onClick={() => { navigator.clipboard.writeText(form.webhookSecret); toast.success("Copied"); }} disabled={!form.webhookSecret}><Copy className="h-4 w-4" /></Button>
+              <Button variant="outline" onClick={() => rotate.mutate()} disabled={rotate.isPending} data-testid="button-sdp-rotate">Rotate</Button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Test from a terminal (any machine that can reach this server)</Label>
+            <Textarea readOnly rows={5} value={curlExample} className="font-mono text-xs" data-testid="text-sdp-curl" />
+          </div>
+          <Alert>
+            <AlertDescription data-testid="text-sdp-last-webhook">
+              {form.lastWebhookAt ? (
+                <>Last webhook received {fmtDateTime(form.lastWebhookAt)} — request #{form.lastWebhookRequestId ?? "?"} — {form.lastWebhookStatus ?? ""}</>
+              ) : (
+                <>No webhook received yet. Expected JSON body: request_id, subject, description, requester_name, technician_email.</>
+              )}
+            </AlertDescription>
+          </Alert>
+          <Button variant="ghost" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["settings.sdp"] }).then(() => setForm(null))} data-testid="button-sdp-refresh">Refresh status</Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

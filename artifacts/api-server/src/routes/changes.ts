@@ -21,6 +21,7 @@ import {
 import { requireAuth, requireAdmin, getChangeAccess, getChangeViewAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
+import { sdpSyncTerminalState } from "../lib/sdp";
 import { notify, getUserEmail, getUserEmails } from "../lib/email";
 import { resolveRecipients } from "../lib/notification-routing";
 import { getAssignedUserIds } from "./assignees";
@@ -700,6 +701,22 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   }
   if (toStatus === "completed") {
     await notifyChangeCompleted(updated);
+  }
+  // ServiceDesk Plus write-back: when a change that originated from an SD+
+  // RFC ticket reaches a terminal state, resolve/reject the ticket with the
+  // milestone history (and rejection note) in the resolution field.
+  // Fire-and-forget — a slow or unreachable SD+ server never blocks the UI.
+  if (updated.sdpRequestId && (toStatus === "completed" || toStatus === "rejected")) {
+    const outcome = toStatus === "completed" ? "Resolved" : "Rejected";
+    void sdpSyncTerminalState(updated, outcome, note ?? null).then(async (r) => {
+      await audit(req, {
+        action: r.success ? "integration.sdp_synced" : "integration.sdp_sync_failed",
+        entityType: "change",
+        entityId: updated.id,
+        summary: `${updated.ref}: SD+ request #${updated.sdpRequestId} → ${outcome}: ${r.message}`,
+        after: r,
+      });
+    });
   }
   res.json(await expandChangeRow(updated));
 });

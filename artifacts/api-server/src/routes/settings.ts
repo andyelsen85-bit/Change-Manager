@@ -1,12 +1,15 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
 import {
   db,
   smtpSettingsTable,
   ldapSettingsTable,
   sslSettingsTable,
   workflowTimeoutsTable,
+  sdpSettingsTable,
 } from "@workspace/db";
+import { testSdpConnection } from "../lib/sdp";
 import { requireAdmin } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { sendTestEmail } from "../lib/email";
@@ -432,6 +435,110 @@ router.post("/settings/notifications/flush", requireAdmin, async (req, res): Pro
     after: r,
   });
   res.json({ ...r, status: await notificationStatus() });
+});
+
+// ─── ServiceDesk Plus (on-premises) integration ─────────────────────────────
+
+function maskSdp(row: typeof sdpSettingsTable.$inferSelect | undefined) {
+  if (!row) {
+    return {
+      enabled: false,
+      baseUrl: "",
+      technicianKeySet: false,
+      webhookSecret: "",
+      tlsRejectUnauthorized: true,
+      lastWebhookAt: null as string | null,
+      lastWebhookRequestId: null as string | null,
+      lastWebhookStatus: null as string | null,
+    };
+  }
+  return {
+    enabled: row.enabled,
+    baseUrl: row.baseUrl,
+    technicianKeySet: !!row.technicianKeyEnc,
+    // The webhook secret is intentionally readable by admins — they must
+    // paste it into the SD+ custom trigger configuration.
+    webhookSecret: row.webhookSecret,
+    tlsRejectUnauthorized: row.tlsRejectUnauthorized,
+    lastWebhookAt: row.lastWebhookAt ? row.lastWebhookAt.toISOString() : null,
+    lastWebhookRequestId: row.lastWebhookRequestId,
+    lastWebhookStatus: row.lastWebhookStatus,
+  };
+}
+
+router.get("/settings/sdp", requireAdmin, async (_req, res): Promise<void> => {
+  const [row] = await db.select().from(sdpSettingsTable).where(eq(sdpSettingsTable.key, KEY));
+  res.json(maskSdp(row));
+});
+
+router.put("/settings/sdp", requireAdmin, async (req, res): Promise<void> => {
+  const b = req.body ?? {};
+  const [before] = await db.select().from(sdpSettingsTable).where(eq(sdpSettingsTable.key, KEY));
+  const values = {
+    key: KEY,
+    enabled: !!b.enabled,
+    baseUrl: typeof b.baseUrl === "string" ? b.baseUrl.trim().replace(/\/+$/, "") : "",
+    technicianKeyEnc:
+      typeof b.technicianKey === "string" && b.technicianKey
+        ? encryptSecret(b.technicianKey)
+        : before?.technicianKeyEnc ?? null,
+    // Generate a webhook secret on first save so the admin never runs with
+    // an empty (insecure) secret.
+    webhookSecret: before?.webhookSecret || randomBytes(24).toString("base64url"),
+    tlsRejectUnauthorized: b.tlsRejectUnauthorized === false ? false : true,
+  };
+  const [row] = await db
+    .insert(sdpSettingsTable)
+    .values(values)
+    .onConflictDoUpdate({ target: sdpSettingsTable.key, set: values })
+    .returning();
+  await audit(req, {
+    action: "settings.sdp_updated",
+    entityType: "settings",
+    entityId: null,
+    summary: `Updated ServiceDesk Plus settings (baseUrl=${row.baseUrl}, enabled=${row.enabled})`,
+    before: before ? { ...maskSdp(before), webhookSecret: "(hidden)" } : null,
+    after: { ...maskSdp(row), webhookSecret: "(hidden)" },
+  });
+  res.json(maskSdp(row));
+});
+
+// Rotate the shared webhook secret. The old secret stops working immediately;
+// the admin must update the SD+ custom trigger with the new value.
+router.post("/settings/sdp/rotate-secret", requireAdmin, async (req, res): Promise<void> => {
+  const [before] = await db.select().from(sdpSettingsTable).where(eq(sdpSettingsTable.key, KEY));
+  const secret = randomBytes(24).toString("base64url");
+  const values = {
+    key: KEY,
+    webhookSecret: secret,
+  };
+  const [row] = await db
+    .insert(sdpSettingsTable)
+    .values(values)
+    .onConflictDoUpdate({ target: sdpSettingsTable.key, set: { webhookSecret: secret } })
+    .returning();
+  await audit(req, {
+    action: "settings.sdp_secret_rotated",
+    entityType: "settings",
+    entityId: null,
+    summary: "ServiceDesk Plus webhook secret rotated",
+    before: { hadSecret: !!before?.webhookSecret },
+  });
+  res.json(maskSdp(row));
+});
+
+// Outbound connectivity test: calls the SD+ REST API with the stored
+// technician key and reports success/failure without touching any ticket.
+router.post("/settings/sdp/test", requireAdmin, async (req, res): Promise<void> => {
+  const r = await testSdpConnection();
+  await audit(req, {
+    action: "settings.sdp_tested",
+    entityType: "settings",
+    entityId: null,
+    summary: `ServiceDesk Plus connection test: ${r.success ? "success" : "failed"} — ${r.message}`,
+    after: r,
+  });
+  res.json(r);
 });
 
 export default router;
