@@ -34,6 +34,10 @@ export const changeRequestsTable = pgTable("change_requests", {
   // Set once the <10-days-left PIR reminder has been emailed so the daily
   // check never sends the same escalation twice for one change.
   pirReminderSentAt: timestamp("pir_reminder_sent_at", { withTimezone: true }),
+  // Soft delete (recycle bin). A non-null deletedAt hides the change from every
+  // list/detail endpoint; admins can restore it or purge it permanently.
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  deletedById: integer("deleted_by_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

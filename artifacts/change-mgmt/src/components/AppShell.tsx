@@ -11,6 +11,7 @@ import {
   ShieldAlert,
   Settings,
   ScrollText,
+  Trash2,
   LogOut,
   Bell,
   Moon,
@@ -56,6 +57,7 @@ const NAV: NavItem[] = [
   { label: "Users", path: "/users", icon: Users, adminOnly: true },
   { label: "Roles", path: "/roles", icon: ShieldCheck, adminOnly: true },
   { label: "Audit Log", path: "/admin/audit-log", icon: ScrollText, adminOnly: true },
+  { label: "Recycle Bin", path: "/admin/recycle-bin", icon: Trash2, adminOnly: true },
   { label: "Settings", path: "/settings", icon: Settings, adminOnly: true },
 ];
 

@@ -17,7 +17,7 @@ router.get("/changes/:id/attachments", requireAuth, async (req, res): Promise<vo
     return;
   }
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!c) {
+  if (!c || c.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }
@@ -50,7 +50,7 @@ router.post("/changes/:id/attachments", requireAuth, async (req, res): Promise<v
     return;
   }
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!c) {
+  if (!c || c.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }
@@ -125,7 +125,7 @@ router.get("/attachments/:id/download", requireAuth, async (req, res): Promise<v
     return;
   }
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, row.changeId));
-  if (!c || !(await getChangeViewAccess(req.session!, c))) {
+  if (!c || c.deletedAt || !(await getChangeViewAccess(req.session!, c))) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -162,7 +162,7 @@ router.delete("/attachments/:id", requireAuth, async (req, res): Promise<void> =
     return;
   }
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, row.changeId));
-  if (!c) {
+  if (!c || c.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }

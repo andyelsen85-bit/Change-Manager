@@ -24,7 +24,7 @@ router.get("/changes/:id/assignees", requireAuth, async (req, res): Promise<void
     return;
   }
   const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!chg) {
+  if (!chg || chg.deletedAt) {
     res.status(404).json({ error: "Not found" });
     return;
   }
@@ -53,7 +53,7 @@ router.put("/changes/:id/assignees", requireAuth, async (req, res): Promise<void
     return;
   }
   const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!chg) {
+  if (!chg || chg.deletedAt) {
     res.status(404).json({ error: "Not found" });
     return;
   }

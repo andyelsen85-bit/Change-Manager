@@ -44,6 +44,7 @@ export async function runPirReminderCheck(): Promise<{ sent: number }> {
         inArray(changeRequestsTable.status, PIR_PENDING_STATUSES),
         isNotNull(changeRequestsTable.actualEnd),
         isNull(changeRequestsTable.pirReminderSentAt),
+        isNull(changeRequestsTable.deletedAt),
       ),
     );
 

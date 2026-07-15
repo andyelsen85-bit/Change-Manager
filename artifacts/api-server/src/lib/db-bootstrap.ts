@@ -64,6 +64,11 @@ INSERT INTO notification_settings (key) VALUES ('global')
 -- so the periodic check emails the Change Manager pool exactly once per change.
 ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS pir_reminder_sent_at timestamptz;
 
+-- Recycle bin: soft-deleted changes keep their row (and history) but carry a
+-- deleted_at stamp; deleted_by_id records the admin who removed it.
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS deleted_by_id integer;
+
 -- Per-user discussion read state. One row per (user, change); last_read_at is
 -- compared against the newest comment timestamp to decide "unread".
 CREATE TABLE IF NOT EXISTS discussion_reads (

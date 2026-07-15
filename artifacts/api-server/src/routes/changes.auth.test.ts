@@ -27,6 +27,10 @@ vi.mock("@workspace/db", () => ({
   rolesTable: { _t: "roles" },
   roleAssignmentsTable: { _t: "role_assignments" },
   cabMeetingsTable: { _t: "cab_meetings" },
+  cabChangesTable: { _t: "cab_changes" },
+  discussionReadsTable: { _t: "discussion_reads" },
+  changeAssigneesTable: { _t: "change_assignees" },
+  attachmentsTable: { _t: "attachments" },
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -36,6 +40,9 @@ vi.mock("drizzle-orm", () => ({
   ilike: () => ({}),
   or: () => ({}),
   sql: () => ({}),
+  isNull: () => ({}),
+  isNotNull: () => ({}),
+  inArray: () => ({}),
 }));
 
 vi.mock("../lib/auth", async () => {
@@ -44,6 +51,21 @@ vi.mock("../lib/auth", async () => {
   return {
     ...actual,
     requireAuth: (req: unknown, _res: unknown, next: () => void) => next(),
+    requireAdmin: (
+      req: { session?: { isAdmin?: boolean } },
+      res: { status: (n: number) => { json: (b: unknown) => void } },
+      next: () => void,
+    ) => {
+      if (!req.session) {
+        res.status(401).json({ error: "Not authenticated" });
+        return;
+      }
+      if (!req.session.isAdmin) {
+        res.status(403).json({ error: "Admin only" });
+        return;
+      }
+      next();
+    },
     getChangeAccess: getChangeAccessMock,
     getChangeViewAccess: getChangeViewAccessMock,
   };
@@ -183,59 +205,84 @@ describe("changes.ts authorization gates", () => {
     });
   });
 
-  describe("DELETE /changes/:id", () => {
-    it("returns 403 for a stranger (no relationship, no governance role)", async () => {
-      dbMock.enqueue("select", [sampleChange]);
-      getChangeAccessMock.mockResolvedValueOnce(null);
-      const app = buildTestApp(changesRouter, STRANGER_SESSION);
-      const res = await request(app).delete("/api/changes/1");
-      expect(res.status).toBe(403);
-      expect(res.body.error).toMatch(/owner|assignee|governance|admin/i);
-    });
-
-    it("allows the owner to delete", async () => {
-      dbMock.enqueue("select", [sampleChange]);
-      dbMock.enqueue("delete", undefined);
-      getChangeAccessMock.mockResolvedValueOnce("owner");
+  describe("DELETE /changes/:id (admin-only soft delete)", () => {
+    it("returns 403 for a non-admin (owner)", async () => {
       const app = buildTestApp(changesRouter, OWNER_SESSION);
       const res = await request(app).delete("/api/changes/1");
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/admin/i);
     });
 
-    it("allows the assignee to delete", async () => {
-      dbMock.enqueue("select", [sampleChange]);
-      dbMock.enqueue("delete", undefined);
-      getChangeAccessMock.mockResolvedValueOnce("assignee");
+    it("returns 403 for a non-admin (assignee)", async () => {
       const app = buildTestApp(changesRouter, ASSIGNEE_SESSION);
       const res = await request(app).delete("/api/changes/1");
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(403);
     });
 
-    it("allows admin to delete", async () => {
-      dbMock.enqueue("select", [sampleChange]);
-      dbMock.enqueue("delete", undefined);
-      getChangeAccessMock.mockResolvedValueOnce("admin");
+    it("returns 403 for a non-admin (change_manager)", async () => {
+      const app = buildTestApp(changesRouter, CHANGE_MANAGER_SESSION);
+      const res = await request(app).delete("/api/changes/1");
+      expect(res.status).toBe(403);
+    });
+
+    it("returns 401 when unauthenticated", async () => {
+      const app = buildTestApp(changesRouter, null);
+      const res = await request(app).delete("/api/changes/1");
+      expect(res.status).toBe(401);
+    });
+
+    it("allows admin to soft-delete (moves to recycle bin)", async () => {
+      dbMock.enqueue("select", [sampleChange]); // before lookup
+      dbMock.enqueue("update", [
+        { ...sampleChange, deletedAt: new Date(), deletedById: 1 },
+      ]); // soft-delete update
       const app = buildTestApp(changesRouter, ADMIN_SESSION);
       const res = await request(app).delete("/api/changes/1");
       expect(res.status).toBe(204);
     });
 
-    it("allows change_manager to delete", async () => {
-      dbMock.enqueue("select", [sampleChange]);
-      dbMock.enqueue("delete", undefined);
-      getChangeAccessMock.mockResolvedValueOnce("change_manager");
-      const app = buildTestApp(changesRouter, CHANGE_MANAGER_SESSION);
+    it("returns 404 when the change is already in the recycle bin", async () => {
+      dbMock.enqueue("select", [
+        { ...sampleChange, deletedAt: new Date(), deletedById: 1 },
+      ]);
+      const app = buildTestApp(changesRouter, ADMIN_SESSION);
       const res = await request(app).delete("/api/changes/1");
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("recycle bin endpoints (admin-only)", () => {
+    it("GET /recycle-bin/changes returns 403 for non-admin", async () => {
+      const app = buildTestApp(changesRouter, OWNER_SESSION);
+      const res = await request(app).get("/api/recycle-bin/changes");
+      expect(res.status).toBe(403);
     });
 
-    it("allows ecab_member to delete (governance role)", async () => {
-      dbMock.enqueue("select", [sampleChange]);
-      dbMock.enqueue("delete", undefined);
-      getChangeAccessMock.mockResolvedValueOnce("ecab_member");
+    it("POST /changes/:id/restore returns 403 for non-admin", async () => {
       const app = buildTestApp(changesRouter, CHANGE_MANAGER_SESSION);
-      const res = await request(app).delete("/api/changes/1");
-      expect(res.status).toBe(204);
+      const res = await request(app).post("/api/changes/1/restore");
+      expect(res.status).toBe(403);
+    });
+
+    it("DELETE /recycle-bin/changes returns 403 for non-admin", async () => {
+      const app = buildTestApp(changesRouter, STRANGER_SESSION);
+      const res = await request(app).delete("/api/recycle-bin/changes");
+      expect(res.status).toBe(403);
+    });
+
+    it("POST /changes/:id/restore returns 400 when change is not deleted", async () => {
+      dbMock.enqueue("select", [sampleChange]); // not soft-deleted
+      const app = buildTestApp(changesRouter, ADMIN_SESSION);
+      const res = await request(app).post("/api/changes/1/restore");
+      expect(res.status).toBe(400);
+    });
+
+    it("DELETE /recycle-bin/changes purges nothing when the bin is empty", async () => {
+      dbMock.enqueue("select", []); // no soft-deleted rows
+      const app = buildTestApp(changesRouter, ADMIN_SESSION);
+      const res = await request(app).delete("/api/recycle-bin/changes");
+      expect(res.status).toBe(200);
+      expect(res.body.purged).toBe(0);
     });
   });
 

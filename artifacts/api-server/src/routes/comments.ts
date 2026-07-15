@@ -15,7 +15,7 @@ router.get("/changes/:id/comments", requireAuth, async (req, res): Promise<void>
     return;
   }
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!c) {
+  if (!c || c.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }
@@ -52,7 +52,7 @@ router.post("/changes/:id/comments", requireAuth, async (req, res): Promise<void
   }
   const session = req.session!;
   const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!chg) {
+  if (!chg || chg.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }

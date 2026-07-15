@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import {
   db,
   changeRequestsTable,
@@ -13,8 +13,12 @@ import {
   rolesTable,
   roleAssignmentsTable,
   cabMeetingsTable,
+  cabChangesTable,
+  discussionReadsTable,
+  changeAssigneesTable,
+  attachmentsTable,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess, getChangeViewAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
+import { requireAuth, requireAdmin, getChangeAccess, getChangeViewAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
 import { notify, getUserEmail, getUserEmails } from "../lib/email";
@@ -153,7 +157,8 @@ router.get("/changes", requireAuth, async (req, res): Promise<void> => {
   const track = typeof req.query["track"] === "string" ? req.query["track"] : null;
   const ownerId = req.query["ownerId"] ? Number(req.query["ownerId"]) : null;
   const search = typeof req.query["search"] === "string" ? req.query["search"] : null;
-  const conds = [];
+  // Soft-deleted changes live in the recycle bin and never appear here.
+  const conds = [isNull(changeRequestsTable.deletedAt)];
   if (status === "active") {
     conds.push(sql`${changeRequestsTable.status} IN (${sql.join(ACTIVE_STATUSES.map((s) => sql`${s}`), sql`, `)})`);
   } else if (status) {
@@ -170,13 +175,11 @@ router.get("/changes", requireAuth, async (req, res): Promise<void> => {
       )!,
     );
   }
-  const rows = conds.length
-    ? await db
-        .select()
-        .from(changeRequestsTable)
-        .where(and(...conds))
-        .orderBy(desc(changeRequestsTable.createdAt))
-    : await db.select().from(changeRequestsTable).orderBy(desc(changeRequestsTable.createdAt));
+  const rows = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(and(...conds))
+    .orderBy(desc(changeRequestsTable.createdAt));
   const dtos = await Promise.all(rows.map(expandChangeRow));
   res.json(dtos);
 });
@@ -297,7 +300,8 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   const [row] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!row) {
+  // Soft-deleted changes are only reachable through the admin recycle bin.
+  if (!row || row.deletedAt) {
     res.status(404).json({ error: "Not found" });
     return;
   }
@@ -363,7 +367,7 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!before) {
+  if (!before || before.deletedAt) {
     res.status(404).json({ error: "Not found" });
     return;
   }
@@ -409,7 +413,64 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(await expandChangeRow(updated));
 });
 
-router.delete("/changes/:id", requireAuth, async (req, res): Promise<void> => {
+// ---------------------------------------------------------------------------
+// RECYCLE BIN — admin-only soft delete, restore, and permanent purge.
+//
+// DELETE /changes/:id           → move a change into the recycle bin (soft delete)
+// GET    /recycle-bin/changes   → list soft-deleted changes
+// POST   /changes/:id/restore   → restore a change from the recycle bin
+// DELETE /recycle-bin/changes   → empty the bin (irreversible hard delete of
+//                                 the changes AND all their dependent records)
+// ---------------------------------------------------------------------------
+
+router.delete("/changes/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!before || before.deletedAt) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const [updated] = await db
+    .update(changeRequestsTable)
+    .set({ deletedAt: new Date(), deletedById: req.session!.uid })
+    .where(eq(changeRequestsTable.id, id))
+    .returning();
+  await audit(req, {
+    action: "change.deleted",
+    entityType: "change",
+    entityId: id,
+    summary: `Moved change ${before.ref} to the recycle bin`,
+    before,
+    after: { deletedAt: updated?.deletedAt ?? null },
+  });
+  res.status(204).end();
+});
+
+router.get("/recycle-bin/changes", requireAdmin, async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(isNotNull(changeRequestsTable.deletedAt))
+    .orderBy(desc(changeRequestsTable.deletedAt));
+  const dtos = await Promise.all(
+    rows.map(async (c) => {
+      const dto = await expandChangeRow(c);
+      let deletedByName: string | null = null;
+      if (c.deletedById != null) {
+        const [u] = await db.select().from(usersTable).where(eq(usersTable.id, c.deletedById));
+        deletedByName = u?.fullName ?? null;
+      }
+      return { ...dto, deletedByName };
+    }),
+  );
+  res.json(dtos);
+});
+
+router.post("/changes/:id/restore", requireAdmin, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -420,24 +481,66 @@ router.delete("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Not found" });
     return;
   }
-  // Per policy, deleting a change is permitted to the same group authorised to
-  // edit / transition it: the owner, the assignee, a governance role (change
-  // manager / eCAB member / CAB chair), or an admin. Other authenticated users
-  // are rejected to prevent IDOR-style mass deletion.
-  const access = await getChangeAccess(req.session!, before);
-  if (!access) {
-    res.status(403).json({ error: "Only the owner, assignee, a governance role holder, or an admin can delete this change." });
+  if (!before.deletedAt) {
+    res.status(400).json({ error: "This change is not in the recycle bin." });
     return;
   }
-  await db.delete(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  // Conditional update guards against a concurrent "empty bin" purge: if the
+  // row was already hard-deleted (or restored) in the meantime, nothing matches.
+  const [restored] = await db
+    .update(changeRequestsTable)
+    .set({ deletedAt: null, deletedById: null })
+    .where(and(eq(changeRequestsTable.id, id), isNotNull(changeRequestsTable.deletedAt)))
+    .returning();
+  if (!restored) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
   await audit(req, {
-    action: "change.deleted",
+    action: "change.restored",
     entityType: "change",
     entityId: id,
-    summary: `Deleted change ${before.ref}`,
-    before,
+    summary: `Restored change ${before.ref} from the recycle bin`,
+    before: { deletedAt: before.deletedAt },
+    after: restored,
   });
-  res.status(204).end();
+  res.json(await expandChangeRow(restored));
+});
+
+router.delete("/recycle-bin/changes", requireAdmin, async (req, res): Promise<void> => {
+  const deleted = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(isNotNull(changeRequestsTable.deletedAt));
+  if (deleted.length === 0) {
+    res.json({ purged: 0 });
+    return;
+  }
+  const ids = deleted.map((c) => c.id);
+  // Hard delete: remove every dependent record so no orphan rows remain. The
+  // audit log is intentionally untouched (append-only trail of what happened).
+  await db.delete(approvalsTable).where(inArray(approvalsTable.changeId, ids));
+  await db.delete(commentsTable).where(inArray(commentsTable.changeId, ids));
+  await db.delete(discussionReadsTable).where(inArray(discussionReadsTable.changeId, ids));
+  await db.delete(changeAssigneesTable).where(inArray(changeAssigneesTable.changeId, ids));
+  await db.delete(attachmentsTable).where(inArray(attachmentsTable.changeId, ids));
+  await db.delete(planningRecordsTable).where(inArray(planningRecordsTable.changeId, ids));
+  await db.delete(testRecordsTable).where(inArray(testRecordsTable.changeId, ids));
+  await db.delete(pirRecordsTable).where(inArray(pirRecordsTable.changeId, ids));
+  await db.delete(cabChangesTable).where(inArray(cabChangesTable.changeId, ids));
+  // Only rows still marked deleted are purged, so a change restored between
+  // the snapshot above and this statement survives.
+  await db
+    .delete(changeRequestsTable)
+    .where(and(inArray(changeRequestsTable.id, ids), isNotNull(changeRequestsTable.deletedAt)));
+  await audit(req, {
+    action: "recycle_bin.emptied",
+    entityType: "change",
+    entityId: 0,
+    summary: `Emptied the recycle bin: permanently deleted ${ids.length} change(s) (${deleted.map((c) => c.ref).join(", ")})`,
+    before: deleted.map((c) => ({ id: c.id, ref: c.ref, title: c.title })),
+  });
+  res.json({ purged: ids.length });
 });
 
 router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<void> => {
@@ -452,7 +555,7 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     return;
   }
   const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!before) {
+  if (!before || before.deletedAt) {
     res.status(404).json({ error: "Not found" });
     return;
   }
@@ -644,7 +747,7 @@ router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> 
     return;
   }
   const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!before) {
+  if (!before || before.deletedAt) {
     res.status(404).json({ error: "Not found" });
     return;
   }

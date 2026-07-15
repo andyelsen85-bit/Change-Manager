@@ -1,3 +1,4 @@
 - [Change access & deputy model](change-access-model.md) — read gate (getChangeViewAccess incl. cab_member) vs write gate (getChangeAccess); deputies==primaries via loadUserRoles ignoring isDeputy; keep isPrivilegedAccess write-only.
 - [API route test mocking](api-route-test-mocking.md) — route tests mock @workspace/db table-by-table; new table/helper imports in a route 500 existing suites until added to every affected test's mock.
+- [Soft-delete visibility gate](soft-delete-visibility.md) — every route that loads a change (incl. subresources & dashboard joins) must 404 on deletedAt; restore/purge use conditional writes on deleted_at for race safety.
 - [Stale TS project references](ts-project-references.md) — after editing lib/db schema, rebuild refs (`pnpm exec tsc -b lib/db --force`) or dependent packages typecheck against old declarations.

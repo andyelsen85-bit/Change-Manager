@@ -21,6 +21,7 @@ import { UsersPage } from "@/pages/Users";
 import { RolesPage } from "@/pages/Roles";
 import { SettingsPage } from "@/pages/Settings";
 import { AuditLogPage } from "@/pages/AuditLog";
+import { RecycleBinPage } from "@/pages/RecycleBin";
 import { NotificationsPage } from "@/pages/Notifications";
 import { ProfilePage } from "@/pages/Profile";
 import { ForbiddenPage } from "@/pages/Forbidden";
@@ -100,6 +101,7 @@ function ProtectedRoutes() {
         <Route path="/roles" component={user.isAdmin ? RolesPage : ForbiddenPage} />
         <Route path="/settings" component={user.isAdmin ? SettingsPage : ForbiddenPage} />
         <Route path="/admin/audit-log" component={user.isAdmin ? AuditLogPage : ForbiddenPage} />
+        <Route path="/admin/recycle-bin" component={user.isAdmin ? RecycleBinPage : ForbiddenPage} />
         <Route path="/audit">{() => <Redirect to="/admin/audit-log" />}</Route>
         <Route path="/notifications" component={NotificationsPage} />
         <Route path="/profile" component={ProfilePage} />
