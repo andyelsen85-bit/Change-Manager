@@ -19,6 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useDiscussionStates, useMarkAllDiscussionsRead } from "@/lib/discussions";
+import { fmtAgo } from "@/lib/format";
 import { useTheme } from "@/lib/theme-context";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -178,11 +180,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
-            <Link href="/notifications">
-              <Button variant="ghost" size="icon" aria-label="Notification preferences" data-testid="button-notifications">
-                <Bell className="h-4 w-4" />
-              </Button>
-            </Link>
+            <DiscussionBell />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -232,6 +230,67 @@ export function AppShell({ children }: { children: ReactNode }) {
         />
       )}
     </div>
+  );
+}
+
+// Header bell: unread-discussion counter with a popup listing each change
+// that has unread messages, linking straight to its Discussion tab.
+function DiscussionBell() {
+  const statesQ = useDiscussionStates();
+  const markAll = useMarkAllDiscussionsRead();
+  const [, setLocation] = useLocation();
+  const unread = (statesQ.data ?? []).filter((s) => s.unread);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" aria-label="Unread discussions" className="relative" data-testid="button-discussion-bell">
+          <Bell className="h-4 w-4" />
+          {unread.length > 0 && (
+            <span
+              className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground"
+              data-testid="badge-discussion-count"
+            >
+              {unread.length > 9 ? "9+" : unread.length}
+            </span>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-80">
+        <DropdownMenuLabel className="flex items-center justify-between">
+          <span>Unread discussions</span>
+          {unread.length > 0 && (
+            <button
+              className="text-xs font-normal text-primary hover:underline"
+              onClick={() => markAll.mutate()}
+              disabled={markAll.isPending}
+              data-testid="button-mark-all-read"
+            >
+              Mark all as read
+            </button>
+          )}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {unread.length === 0 ? (
+          <div className="px-2 py-4 text-center text-sm text-muted-foreground" data-testid="text-no-unread">
+            No unread discussions
+          </div>
+        ) : (
+          unread.map((s) => (
+            <DropdownMenuItem
+              key={s.changeId}
+              className="flex flex-col items-start gap-0.5"
+              onClick={() => setLocation(`/changes/${s.changeId}?tab=comments`)}
+              data-testid={`menuitem-discussion-${s.changeId}`}
+            >
+              <span className="text-sm font-medium">
+                <span className="font-mono text-xs text-muted-foreground">{s.ref}</span> {s.title}
+              </span>
+              <span className="text-xs text-muted-foreground">New message {fmtAgo(s.lastMessageAt)}</span>
+            </DropdownMenuItem>
+          ))
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

@@ -31,6 +31,9 @@ export const changeRequestsTable = pgTable("change_requests", {
   plannedEnd: timestamp("planned_end", { withTimezone: true }),
   actualStart: timestamp("actual_start", { withTimezone: true }),
   actualEnd: timestamp("actual_end", { withTimezone: true }),
+  // Set once the <10-days-left PIR reminder has been emailed so the daily
+  // check never sends the same escalation twice for one change.
+  pirReminderSentAt: timestamp("pir_reminder_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

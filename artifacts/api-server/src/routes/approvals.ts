@@ -195,6 +195,24 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
   // approval — every other approval vote is captured in the audit log but
   // does not generate email. This keeps the notification stream narrow per
   // user request.
+  // Rejections always notify (any approver role): the owner must learn the
+  // outcome and the mandatory rejection reason regardless of who rejected.
+  if (change && decision === "rejected") {
+    const targets = await resolveRecipients("approval.rejected", {
+      changeId: change.id,
+      ownerId: change.ownerId,
+      assigneeId: change.assigneeId,
+      track: change.track,
+    });
+    if (targets.length > 0) {
+      await notify({
+        eventKey: "approval.rejected",
+        to: targets,
+        subject: `[CHG ${change.ref}] Rejected: ${change.title}`,
+        text: `${change.ref} ${change.title}\n\nYour change has been rejected by ${ap.roleKey.replace(/_/g, " ")}${me?.isDeputy ? " (deputy)" : ""}.\n\nRejection reason:\n${comment}`,
+      });
+    }
+  }
   if (change && ap.roleKey === "change_manager" && decision === "approved") {
     const targets = await resolveRecipients("approval.granted", {
       changeId: change.id,

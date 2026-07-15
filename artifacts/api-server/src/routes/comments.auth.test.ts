@@ -32,6 +32,9 @@ vi.mock("../lib/auth", async () => {
 });
 
 vi.mock("../lib/audit", () => ({ audit: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("../lib/notification-routing", () => ({
+  resolveRecipients: vi.fn().mockResolvedValue([]),
+}));
 vi.mock("../lib/email", () => ({
   notify: vi.fn().mockResolvedValue(undefined),
   getUserEmail: vi.fn().mockResolvedValue(null),

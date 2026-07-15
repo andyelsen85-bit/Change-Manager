@@ -12,6 +12,7 @@ import {
   commentsTable,
   rolesTable,
   roleAssignmentsTable,
+  cabMeetingsTable,
 } from "@workspace/db";
 import { requireAuth, getChangeAccess, getChangeViewAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
@@ -76,11 +77,17 @@ async function expandChangeRow(c: typeof changeRequestsTable.$inferSelect) {
     const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, c.templateId));
     templateName = t?.name ?? null;
   }
+  let cabMeetingDate: Date | null = null;
+  if (c.cabMeetingId != null) {
+    const [m] = await db.select().from(cabMeetingsTable).where(eq(cabMeetingsTable.id, c.cabMeetingId));
+    cabMeetingDate = m?.scheduledStart ?? null;
+  }
   return {
     ...c,
     ownerName: owner?.fullName ?? "Unknown",
     assigneeName,
     templateName,
+    cabMeetingDate,
   };
 }
 

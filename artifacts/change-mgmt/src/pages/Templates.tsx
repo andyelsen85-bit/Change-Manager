@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { StandardTemplate } from "@/lib/types";
@@ -37,6 +37,26 @@ export function TemplatesPage() {
   const isAdmin = user?.isAdmin === true;
   const q = useQuery({ queryKey: ["templates"], queryFn: () => api.get<StandardTemplate[]>("/templates") });
   const [editing, setEditing] = useState<StandardTemplate | null>(null);
+  const [search, setSearch] = useState("");
+
+  const needle = search.trim().toLowerCase();
+  const filtered = (q.data ?? []).filter((t) => {
+    if (!needle) return true;
+    const haystack = [
+      t.name,
+      t.description,
+      t.category,
+      t.risk,
+      t.impact,
+      t.defaultPriority,
+      t.prefilledPlanning,
+      t.prefilledTestPlan,
+    ]
+      .filter(Boolean)
+      .join(" \n ")
+      .toLowerCase();
+    return needle.split(/\s+/).every((word) => haystack.includes(word));
+  });
 
   const save = useMutation({
     mutationFn: (t: StandardTemplate) =>
@@ -71,10 +91,25 @@ export function TemplatesPage() {
         )}
       </div>
 
+      <div className="relative max-w-sm">
+        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          className="pl-8"
+          placeholder="Search all template text…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          data-testid="input-template-search"
+        />
+      </div>
+
       <Card>
         <CardContent className="p-0">
           {q.isLoading ? (
             <Skeleton className="h-64 w-full" />
+          ) : filtered.length === 0 ? (
+            <p className="p-6 text-sm text-muted-foreground" data-testid="text-no-templates">
+              {needle ? "No templates match your search." : "No templates yet."}
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -88,7 +123,7 @@ export function TemplatesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(q.data ?? []).map((t) => (
+                {filtered.map((t) => (
                   <TableRow key={t.id} data-testid={`row-template-${t.id}`}>
                     <TableCell>
                       <div className="font-medium">{t.name}</div>
