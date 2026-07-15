@@ -10,6 +10,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import {
@@ -445,6 +455,20 @@ export function ChangeDetailPage() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Revert failed"),
   });
 
+  // Admin-only: move the change into the recycle bin (soft delete). It can be
+  // restored from Settings → Recycle Bin until the bin is emptied.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const deleteChange = useMutation({
+    mutationFn: () => api.delete(`/changes/${id}`),
+    onSuccess: () => {
+      toast.success("Change moved to the recycle bin");
+      qc.invalidateQueries({ queryKey: ["changes"] });
+      qc.invalidateQueries({ queryKey: ["recycle-bin"] });
+      setLocation("/changes");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Delete failed"),
+  });
+
   const c = changeQ.data;
   // Allow deep-linking to a specific tab (e.g. the bell popup links to
   // /changes/:id?tab=comments). Tabs are controlled and re-sync whenever the
@@ -568,6 +592,18 @@ export function ChangeDetailPage() {
                   </a>
                 </Button>
               )}
+              {user?.isAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                  onClick={() => setDeleteOpen(true)}
+                  data-testid="button-delete-change"
+                  title="Move this change to the recycle bin (Admin only). It can be restored later."
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete…
+                </Button>
+              )}
               {canRevert && REVERSIONS_BY_TRACK[c.track][c.status].length > 0 && (
                 <Button
                   variant="outline"
@@ -590,6 +626,31 @@ export function ChangeDetailPage() {
       )}
 
       {c && (
+        <>
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <AlertDialogContent data-testid="dialog-delete-change">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete change {c.ref}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                "{c.title}" will be moved to the recycle bin and disappear from all lists.
+                You can restore it later from the Recycle Bin, or remove it permanently by
+                emptying the bin.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="button-delete-cancel">Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => deleteChange.mutate()}
+                disabled={deleteChange.isPending}
+                data-testid="button-delete-confirm"
+              >
+                Move to recycle bin
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         <Dialog open={revertOpen} onOpenChange={setRevertOpen}>
           <DialogContent data-testid="dialog-revert">
             <DialogHeader>
@@ -643,6 +704,7 @@ export function ChangeDetailPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </>
       )}
 
       {c && (

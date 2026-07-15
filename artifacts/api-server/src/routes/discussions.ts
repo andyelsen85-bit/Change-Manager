@@ -36,7 +36,7 @@ async function loadDiscussionStates(session: NonNullable<Express.Request["sessio
   const out: DiscussionState[] = [];
   for (const l of latest) {
     const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, l.changeId));
-    if (!chg) continue;
+    if (!chg || chg.deletedAt) continue;
     if (!(await getChangeViewAccess(session, chg))) continue;
     const lastReadAt = readByChange.get(l.changeId) ?? null;
     const lastMessage = new Date(l.lastMessageAt);
@@ -75,7 +75,7 @@ router.post("/changes/:id/discussion/read", requireAuth, async (req, res): Promi
     return;
   }
   const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!chg) {
+  if (!chg || chg.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }
@@ -98,7 +98,7 @@ router.post("/changes/:id/discussion/unread", requireAuth, async (req, res): Pro
     return;
   }
   const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!chg) {
+  if (!chg || chg.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }

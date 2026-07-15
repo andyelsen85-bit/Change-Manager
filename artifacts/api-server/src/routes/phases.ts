@@ -30,7 +30,7 @@ async function loadChangeForCaller(
     return null;
   }
   const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!c) {
+  if (!c || c.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return null;
   }

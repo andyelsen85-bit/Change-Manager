@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, or } from "drizzle-orm";
 import {
   db,
   changeRequestsTable,
@@ -79,7 +79,7 @@ router.get("/dashboard/summary", requireAuth, async (req, res): Promise<void> =>
   // change log) and this keeps the in-memory aggregations identical to the
   // unfiltered branch — switching to SQL aggregates would only matter once
   // we hit tens of thousands of changes.
-  const allRaw = await db.select().from(changeRequestsTable);
+  const allRaw = (await db.select().from(changeRequestsTable)).filter((c) => !c.deletedAt);
   const all = range
     ? allRaw.filter((c) => c.createdAt >= range.start && c.createdAt <= range.end)
     : allRaw;
@@ -173,7 +173,13 @@ router.get("/dashboard/my-tasks", requireAuth, async (req, res): Promise<void> =
       })
       .from(approvalsTable)
       .innerJoin(changeRequestsTable, eq(changeRequestsTable.id, approvalsTable.changeId))
-      .where(and(eq(approvalsTable.decision, "pending"), inArray(approvalsTable.roleKey, myRoles)));
+      .where(
+        and(
+          eq(approvalsTable.decision, "pending"),
+          inArray(approvalsTable.roleKey, myRoles),
+          isNull(changeRequestsTable.deletedAt),
+        ),
+      );
     for (const p of pending) {
       tasks.push({
         kind: "approval",
@@ -189,7 +195,12 @@ router.get("/dashboard/my-tasks", requireAuth, async (req, res): Promise<void> =
   const myChanges = await db
     .select()
     .from(changeRequestsTable)
-    .where(or(eq(changeRequestsTable.ownerId, session.uid), eq(changeRequestsTable.assigneeId, session.uid))!);
+    .where(
+      and(
+        or(eq(changeRequestsTable.ownerId, session.uid), eq(changeRequestsTable.assigneeId, session.uid)),
+        isNull(changeRequestsTable.deletedAt),
+      ),
+    );
   for (const c of myChanges) {
     if (c.status === "in_testing" || (c.status === "implemented" && c.track !== "standard")) {
       const [t] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, c.id));

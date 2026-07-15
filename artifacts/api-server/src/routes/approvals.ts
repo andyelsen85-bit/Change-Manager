@@ -23,7 +23,7 @@ router.get("/changes/:id/approvals", requireAuth, async (req, res): Promise<void
     return;
   }
   const [chg] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
-  if (!chg) {
+  if (!chg || chg.deletedAt) {
     res.status(404).json({ error: "Change not found" });
     return;
   }
@@ -73,16 +73,22 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     res.status(404).json({ error: "Approval not found" });
     return;
   }
+  // A vote on a change sitting in the recycle bin must not go through.
+  const [parentChange] = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(eq(changeRequestsTable.id, ap.changeId));
+  if (!parentChange || parentChange.deletedAt) {
+    res.status(404).json({ error: "Change not found" });
+    return;
+  }
   // Post-CAB sign-off gate: only enforced for the Normal track. Normal changes
   // are reviewed at a scheduled CAB meeting and votes are recorded after the
   // meeting has concluded, so we require the linked meeting to be `completed`.
   // Emergency changes vote directly in the Approvals tab without a meeting
   // (that is the entire point of the emergency flow), so they only need to be
   // in `awaiting_approval`. Standard changes carry no approval rows at all.
-  const [chgForGate] = await db
-    .select()
-    .from(changeRequestsTable)
-    .where(eq(changeRequestsTable.id, ap.changeId));
+  const chgForGate = parentChange;
   if (chgForGate && (chgForGate.track === "normal" || chgForGate.track === "emergency")) {
     // Resolve the linked CAB meeting (if any) up-front. For Normal-track
     // changes the meeting must be in_progress|completed before votes count.
