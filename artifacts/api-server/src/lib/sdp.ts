@@ -88,8 +88,28 @@ export async function testSdpConnection(): Promise<{ success: boolean; message: 
       return { success: false, message: `Authentication failed (HTTP ${r.status}). Check the technician API key.` };
     return { success: false, message: `SD+ responded with HTTP ${r.status}: ${r.body.slice(0, 300)}` };
   } catch (err) {
-    return { success: false, message: `Connection failed: ${err instanceof Error ? err.message : String(err)}` };
+    return { success: false, message: `Connection failed: ${describeFetchError(err)}` };
   }
+}
+
+// undici wraps network errors in a generic "fetch failed" TypeError; the
+// actionable detail (DNS, timeout, TLS, refused) lives in err.cause.
+function describeFetchError(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = (err as Error & { cause?: unknown }).cause;
+  const causeMsg =
+    cause instanceof Error
+      ? `${(cause as NodeJS.ErrnoException).code ? `[${(cause as NodeJS.ErrnoException).code}] ` : ""}${cause.message}`
+      : cause
+        ? String(cause)
+        : "";
+  if (err.name === "AbortError") return "Timed out after 15s. The server did not respond — check that it is reachable from the internet.";
+  let msg = causeMsg ? `${err.message} — ${causeMsg}` : err.message;
+  if (/ENOTFOUND/.test(msg)) msg += ". The hostname could not be resolved from Change-it's network — internal-only DNS names are not reachable from here.";
+  else if (/ECONNREFUSED/.test(msg)) msg += ". The server refused the connection — check the port and that the SD+ API is exposed externally.";
+  else if (/ETIMEDOUT|ECONNRESET|UND_ERR_CONNECT_TIMEOUT/.test(msg)) msg += ". No response from the server — likely blocked by a firewall or not reachable from the internet.";
+  else if (/certificate|CERT|self[- ]signed|unable to verify/i.test(msg)) msg += ". TLS certificate problem — if SD+ uses an internal/self-signed certificate, enable the self-signed certificate toggle.";
+  return msg;
 }
 
 // Timeline of the change's lifecycle taken from the audit log — pushed into
