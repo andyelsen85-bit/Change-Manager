@@ -3,6 +3,7 @@ import { logger } from "./lib/logger";
 import { runSeed } from "./seed";
 import { applyDbConstraints } from "./lib/db-bootstrap";
 import { startNotificationWorker } from "./lib/notification-worker";
+import { startPirReminderWorker } from "./lib/pir-reminder";
 
 const rawPort = process.env["PORT"];
 
@@ -40,5 +41,8 @@ applyDbConstraints()
       // (configurable) N minutes so users get one consolidated email
       // instead of one per event.
       startNotificationWorker();
+      // Periodic PIR-deadline check — escalates to the Change Manager pool
+      // when fewer than 10 days remain to complete a PIR.
+      startPirReminderWorker();
     });
   });

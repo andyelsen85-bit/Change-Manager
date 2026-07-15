@@ -59,6 +59,19 @@ CREATE TABLE IF NOT EXISTS notification_settings (
 );
 INSERT INTO notification_settings (key) VALUES ('global')
   ON CONFLICT (key) DO NOTHING;
+
+-- PIR deadline escalation: remember when the <10-days-left reminder was sent
+-- so the periodic check emails the Change Manager pool exactly once per change.
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS pir_reminder_sent_at timestamptz;
+
+-- Per-user discussion read state. One row per (user, change); last_read_at is
+-- compared against the newest comment timestamp to decide "unread".
+CREATE TABLE IF NOT EXISTS discussion_reads (
+  user_id      integer NOT NULL,
+  change_id    integer NOT NULL,
+  last_read_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, change_id)
+);
 `;
 
 // Cleanup: per policy update, Technical Reviewer and Business Owner are no longer

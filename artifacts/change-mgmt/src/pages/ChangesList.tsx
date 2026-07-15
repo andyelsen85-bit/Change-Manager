@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search } from "lucide-react";
+import { CheckCircle2, Plus, Search, StickyNote } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ChangeRequest, ChangeStatus, ChangeTrack } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { RiskScoreBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
 import { fmtDateShort, fmtDateTime } from "@/lib/format";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { PirCountdownBadge } from "@/components/PirCountdownBadge";
+import { useDiscussionStates } from "@/lib/discussions";
 
 const TRACKS: ChangeTrack[] = ["normal", "standard", "emergency"];
 // Active statuses = anything not terminal. Used as the DEFAULT view so
@@ -50,6 +53,12 @@ export function ChangesListPage() {
   const path = qs ? `/changes?${qs}` : "/changes";
 
   const { data, isLoading } = useQuery({ queryKey: [path], queryFn: () => api.get<ChangeRequest[]>(path) });
+  // Post-it indicator: which changes have a discussion, and is it unread?
+  const discussionsQ = useDiscussionStates();
+  const discussionByChange = useMemo(
+    () => new Map((discussionsQ.data ?? []).map((s) => [s.changeId, s])),
+    [discussionsQ.data],
+  );
 
   const trackOptions: ComboboxOption[] = [
     { value: "all", label: "All tracks" },
@@ -134,10 +143,14 @@ export function ChangesListPage() {
                   <TableRow>
                     <TableHead>Ref</TableHead>
                     <TableHead>Title</TableHead>
+                    <TableHead className="w-8 text-center" aria-label="Discussion" />
+
                     <TableHead>Track</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Risk score</TableHead>
                     <TableHead>Owner</TableHead>
+                    <TableHead className="text-center">CAB</TableHead>
+                    <TableHead>PIR</TableHead>
                     <TableHead>Planned start</TableHead>
                     <TableHead>Updated</TableHead>
                   </TableRow>
@@ -154,10 +167,52 @@ export function ChangesListPage() {
                       <TableCell className="max-w-md">
                         <div className="truncate font-medium">{c.title}</div>
                       </TableCell>
+                      <TableCell className="text-center">
+                        {(() => {
+                          const d = discussionByChange.get(c.id);
+                          if (!d) return null;
+                          return (
+                            <TooltipProvider delayDuration={150}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <StickyNote
+                                    className={`inline h-4 w-4 ${d.unread ? "text-amber-500" : "text-muted-foreground/40"}`}
+                                    data-testid={`icon-discussion-${c.id}`}
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {d.unread ? "Unread discussion messages" : "Discussion — all read"}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          );
+                        })()}
+                      </TableCell>
                       <TableCell><TrackBadge track={c.track} /></TableCell>
                       <TableCell><StatusBadge status={c.status} /></TableCell>
                       <TableCell><RiskScoreBadge impact={c.impact} probability={c.risk} /></TableCell>
                       <TableCell className="text-sm">{c.ownerName ?? "—"}</TableCell>
+                      <TableCell className="text-center">
+                        {c.cabMeetingId != null ? (
+                          <TooltipProvider delayDuration={150}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex" data-testid={`icon-cab-planned-${c.id}`}>
+                                  <CheckCircle2 className="h-4 w-4 text-success" />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                CAB meeting: {c.cabMeetingDate ? fmtDateTime(c.cabMeetingDate) : "scheduled"}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        <PirCountdownBadge change={c} data-testid={`badge-pir-${c.id}`} />
+                      </TableCell>
                       <TableCell className="text-sm whitespace-nowrap">{fmtDateShort(c.plannedStart)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                         {fmtDateTime(c.updatedAt)}

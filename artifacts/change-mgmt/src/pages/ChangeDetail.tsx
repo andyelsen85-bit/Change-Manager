@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useRoute } from "wouter";
+import { Link, useLocation, useRoute, useSearch } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Download, Loader2, MessageSquare, Paperclip, Send, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Loader2, MailOpen, MessageSquare, Paperclip, Send, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RiskBadge, RiskScoreBadge, StatusBadge, TrackBadge } from "@/components/StatusBadge";
+import { PirCountdownBadge } from "@/components/PirCountdownBadge";
 import { fmtAgo, fmtDateTime, toLocalDateTimeInput, fromLocalDateTimeInput } from "@/lib/format";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,7 @@ import {
   CATEGORY_HINT,
 } from "@/components/FieldHint";
 import { useAuth } from "@/lib/auth-context";
+import { useMarkDiscussionRead, useMarkDiscussionUnread } from "@/lib/discussions";
 import { RequesterField } from "@/components/RequesterField";
 import { cn } from "@/lib/utils";
 
@@ -444,6 +446,21 @@ export function ChangeDetailPage() {
   });
 
   const c = changeQ.data;
+  // Allow deep-linking to a specific tab (e.g. the bell popup links to
+  // /changes/:id?tab=comments). Tabs are controlled and re-sync whenever the
+  // ?tab= query changes, so bell links work even if the page is already open.
+  const searchString = useSearch();
+  const tabFromUrl = (() => {
+    const t = new URLSearchParams(searchString).get("tab");
+    return t &&
+      ["details", "planning", "approvals", "assignees", "preprod-testing", "testing", "pir", "attachments", "comments"].includes(t)
+      ? t
+      : null;
+  })();
+  const [activeTab, setActiveTab] = useState(tabFromUrl ?? "details");
+  useEffect(() => {
+    if (tabFromUrl) setActiveTab(tabFromUrl);
+  }, [tabFromUrl]);
   // Build a Teams "new meeting" deep-link with eCAB member emails as the
   // attendee list. https://teams.microsoft.com/l/meeting/new?subject=…&attendees=…
   const teamsMeetingUrl = (() => {
@@ -477,6 +494,7 @@ export function ChangeDetailPage() {
                   <TrackBadge track={c.track} />
                   <StatusBadge status={c.status} />
                   <RiskBadge risk={c.risk} />
+                  <PirCountdownBadge change={c} data-testid="badge-pir-detail" />
                 </div>
                 <CardTitle className="text-xl">{c.title}</CardTitle>
                 <p className="max-w-3xl text-sm text-muted-foreground">{c.description || "No description provided."}</p>
@@ -628,7 +646,7 @@ export function ChangeDetailPage() {
       )}
 
       {c && (
-        <Tabs defaultValue="details" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="flex flex-wrap">
             <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
             <TabsTrigger value="planning" data-testid="tab-planning">Planning</TabsTrigger>
@@ -1367,6 +1385,13 @@ function CommentsTab({ id }: { id: number }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["change.comments", id], queryFn: () => api.get<Comment[]>(`/changes/${id}/comments`) });
   const [body, setBody] = useState("");
+  const markRead = useMarkDiscussionRead(id);
+  const markUnread = useMarkDiscussionUnread(id);
+  // Opening the Discussion tab marks the whole thread as read for this user.
+  const markReadMutate = markRead.mutate;
+  useEffect(() => {
+    markReadMutate();
+  }, [markReadMutate]);
   const post = useMutation({
     mutationFn: () => api.post<Comment>(`/changes/${id}/comments`, { body }),
     onSuccess: () => {
@@ -1406,7 +1431,19 @@ function CommentsTab({ id }: { id: number }) {
               <div key={c.id} className="rounded-md border border-border p-3" data-testid={`comment-${c.id}`}>
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-medium">{c.authorName}</div>
-                  <div className="text-xs text-muted-foreground">{fmtAgo(c.createdAt)}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs text-muted-foreground">{fmtAgo(c.createdAt)}</div>
+                    <button
+                      title="Mark as unread from here"
+                      className="text-muted-foreground hover:text-foreground"
+                      onClick={() => {
+                        markUnread.mutate(c.id, { onSuccess: () => toast.success("Marked as unread") });
+                      }}
+                      data-testid={`button-mark-unread-${c.id}`}
+                    >
+                      <MailOpen className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-1 whitespace-pre-wrap text-sm">{c.body}</div>
               </div>

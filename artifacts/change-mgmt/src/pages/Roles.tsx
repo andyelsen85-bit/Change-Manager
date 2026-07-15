@@ -7,7 +7,7 @@ import type { Role, RoleAssignment, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -83,8 +83,11 @@ function RoleCard({
   onRemove: (id: number) => void;
   busy: boolean;
 }) {
-  const [userId, setUserId] = useState<string>("none");
+  const [userId, setUserId] = useState<string>("");
   const [isDeputy, setIsDeputy] = useState(false);
+  const userOptions: ComboboxOption[] = users
+    .filter((u) => u.isActive)
+    .map((u) => ({ value: String(u.id), label: u.fullName, hint: u.email ?? undefined }));
   return (
     <Card data-testid={`role-card-${role.key}`}>
       <CardHeader>
@@ -125,15 +128,15 @@ function RoleCard({
         </div>
         <div className="rounded-md border border-dashed border-border p-3 space-y-2">
           <div className="grid gap-2 md:grid-cols-2">
-            <Select value={userId} onValueChange={setUserId}>
-              <SelectTrigger data-testid={`select-add-user-${role.key}`}><SelectValue placeholder="Choose user" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— Choose user —</SelectItem>
-                {users.filter((u) => u.isActive).map((u) => (
-                  <SelectItem key={u.id} value={String(u.id)}>{u.fullName}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              options={userOptions}
+              value={userId}
+              onChange={setUserId}
+              placeholder="Choose user"
+              searchPlaceholder="Search users…"
+              emptyText="No matching user."
+              data-testid={`select-add-user-${role.key}`}
+            />
             <div className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm">
               <span>Assign as deputy</span>
               <Switch checked={isDeputy} onCheckedChange={setIsDeputy} />
@@ -142,12 +145,12 @@ function RoleCard({
           <Button
             size="sm"
             onClick={() => {
-              if (userId === "none") return;
+              if (!userId) return;
               onAdd(Number(userId), isDeputy);
-              setUserId("none");
+              setUserId("");
               setIsDeputy(false);
             }}
-            disabled={busy || userId === "none"}
+            disabled={busy || !userId}
             data-testid={`button-add-assignment-${role.key}`}
           >
             <UserPlus className="mr-2 h-4 w-4" /> Add assignment

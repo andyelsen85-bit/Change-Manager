@@ -92,6 +92,7 @@ export type ChangeRequest = {
   assigneeName?: string | null;
   templateId: number | null;
   cabMeetingId: number | null;
+  cabMeetingDate?: string | null;
   hasPreprodEnv?: boolean;
   preprodEnvUrl?: string | null;
   ticketLink?: string | null;

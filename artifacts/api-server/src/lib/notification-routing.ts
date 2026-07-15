@@ -18,9 +18,11 @@ export const ROUTABLE_EVENTS = [
   "change.cancelled",
   "change.completed",
   "approval.granted",
+  "approval.rejected",
   "test.signed_off",
   "comment.added",
   "pir.due",
+  "pir.reminder",
   "pentest.requested",
   "pentest.status_changed",
 ] as const;
@@ -64,6 +66,11 @@ export const DEFAULT_ROUTING_RULES: Array<{
 
   { eventKey: "approval.granted", kind: "owner", sortOrder: 10 },
 
+  // Rejections always go to the owner (and assignee, when set) so the
+  // requester learns the outcome and the mandatory rejection reason.
+  { eventKey: "approval.rejected", kind: "owner", sortOrder: 10 },
+  { eventKey: "approval.rejected", kind: "assignee", sortOrder: 20 },
+
   { eventKey: "test.signed_off", kind: "owner", sortOrder: 10 },
 
   { eventKey: "comment.added", kind: "owner", excludeActor: true, sortOrder: 10 },
@@ -71,6 +78,11 @@ export const DEFAULT_ROUTING_RULES: Array<{
 
   { eventKey: "pir.due", kind: "owner", sortOrder: 10 },
   { eventKey: "pir.due", kind: "assignee", sortOrder: 20 },
+
+  // PIR deadline approaching (<10 days left): escalate to the Change Manager
+  // pool — deputies are included because deputy assignments live in the same
+  // role pool (role_assignments.role_key = change_manager).
+  { eventKey: "pir.reminder", kind: "role", roleKey: "change_manager", sortOrder: 10 },
 
   // PenTesting (TopSecret) — defaults preserve the original fixed audience:
   // the request creator, its collaborators, and the pentest_mgmt role pool.
