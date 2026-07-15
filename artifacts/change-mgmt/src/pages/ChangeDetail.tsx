@@ -34,6 +34,7 @@ import {
   type CategoryItem,
   type PirRecord,
   type PlanningRecord,
+  type StandardTemplate,
   type TestRecord,
   type User,
 } from "@/lib/types";
@@ -839,12 +840,22 @@ function AutoTextarea({
 
 // Editable mirror of the creation form. Lets users correct the descriptive
 // fields (title, description, the risk-matrix inputs, category, owner, preprod
-// env) after a change has been created. Track and template are intentionally
-// not editable — they drive the lifecycle graph and approvals.
+// env) after a change has been created. Track is intentionally not editable —
+// it drives the lifecycle graph and approvals. The template CAN be selected
+// here for standard changes still in draft (e.g. drafts created from
+// ServiceDesk Plus without one); it locks once the change leaves draft.
 function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
   const qc = useQueryClient();
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
   const categoriesQ = useQuery({ queryKey: ["categories"], queryFn: () => api.get<CategoryItem[]>("/categories") });
+  // Standard drafts created without a template (e.g. via ServiceDesk Plus)
+  // must have one linked before they can leave draft.
+  const canPickTemplate = change.track === "standard" && change.status === "draft";
+  const templatesQ = useQuery({
+    queryKey: ["templates"],
+    queryFn: () => api.get<StandardTemplate[]>("/templates"),
+    enabled: canPickTemplate,
+  });
 
   const [title, setTitle] = useState(change.title);
   const [description, setDescription] = useState(change.description);
@@ -859,9 +870,14 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
   const [requesterType, setRequesterType] = useState<"internal" | "external">(change.requesterType ?? "internal");
   const [requesterName, setRequesterName] = useState<string>(change.requesterName ?? "");
 
+  const [templateId, setTemplateId] = useState<string>(change.templateId ? String(change.templateId) : "");
+
   const save = useMutation({
     mutationFn: () =>
       api.patch(`/changes/${change.id}`, {
+        ...(canPickTemplate && templateId && Number(templateId) !== (change.templateId ?? -1)
+          ? { templateId: Number(templateId) }
+          : {}),
         title: title.trim(),
         description: description.trim(),
         impact,
@@ -894,7 +910,8 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
     preprodEnvUrl !== (change.preprodEnvUrl ?? "") ||
     (ticketLink.trim() || null) !== (change.ticketLink ?? null) ||
     (requesterName.trim() || null) !== (change.requesterName ?? null) ||
-    (requesterName.trim() ? requesterType : null) !== (change.requesterType ?? null);
+    (requesterName.trim() ? requesterType : null) !== (change.requesterType ?? null) ||
+    (canPickTemplate && !!templateId && Number(templateId) !== (change.templateId ?? -1));
 
   return (
     <TooltipProvider>
@@ -908,6 +925,31 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
             <Label htmlFor="details-description">Description</Label>
             <Textarea id="details-description" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} data-testid="input-details-description" />
           </div>
+
+          {canPickTemplate && (
+            <div
+              className={`space-y-2 rounded-md border p-3 ${change.templateId ? "border-border" : "border-amber-500/60 bg-amber-500/10"}`}
+              data-testid="details-template-panel"
+            >
+              <Label className="flex items-center gap-1.5">Standard template</Label>
+              {!change.templateId && (
+                <p className="text-xs text-muted-foreground">
+                  This standard change has no template yet. Select one and save — the change cannot leave draft without it.
+                </p>
+              )}
+              <Combobox
+                options={(templatesQ.data ?? [])
+                  .filter((t) => t.isActive)
+                  .map((t) => ({ value: String(t.id), label: t.name }))}
+                value={templateId}
+                onChange={setTemplateId}
+                placeholder="Select a template…"
+                searchPlaceholder="Search templates…"
+                emptyText="No active templates found."
+                data-testid="select-details-template"
+              />
+            </div>
+          )}
 
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2">

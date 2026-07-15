@@ -189,7 +189,7 @@ function SdpPanel() {
               {form.lastWebhookAt ? (
                 <>Last webhook received {fmtDateTime(form.lastWebhookAt)} — request #{form.lastWebhookRequestId ?? "?"} — {form.lastWebhookStatus ?? ""}</>
               ) : (
-                <>No webhook received yet. Expected JSON body: request_id, subject, description, requester_name, technician_email, change_type (normal | standard | emergency), template (name, for standard).</>
+                <>No webhook received yet. Expected JSON body: request_id, subject, description, requester_name, technician_email, change_type (normal | standard | emergency), template (optional name for standard — if omitted, the template is chosen in the draft here).</>
               )}
             </AlertDescription>
           </Alert>
