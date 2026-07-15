@@ -150,7 +150,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="absolute inset-x-0 bottom-0 border-t border-sidebar-border p-3 text-xs text-sidebar-foreground/60">
-          <div>v1.0</div>
+          <div>v1.0.1</div>
           <div>{user?.source === "ldap" ? "LDAP-authenticated session" : "Local session"}</div>
         </div>
       </aside>
