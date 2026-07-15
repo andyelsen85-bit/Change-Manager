@@ -61,7 +61,7 @@ const router: IRouter = Router();
 // (handled at vote time via roleAssignmentsTable.isDeputy). Technical and business sign-off
 // is captured in the planning + CAB-meeting records, not as separate approval votes.
 // Emergency changes still require an eCAB member alongside the Change Manager.
-const APPROVER_ROLES_BY_TRACK: Record<string, string[]> = {
+export const APPROVER_ROLES_BY_TRACK: Record<string, string[]> = {
   normal: ["change_manager"],
   // Emergency: the eCAB is the sole approving authority. The Change Manager
   // coordinates the change but does not vote — matching common ITIL practice
@@ -96,7 +96,7 @@ async function expandChangeRow(c: typeof changeRequestsTable.$inferSelect) {
   };
 }
 
-async function createApprovalsForChange(changeId: number, track: string) {
+export async function createApprovalsForChange(changeId: number, track: string) {
   const roleKeys = APPROVER_ROLES_BY_TRACK[track] ?? [];
   for (const roleKey of roleKeys) {
     await db.insert(approvalsTable).values({ changeId, roleKey, decision: "pending" });

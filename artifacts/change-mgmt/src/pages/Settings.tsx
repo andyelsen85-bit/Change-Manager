@@ -112,7 +112,7 @@ function SdpPanel() {
   });
   if (!form) return <Skeleton className="mt-4 h-72 w-full" />;
   const webhookUrl = `${window.location.origin}/api/integrations/sdp/create-change`;
-  const curlExample = `curl -X POST "${webhookUrl}" \\\n  -H "Content-Type: application/json" \\\n  -H "X-Webhook-Secret: ${form.webhookSecret || "<secret>"}" \\\n  -d '{"request_id": "1234", "subject": "Test RFC", "description": "Test from curl", "technician_email": "tech@example.org"}'`;
+  const curlExample = `curl -X POST "${webhookUrl}" \\\n  -H "Content-Type: application/json" \\\n  -H "X-Webhook-Secret: ${form.webhookSecret || "<secret>"}" \\\n  -d '{"request_id": "1234", "subject": "Test RFC", "description": "Test from curl", "technician_email": "tech@example.org", "change_type": "normal"}'`;
   return (
     <div className="mt-4 space-y-4">
       <Card>
@@ -189,7 +189,7 @@ function SdpPanel() {
               {form.lastWebhookAt ? (
                 <>Last webhook received {fmtDateTime(form.lastWebhookAt)} — request #{form.lastWebhookRequestId ?? "?"} — {form.lastWebhookStatus ?? ""}</>
               ) : (
-                <>No webhook received yet. Expected JSON body: request_id, subject, description, requester_name, technician_email.</>
+                <>No webhook received yet. Expected JSON body: request_id, subject, description, requester_name, technician_email, change_type (normal | standard | emergency), template (name, for standard).</>
               )}
             </AlertDescription>
           </Alert>

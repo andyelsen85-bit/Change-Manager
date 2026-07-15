@@ -3,8 +3,8 @@
 // A technician clicks a "Create Change" custom action on an RFC ticket in
 // SD+; the custom trigger fires a webhook to this endpoint. Authentication
 // is a shared secret configured in the Change-it Settings page and sent as
-// the `X-Webhook-Secret` header (or `secret` query parameter for SD+ setups
-// that cannot set custom headers).
+// the `X-Webhook-Secret` header (header-only by design — query parameters
+// would leak the secret into proxy and access logs).
 //
 // The endpoint is idempotent per SD+ request: if an active (non-deleted)
 // change already exists for the request ID, it is returned instead of
@@ -19,7 +19,9 @@ import {
   usersTable,
   sdpSettingsTable,
   changeCategoriesTable,
+  standardTemplatesTable,
 } from "@workspace/db";
+import { createApprovalsForChange } from "./changes";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
 import { getSdpConfig, sdpAddBackLinkNote, sdpRequestUrl, appBaseUrl } from "../lib/sdp";
@@ -67,6 +69,19 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
   const requesterName = str(b.requester_name ?? b.requesterName ?? b.requester);
   const technicianEmail = str(b.technician_email ?? b.technicianEmail).toLowerCase();
   const requesterEmail = str(b.requester_email ?? b.requesterEmail).toLowerCase();
+  const rawType = str(b.change_type ?? b.changeType ?? b.track).toLowerCase();
+  const templateName = str(b.template ?? b.template_name ?? b.templateName);
+
+  // Map the SD+-provided change type onto Change-it tracks. Urgent/urgency
+  // are accepted as aliases for the emergency track.
+  let track: "normal" | "standard" | "emergency" = "normal";
+  if (["emergency", "urgent", "urgency"].includes(rawType)) track = "emergency";
+  else if (rawType === "standard") track = "standard";
+  else if (rawType && rawType !== "normal") {
+    await recordWebhook(str(b.request_id ?? b.requestId ?? b.id) || null, `error: unknown change_type "${rawType}"`);
+    res.status(400).json({ error: `Unknown change_type "${rawType}". Use normal, standard or emergency.` });
+    return;
+  }
 
   if (!requestId) {
     await recordWebhook(null, "error: missing request id");
@@ -124,7 +139,30 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
   const cats = await db.select().from(changeCategoriesTable).where(eq(changeCategoriesTable.isActive, true));
   if (!cats.some((c) => c.key === "general") && cats.length > 0) category = cats[0]!.key;
 
-  const ref = await nextRef("normal");
+  // Standard changes require an active template — the webhook may name one.
+  // If none matches, fall back to a normal change and record why, so nothing
+  // silently bypasses the approval pipeline.
+  let templateId: number | null = null;
+  let trackNote = "";
+  if (track === "standard") {
+    const templates = await db
+      .select()
+      .from(standardTemplatesTable)
+      .where(eq(standardTemplatesTable.isActive, true));
+    const match = templateName
+      ? templates.find((t) => t.name.toLowerCase() === templateName.toLowerCase())
+      : undefined;
+    if (match) {
+      templateId = match.id;
+    } else {
+      track = "normal";
+      trackNote = templateName
+        ? `\n\nNote: requested as a Standard change, but no active template named “${templateName}” exists — created as a Normal change instead.`
+        : `\n\nNote: requested as a Standard change, but no template was specified — created as a Normal change instead.`;
+    }
+  }
+
+  const ref = await nextRef(track);
   let created: typeof changeRequestsTable.$inferSelect;
   try {
     [created] = (await db
@@ -134,8 +172,10 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
       title: subject || `SD+ request ${requestId}`,
       description:
         (description || "(no description provided by ServiceDesk Plus)") +
-        `\n\n— Created from ServiceDesk Plus request #${requestId}.`,
-      track: "normal",
+        `\n\n— Created from ServiceDesk Plus request #${requestId}.` +
+        trackNote,
+      track,
+      templateId,
       status: "draft",
       risk: "low",
       impact: "low",
@@ -150,7 +190,12 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
       .returning()) as [typeof changeRequestsTable.$inferSelect];
   } catch (err) {
     // Unique-index race: a concurrent webhook for the same SD+ request won
-    // the insert. Return the winner instead of failing.
+    // the insert. Return the winner instead of failing. Any other DB error
+    // is rethrown untouched.
+    const pgCode =
+      (err as { code?: string }).code ??
+      ((err as { cause?: { code?: string } }).cause?.code);
+    if (pgCode !== "23505") throw err;
     const [winner] = await db
       .select()
       .from(changeRequestsTable)
@@ -170,13 +215,24 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
     throw err;
   }
   await db.insert(planningRecordsTable).values({ changeId: created.id }).onConflictDoNothing();
+  if (templateId) {
+    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, templateId));
+    if (t?.prefilledPlanning) {
+      await db
+        .update(planningRecordsTable)
+        .set({ implementationPlan: t.prefilledPlanning })
+        .where(eq(planningRecordsTable.changeId, created.id));
+    }
+  }
+  // Same approval scaffolding as changes created in the UI (standard: none).
+  await createApprovalsForChange(created.id, track);
 
   await audit(req, {
     action: "integration.sdp_change_created",
     entityType: "change",
     entityId: created.id,
-    summary: `${ref}: draft created from ServiceDesk Plus request #${requestId}`,
-    after: { sdpRequestId: requestId, subject, owner: owner.username },
+    summary: `${ref}: draft ${track} change created from ServiceDesk Plus request #${requestId}`,
+    after: { sdpRequestId: requestId, subject, owner: owner.username, track },
   }, { id: null, name: "sdp-webhook" });
   await recordWebhook(requestId, `ok: created ${ref}`);
 
@@ -189,7 +245,7 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
     changeId: created.id,
     ref,
     url: appBaseUrl() ? `${appBaseUrl()}/changes/${created.id}` : null,
-    message: `Draft change ${ref} created for SD+ request ${requestId}.`,
+    message: `Draft ${track} change ${ref} created for SD+ request ${requestId}.${trackNote ? " (Standard fallback: see change description.)" : ""}`,
   });
 });
 
