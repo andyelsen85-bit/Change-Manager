@@ -60,14 +60,18 @@ async function sdpFetch(
   }
   // Allow self-signed certificates on internal SD+ servers when the admin
   // explicitly disabled TLS verification (mirrors the SMTP/LDAP toggles).
+  // Always use undici's own fetch so the Agent dispatcher matches the fetch
+  // implementation — mixing the installed undici Agent with Node's built-in
+  // fetch throws UND_ERR_INVALID_ARG (invalid onRequestStart method).
+  const undici = await import("undici");
+  let doFetch: typeof fetch = undici.fetch as unknown as typeof fetch;
   if (!cfg.tlsRejectUnauthorized && url.startsWith("https:")) {
-    const { Agent } = await import("undici");
-    init.dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+    init.dispatcher = new undici.Agent({ connect: { rejectUnauthorized: false } });
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal } as unknown as RequestInit);
+    const res = await doFetch(url, { ...init, signal: controller.signal } as unknown as RequestInit);
     const body = await res.text();
     return { ok: res.ok, status: res.status, body };
   } finally {
