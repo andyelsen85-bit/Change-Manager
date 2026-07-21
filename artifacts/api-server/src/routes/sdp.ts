@@ -30,6 +30,88 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 const KEY = "global";
 
+// SD+ sends rich-text fields (notably the request description) as full HTML
+// documents — inline styles, <table> layouts, email signatures and entity-
+// encoded characters (&nbsp;, &quot;, &#8217;…). Change-it stores plain text,
+// so convert: drop style/script blocks, turn block-level closers and <br>
+// into newlines, strip the remaining tags, decode entities and collapse
+// excess whitespace. Plain-text input passes through untouched.
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ",
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  rsquo: "\u2019",
+  lsquo: "\u2018",
+  rdquo: "\u201d",
+  ldquo: "\u201c",
+  ndash: "\u2013",
+  mdash: "\u2014",
+  hellip: "\u2026",
+  eacute: "é",
+  egrave: "è",
+  ecirc: "ê",
+  agrave: "à",
+  acirc: "â",
+  ccedil: "ç",
+  ocirc: "ô",
+  ucirc: "û",
+  ugrave: "ù",
+  iuml: "ï",
+  euml: "ë",
+  Eacute: "É",
+  Egrave: "È",
+  Agrave: "À",
+  Ccedil: "Ç",
+  uuml: "ü",
+  ouml: "ö",
+  auml: "ä",
+  Uuml: "Ü",
+  Ouml: "Ö",
+  Auml: "Ä",
+  szlig: "ß",
+  euro: "€",
+  copy: "©",
+  reg: "®",
+  trade: "™",
+};
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
+      const cp = parseInt(hex, 16);
+      return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+    })
+    .replace(/&#(\d+);/g, (_, dec: string) => {
+      const cp = parseInt(dec, 10);
+      return Number.isFinite(cp) && cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : "";
+    })
+    .replace(/&([a-zA-Z]+);/g, (m, name: string) => NAMED_ENTITIES[name] ?? m);
+}
+
+export function htmlToPlainText(input: string): string {
+  // Fast path: nothing HTML-ish in the string.
+  if (!/[<&]/.test(input)) return input;
+  let s = input;
+  s = s.replace(/<(style|script|head|title)\b[\s\S]*?<\/\1\s*>/gi, "");
+  s = s.replace(/<!--[\s\S]*?-->/g, "");
+  s = s.replace(/<\s*br\s*\/?\s*>/gi, "\n");
+  s = s.replace(/<\/\s*(p|div|li|tr|h[1-6]|table|ul|ol|blockquote)\s*>/gi, "\n");
+  s = s.replace(/<\s*(td|th)\b[^>]*>/gi, " ");
+  s = s.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  s = decodeHtmlEntities(s);
+  // Collapse whitespace but preserve intentional line breaks.
+  s = s
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t\u00a0]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return s;
+}
+
 function timingSafeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -64,9 +146,9 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
   const b = (req.body ?? {}) as Record<string, unknown>;
   const str = (v: unknown): string => (typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "");
   const requestId = str(b.request_id ?? b.requestId ?? b.id ?? b.woid ?? b.WOID);
-  const subject = str(b.subject ?? b.title);
-  const description = str(b.description);
-  const requesterName = str(b.requester_name ?? b.requesterName ?? b.requester);
+  const subject = htmlToPlainText(str(b.subject ?? b.title));
+  const description = htmlToPlainText(str(b.description));
+  const requesterName = htmlToPlainText(str(b.requester_name ?? b.requesterName ?? b.requester));
   const technicianEmail = str(b.technician_email ?? b.technicianEmail).toLowerCase();
   const requesterEmail = str(b.requester_email ?? b.requesterEmail).toLowerCase();
   const rawType = str(b.change_type ?? b.changeType ?? b.track).toLowerCase();
