@@ -550,7 +550,6 @@ export function ChangeDetailPage() {
                   <PirCountdownBadge change={c} data-testid="badge-pir-detail" />
                 </div>
                 <CardTitle className="text-xl">{c.title}</CardTitle>
-                <p className="max-w-3xl text-sm text-muted-foreground">{c.description || "No description provided."}</p>
               </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="text-xs text-muted-foreground">Creator: {c.ownerName ?? "—"}</div>
@@ -1078,7 +1077,24 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="details-description">Description</Label>
-            <Textarea id="details-description" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} data-testid="input-details-description" />
+            <Textarea
+              id="details-description"
+              rows={4}
+              className="max-h-[60vh] resize-y overflow-y-auto"
+              ref={(el) => {
+                if (!el) return;
+                el.style.height = "auto";
+                el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.6)}px`;
+              }}
+              onInput={(e) => {
+                const el = e.currentTarget;
+                el.style.height = "auto";
+                el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.6)}px`;
+              }}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              data-testid="input-details-description"
+            />
           </div>
 
           {canPickTemplate && (
