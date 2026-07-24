@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useRoute, useSearch } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Download, Loader2, MailOpen, MessageSquare, Paperclip, Send, Trash2, Undo2, Upload, Video, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Loader2, MailOpen, MessageSquare, Paperclip, Repeat, Send, Trash2, Undo2, Upload, Video, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -465,6 +465,25 @@ export function ChangeDetailPage() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Revert failed"),
   });
 
+  // Switch track (Change Manager / Admin only, Draft or Submitted only).
+  // Governance reset: status back to Draft, approvals cleared and re-seeded
+  // for the new track. The ref keeps its original prefix; a note on this page
+  // records the switch.
+  const [trackOpen, setTrackOpen] = useState(false);
+  const [newTrack, setNewTrack] = useState<ChangeTrack | "">("");
+  const changeTrack = useMutation({
+    mutationFn: (payload: { track: ChangeTrack }) => api.post(`/changes/${id}/track`, payload),
+    onSuccess: () => {
+      toast.success("Track changed — change is back in Draft");
+      setTrackOpen(false);
+      setNewTrack("");
+      qc.invalidateQueries({ queryKey: ["change", id] });
+      qc.invalidateQueries({ queryKey: ["change.approvals", id] });
+      qc.invalidateQueries({ queryKey: ["changes"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Track change failed"),
+  });
+
   // Admin-only: move the change into the recycle bin (soft delete). It can be
   // restored from Settings → Recycle Bin until the bin is emptied.
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -580,6 +599,18 @@ export function ChangeDetailPage() {
                 assignees={assigneesQ.data ?? []}
               />
             </div>
+            {c.trackChange && (
+              <div
+                className="mt-4 rounded-md border border-border bg-muted/50 p-3 text-xs text-muted-foreground"
+                data-testid="note-track-changed"
+              >
+                <Repeat className="mr-1.5 inline h-3.5 w-3.5 align-[-2px]" />
+                Track changed from <strong className="capitalize">{c.trackChange.from ?? "?"}</strong> to{" "}
+                <strong className="capitalize">{c.trackChange.to ?? "?"}</strong> on{" "}
+                {new Date(c.trackChange.at).toLocaleString()} by {c.trackChange.by}. The reference{" "}
+                <span className="font-mono">{c.ref}</span> keeps its original prefix.
+              </div>
+            )}
             {(c.status === "cancelled" || c.status === "rejected") && c.closureNote && (
               <div
                 className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm"
@@ -634,6 +665,20 @@ export function ChangeDetailPage() {
                   title="Move this change to the recycle bin (Admin only). It can be restored later."
                 >
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete…
+                </Button>
+              )}
+              {canRevert && (c.status === "draft" || c.status === "submitted") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setNewTrack("");
+                    setTrackOpen(true);
+                  }}
+                  data-testid="button-change-track"
+                  title="Switch this change to a different track (Change Manager / Admin only). Resets the change to Draft and clears approvals."
+                >
+                  <Repeat className="mr-1.5 h-3.5 w-3.5" /> Change track…
                 </Button>
               )}
               {canRevert && REVERSIONS_BY_TRACK[c.track][c.status].length > 0 && (
@@ -723,6 +768,47 @@ export function ChangeDetailPage() {
               >
                 {transition.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {closeTarget === "rejected" ? "Reject change" : "Cancel change"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={trackOpen} onOpenChange={setTrackOpen}>
+          <DialogContent data-testid="dialog-change-track">
+            <DialogHeader>
+              <DialogTitle>Change track of {c.ref}</DialogTitle>
+              <DialogDescription>
+                The change goes back to <strong>Draft</strong> and all approvals are cleared — it will run
+                through the new track's workflow from the start. The reference{" "}
+                <span className="font-mono">{c.ref}</span> keeps its original prefix; the switch is recorded
+                in the audit log and shown as a note on this page.
+                {c.track === "standard" && " The link to the standard template will be removed."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1.5 py-2">
+              <Label htmlFor="new-track">New track</Label>
+              <Combobox
+                options={(["normal", "standard", "emergency"] as ChangeTrack[])
+                  .filter((t) => t !== c.track)
+                  .map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))}
+                value={newTrack}
+                onChange={(v) => setNewTrack(v as ChangeTrack)}
+                placeholder="Choose new track"
+                searchPlaceholder="Search tracks…"
+                data-testid="select-new-track"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setTrackOpen(false)} data-testid="button-track-cancel">
+                Cancel
+              </Button>
+              <Button
+                disabled={!newTrack || changeTrack.isPending}
+                onClick={() => newTrack && changeTrack.mutate({ track: newTrack })}
+                data-testid="button-track-confirm"
+              >
+                {changeTrack.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Change track
               </Button>
             </DialogFooter>
           </DialogContent>

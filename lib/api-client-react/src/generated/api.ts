@@ -25,6 +25,7 @@ import type {
   ChangeDetail,
   ChangePasswordBody,
   ChangeRequest,
+  ChangeTrackBody,
   Comment,
   CreateCabMeetingBody,
   CreateChangeBody,
@@ -1863,6 +1864,87 @@ export const useDeleteChange = <
   TContext
 > => {
   return useMutation(getDeleteChangeMutationOptions(options));
+};
+
+export const getChangeTrackUrl = (id: number) => {
+  return `/api/changes/${id}/track`;
+};
+
+export const changeTrack = async (
+  id: number,
+  changeTrackBody: ChangeTrackBody,
+  options?: RequestInit,
+): Promise<ChangeRequest> => {
+  return customFetch<ChangeRequest>(getChangeTrackUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(changeTrackBody),
+  });
+};
+
+export const getChangeTrackMutationOptions = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof changeTrack>>,
+    TError,
+    { id: number; data: BodyType<ChangeTrackBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof changeTrack>>,
+  TError,
+  { id: number; data: BodyType<ChangeTrackBody> },
+  TContext
+> => {
+  const mutationKey = ["changeTrack"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof changeTrack>>,
+    { id: number; data: BodyType<ChangeTrackBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return changeTrack(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChangeTrackMutationResult = NonNullable<
+  Awaited<ReturnType<typeof changeTrack>>
+>;
+export type ChangeTrackMutationBody = BodyType<ChangeTrackBody>;
+export type ChangeTrackMutationError = ErrorType<Error>;
+
+export const useChangeTrack = <
+  TError = ErrorType<Error>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof changeTrack>>,
+    TError,
+    { id: number; data: BodyType<ChangeTrackBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof changeTrack>>,
+  TError,
+  { id: number; data: BodyType<ChangeTrackBody> },
+  TContext
+> => {
+  return useMutation(getChangeTrackMutationOptions(options));
 };
 
 export const getTransitionChangeUrl = (id: number) => {

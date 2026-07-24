@@ -398,6 +398,14 @@ export const GetChangeResponse = zod
           }),
         )
         .optional(),
+      trackChange: zod
+        .object({
+          from: zod.string().nullish(),
+          to: zod.string().nullish(),
+          at: zod.coerce.date().optional(),
+          by: zod.string().optional(),
+        })
+        .nullish(),
     }),
   );
 
@@ -446,6 +454,40 @@ export const UpdateChangeResponse = zod.object({
 
 export const DeleteChangeParams = zod.object({
   id: zod.coerce.number(),
+});
+
+export const ChangeTrackParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ChangeTrackBody = zod.object({
+  track: zod.enum(["normal", "standard", "emergency"]),
+});
+
+export const ChangeTrackResponse = zod.object({
+  id: zod.number(),
+  ref: zod.string(),
+  title: zod.string(),
+  description: zod.string(),
+  track: zod.enum(["normal", "standard", "emergency"]),
+  status: zod.string(),
+  risk: zod.enum(["low", "medium", "high"]),
+  impact: zod.enum(["low", "medium", "high"]),
+  priority: zod.enum(["low", "medium", "high", "critical"]),
+  category: zod.string(),
+  ownerId: zod.number(),
+  ownerName: zod.string(),
+  assigneeId: zod.number().nullish(),
+  assigneeName: zod.string().nullish(),
+  templateId: zod.number().nullish(),
+  templateName: zod.string().nullish(),
+  plannedStart: zod.coerce.date().nullish(),
+  plannedEnd: zod.coerce.date().nullish(),
+  actualStart: zod.coerce.date().nullish(),
+  actualEnd: zod.coerce.date().nullish(),
+  cabMeetingId: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
 });
 
 export const TransitionChangeParams = zod.object({
