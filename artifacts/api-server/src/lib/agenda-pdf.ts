@@ -274,7 +274,7 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
       ["Priority", titleCase(c.priority)],
       ["Category", titleCase(c.category)],
       ["Requester", c.requesterName || "—"],
-      ["Owner", ownerName || "—"],
+      ["Creator", ownerName || "—"],
       ["Planned start", fmt(c.plannedStart)],
       ["Planned end", fmt(c.plannedEnd)],
       ["Ticket", c.ticketLink || (c.sdpRequestId ? `SD+ #${c.sdpRequestId}` : "—")],

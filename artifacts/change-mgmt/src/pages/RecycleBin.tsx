@@ -102,7 +102,7 @@ export function RecycleBinPage() {
                   <TableHead>Title</TableHead>
                   <TableHead>Track</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Owner</TableHead>
+                  <TableHead>Creator</TableHead>
                   <TableHead>Deleted</TableHead>
                   <TableHead>Deleted by</TableHead>
                   <TableHead className="text-right">Actions</TableHead>

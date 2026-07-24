@@ -102,7 +102,7 @@ export function ChangesListPage() {
             <div className="relative md:col-span-2">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search by ref, title, or owner"
+                placeholder="Search by ref, title, or creator"
                 className="pl-9"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -148,7 +148,7 @@ export function ChangesListPage() {
                     <TableHead>Track</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Risk score</TableHead>
-                    <TableHead>Owner</TableHead>
+                    <TableHead>Creator</TableHead>
                     <TableHead className="text-center">CAB</TableHead>
                     <TableHead>PIR</TableHead>
                     <TableHead>Planned start</TableHead>
