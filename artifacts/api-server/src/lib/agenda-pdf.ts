@@ -10,7 +10,8 @@ import {
 } from "@workspace/db";
 
 // ---------------------------------------------------------------------------
-// CAB agenda PDF — DIN A4, one page per change.
+// CAB agenda PDF — DIN A4, each change starts on a fresh page and its full
+// text flows onto continuation pages as needed (never truncated).
 //
 // Page 1: meeting header (title, kind, schedule, location, free-text agenda)
 //         plus a docket overview table (one line per change).
@@ -82,6 +83,10 @@ function pageHeader(doc: Doc, meetingTitle: string, right: string): void {
     .fontSize(9)
     .text(right, A4_WIDTH - MARGIN - 150, 12, { width: 150, align: "right" });
   doc.restore();
+  // Reset body text styles: pdfkit keeps the header's font/fill color as the
+  // current state, and text that flows onto a new page mid-paragraph would
+  // otherwise continue in the light header color.
+  doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.ink);
   doc.y = 56;
 }
 
@@ -93,9 +98,18 @@ function sectionTitle(doc: Doc, label: string): void {
   doc.y = y + 6;
 }
 
-// Long free-text block, clipped so a single change never spills past its A4
-// page: we stop writing when we reach maxY and append an ellipsis note.
-function textBlock(doc: Doc, value: string, maxY: number): void {
+// Long free-text block: never truncated. pdfkit flows the text onto as many
+// pages as needed (the pageAdded handler repaints the branded header and
+// resets doc.y on every continuation page).
+function textBlock(doc: Doc, value: string): void {
+  const text = (value || "").trim() || "—";
+  doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.ink);
+  doc.text(text, MARGIN, doc.y, { width: CONTENT_W, lineGap: 1.5 });
+}
+
+// Optional clipped variant, used only on the overview page where the docket
+// page references require page 1 content to stay bounded.
+function clippedTextBlock(doc: Doc, value: string, maxY: number): void {
   const text = (value || "").trim() || "—";
   doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.ink);
   const available = maxY - doc.y;
@@ -106,8 +120,6 @@ function textBlock(doc: Doc, value: string, maxY: number): void {
     return;
   }
   doc.text(text, MARGIN, doc.y, { width: CONTENT_W, lineGap: 1.5, height: available - 12, ellipsis: true });
-  doc.font("Helvetica-Oblique").fontSize(8).fillColor(COLORS.muted);
-  doc.text("(truncated — full text in Change-it)", MARGIN, maxY - 10, { width: CONTENT_W });
   doc.y = maxY;
 }
 
@@ -152,10 +164,23 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
   changes.sort((a, b) => riskRank(a.change.risk) - riskRank(b.change.risk));
 
   const kindLabel = m.kind === "ecab" ? "Emergency CAB" : "CAB meeting";
-  const doc = new PDFDocument({ size: "A4", margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN } });
+  // bufferPages lets us go back to page 1 at the end and fill in the real
+  // page number of each change (a change may now span several pages).
+  const doc = new PDFDocument({
+    size: "A4",
+    margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
+    bufferPages: true,
+  });
   const chunks: Buffer[] = [];
   doc.on("data", (c: Buffer) => chunks.push(c));
   const done = new Promise<Buffer>((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
+
+  // Header repainted on every page pdfkit adds automatically while long text
+  // flows past the bottom margin. Content of the header follows this state.
+  const headerState = { title: "", right: "" };
+  doc.on("pageAdded", () => {
+    pageHeader(doc, headerState.title, headerState.right);
+  });
 
   // ---- Page 1: meeting overview -------------------------------------------
   pageHeader(doc, "Change-it — CAB agenda", fmt(m.scheduledStart));
@@ -185,8 +210,13 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
     // Reserve space for the docket header + rows (at least a handful of rows).
     const reservedForDocket = docketHeaderH + Math.min(rowsWanted, 8) * ROW_H;
     const agendaMaxY = Math.max(doc.y + 24, overviewBottom - reservedForDocket);
-    textBlock(doc, agendaText, agendaMaxY);
+    clippedTextBlock(doc, agendaText, agendaMaxY);
   }
+
+  // Docket rows whose "p. N" column is written after all change pages have
+  // been rendered (each entry remembers its row's y position on page 1).
+  const pageRefSlots: Array<{ index: number; y: number }> = [];
+  const changeStartPage: number[] = []; // 1-based page number per change
 
   sectionTitle(doc, `Changes to be discussed (${changes.length})`);
   if (changes.length === 0) {
@@ -202,7 +232,9 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
       doc.text(c.ref, MARGIN + 18, y, { width: 78 });
       doc.font("Helvetica").text(c.title, MARGIN + 100, y, { width: CONTENT_W - 250, height: ROW_H, ellipsis: true });
       doc.fillColor(riskColor(c.risk)).text(`Risk: ${titleCase(c.risk)}`, MARGIN + CONTENT_W - 145, y, { width: 75 });
-      doc.fillColor(COLORS.muted).text(`p. ${i + 2}`, MARGIN + CONTENT_W - 40, y, { width: 40, align: "right" });
+      // Page number filled in later (see pageRefSlots) — a change can now
+      // span multiple pages, so the target page is only known after render.
+      pageRefSlots.push({ index: i, y });
       doc.y = y + ROW_H;
     }
     if (shown < changes.length) {
@@ -224,8 +256,10 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
     const { change: c, ownerName } = changes[i]!;
     const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, c.id));
 
-    doc.addPage();
-    pageHeader(doc, `${m.title} — change ${i + 1} of ${changes.length}`, c.ref);
+    headerState.title = `${m.title} — change ${i + 1} of ${changes.length}`;
+    headerState.right = c.ref;
+    doc.addPage(); // pageAdded handler paints the header
+    changeStartPage.push(doc.bufferedPageRange().count); // 1-based
 
     doc.font("Helvetica-Bold").fontSize(15).fillColor(COLORS.ink).text(`[${c.ref}] ${c.title}`, MARGIN, doc.y, {
       width: CONTENT_W,
@@ -247,39 +281,47 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
       ["Pre-prod env", c.hasPreprodEnv ? "Yes" : "No"],
     ]);
 
-    // Reserve vertical budget per section so everything stays on one A4 page.
+    // Full text, no truncation: each section flows onto continuation pages
+    // as needed; the next change always starts on a fresh page (addPage
+    // above). Keep a section title from being orphaned at the page bottom.
     const bottom = 842 - MARGIN;
-    sectionTitle(doc, "Description");
-    textBlock(doc, c.description, Math.min(doc.y + 150, bottom));
+    const section = (label: string, value: string): void => {
+      if (doc.y > bottom - 60) doc.addPage();
+      sectionTitle(doc, label);
+      textBlock(doc, value);
+    };
 
-    sectionTitle(doc, "Implementation plan");
-    textBlock(doc, planning?.implementationPlan ?? "", Math.min(doc.y + 105, bottom));
-
-    sectionTitle(doc, "Rollback plan");
-    textBlock(doc, planning?.rollbackPlan ?? "", Math.min(doc.y + 85, bottom));
-
-    sectionTitle(doc, "Risk assessment");
-    textBlock(doc, planning?.riskAssessment ?? "", Math.min(doc.y + 70, bottom));
-
-    sectionTitle(doc, "Impacted services");
-    textBlock(doc, planning?.impactedServices ?? "", Math.min(doc.y + 45, bottom));
-
-    sectionTitle(doc, "Success criteria");
-    textBlock(doc, planning?.successCriteria ?? "", bottom - 14);
+    section("Description", c.description);
+    section("Implementation plan", planning?.implementationPlan ?? "");
+    section("Rollback plan", planning?.rollbackPlan ?? "");
+    section("Risk assessment", planning?.riskAssessment ?? "");
+    section("Impacted services", planning?.impactedServices ?? "");
+    section("Success criteria", planning?.successCriteria ?? "");
 
     if (planning?.signedOff) {
+      if (doc.y > bottom - 24) doc.addPage();
+      doc.moveDown(0.8);
       doc
         .font("Helvetica-Oblique")
         .fontSize(8)
         .fillColor(COLORS.muted)
-        // lineBreak:false + fixed y keeps this single footnote line from ever
-        // overflowing the bottom margin and spawning a stray extra page.
         .text(
           `Planning signed off${planning.signedOffBy ? ` by ${planning.signedOffBy}` : ""}${planning.signedOffAt ? ` on ${fmt(planning.signedOffAt)}` : ""}`,
           MARGIN,
-          bottom - 8,
-          { lineBreak: false },
+          doc.y,
+          { width: CONTENT_W },
         );
+    }
+  }
+
+  // ---- Back-fill the docket page references on page 1 ----------------------
+  if (pageRefSlots.length > 0) {
+    doc.switchToPage(0);
+    doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.muted);
+    for (const slot of pageRefSlots) {
+      const page = changeStartPage[slot.index];
+      if (page == null) continue;
+      doc.text(`p. ${page}`, MARGIN + CONTENT_W - 40, slot.y, { width: 40, align: "right", lineBreak: false });
     }
   }
 
