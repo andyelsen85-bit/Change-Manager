@@ -12,7 +12,6 @@ import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Combobox } from "@/components/ui/combobox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fmtDateTime, fromLocalDateTimeInput, toLocalDateTimeInput } from "@/lib/format";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -28,7 +27,6 @@ export function CabDetailPage() {
     queryFn: () => api.get<CabMeetingDetail>(`/cab-meetings/${id}`),
     enabled: Number.isFinite(id),
   });
-  const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
   // Only changes that are in `awaiting_approval` are eligible for docketing —
   // they're the ones waiting on a CAB review. Already-docketed changes on
   // this meeting are merged in below so they remain visible even if their
@@ -46,7 +44,6 @@ export function CabDetailPage() {
     status: string;
     scheduledStart: string;
     scheduledEnd: string;
-    chairUserId: string;
     changeIds: number[];
   } | null>(null);
 
@@ -61,7 +58,6 @@ export function CabDetailPage() {
         status: m.status,
         scheduledStart: toLocalDateTimeInput(m.scheduledStart),
         scheduledEnd: toLocalDateTimeInput(m.scheduledEnd),
-        chairUserId: m.chairUserId == null ? "none" : String(m.chairUserId),
         changeIds: m.changes.map((c) => c.id),
       });
     }
@@ -77,7 +73,6 @@ export function CabDetailPage() {
         status: form!.status,
         scheduledStart: fromLocalDateTimeInput(form!.scheduledStart),
         scheduledEnd: fromLocalDateTimeInput(form!.scheduledEnd),
-        chairUserId: form!.chairUserId === "none" ? null : Number(form!.chairUserId),
         changeIds: form!.changeIds,
       }),
     onSuccess: () => {
@@ -226,20 +221,6 @@ export function CabDetailPage() {
           <div className="space-y-2">
             <Label>Location</Label>
             <Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
-          </div>
-          <div className="space-y-2">
-            <Label>Chair</Label>
-            <Combobox
-              options={[
-                { value: "none", label: "No chair" },
-                ...(usersQ.data ?? []).map((u) => ({ value: String(u.id), label: u.fullName, hint: u.email ?? undefined })),
-              ]}
-              value={form.chairUserId}
-              onChange={(v) => setForm({ ...form, chairUserId: v })}
-              placeholder="No chair"
-              searchPlaceholder="Search users…"
-              data-testid="select-cab-chair"
-            />
           </div>
           <div className="space-y-2">
             <Label>Agenda</Label>

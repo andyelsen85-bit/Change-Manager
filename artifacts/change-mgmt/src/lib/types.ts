@@ -212,8 +212,6 @@ export type CabMeeting = {
 export type CabMeetingDetail = CabMeeting & {
   agenda: string;
   minutes: string;
-  chairUserId: number | null;
-  chairName: string | null;
   members: CabMember[];
   changes: { id: number; ref: string; title: string; track: ChangeTrack; status: ChangeStatus; risk: string }[];
 };

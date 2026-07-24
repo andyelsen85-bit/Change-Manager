@@ -14,7 +14,6 @@ import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Combobox } from "@/components/ui/combobox";
 import { fmtDateTime, fromLocalDateTimeInput, toLocalDateTimeInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -147,7 +146,6 @@ export function CabCalendarPage() {
 function NewCabDialog({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [, setLocation] = useLocation();
-  const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
   const changesQ = useQuery({
     queryKey: ["changes.cab-eligible"],
     queryFn: () => api.get<ChangeRequest[]>("/changes?status=awaiting_approval"),
@@ -169,7 +167,6 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
   const [durationMinutes, setDurationMinutes] = useState<number>(60);
   const [location, setMeetingLocation] = useState("");
   const [agenda, setAgenda] = useState("");
-  const [chairUserId, setChairUserId] = useState<string>("none");
   const [changeIds, setChangeIds] = useState<number[]>([]);
   const [recurring, setRecurring] = useState(false);
   const [recurrenceIntervalWeeks, setRecurrenceIntervalWeeks] = useState<number>(1);
@@ -187,8 +184,10 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
         durationMinutes,
         location,
         agenda,
-        chairUserId: chairUserId === "none" ? null : Number(chairUserId),
         changeIds,
+        // Creator's IANA timezone so recurring occurrences keep the same
+        // wall-clock time across summer/winter time changes.
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         recurring,
         recurrenceIntervalWeeks: recurring ? recurrenceIntervalWeeks : undefined,
         recurrenceUntil: recurring ? recurrenceUntil : undefined,
@@ -295,21 +294,6 @@ function NewCabDialog({ onClose }: { onClose: () => void }) {
         <div className="space-y-2">
           <Label>Agenda</Label>
           <Textarea rows={3} value={agenda} onChange={(e) => setAgenda(e.target.value)} />
-        </div>
-        <div className="space-y-2">
-          <Label>Chair</Label>
-          <Combobox
-            options={[
-              { value: "none", label: "No chair" },
-              ...(usersQ.data ?? []).map((u) => ({ value: String(u.id), label: u.fullName, hint: u.username })),
-            ]}
-            value={chairUserId}
-            onChange={setChairUserId}
-            placeholder="No chair"
-            searchPlaceholder="Search users…"
-            emptyText="No users found."
-            data-testid="select-cab-chair"
-          />
         </div>
         <div className="space-y-2">
           <Label>Changes on agenda ({changeIds.length})</Label>

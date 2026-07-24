@@ -670,10 +670,6 @@ export interface CabMeeting {
   scheduledEnd: string;
   location: string;
   agenda: string;
-  /** @nullable */
-  chairUserId?: number | null;
-  /** @nullable */
-  chairUserName?: string | null;
   status: CabMeetingStatus;
   createdAt: string;
 }
@@ -709,8 +705,11 @@ export interface CreateCabMeetingBody {
   scheduledEnd: string;
   location: string;
   agenda: string;
-  /** @nullable */
-  chairUserId?: number | null;
+  /** Creator's IANA timezone; recurring occurrences keep the same wall-clock time in this zone across DST changes. */
+  timeZone?: string;
+  recurring?: boolean;
+  recurrenceIntervalWeeks?: number;
+  recurrenceUntil?: string;
   memberUserIds: number[];
   changeIds: number[];
 }
@@ -731,8 +730,6 @@ export interface UpdateCabMeetingBody {
   scheduledEnd?: string;
   location?: string;
   agenda?: string;
-  /** @nullable */
-  chairUserId?: number | null;
   status?: UpdateCabMeetingBodyStatus;
   memberUserIds?: number[];
   changeIds?: number[];
