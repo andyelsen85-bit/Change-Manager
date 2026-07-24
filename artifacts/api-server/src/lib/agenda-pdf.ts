@@ -144,8 +144,12 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
     .innerJoin(changeRequestsTable, eq(changeRequestsTable.id, cabChangesTable.changeId))
     .leftJoin(usersTable, eq(usersTable.id, changeRequestsTable.ownerId))
     .where(eq(cabChangesTable.meetingId, meetingId))
-    // Same deterministic order as the agenda email.
     .orderBy(asc(changeRequestsTable.plannedStart), asc(changeRequestsTable.ref));
+
+  // Docket order: high risk first, then medium, then low; within the same
+  // risk level keep the planned-start/ref ordering from the query above.
+  const riskRank = (r: string): number => (r === "high" ? 0 : r === "medium" ? 1 : 2);
+  changes.sort((a, b) => riskRank(a.change.risk) - riskRank(b.change.risk));
 
   const kindLabel = m.kind === "ecab" ? "Emergency CAB" : "CAB meeting";
   const doc = new PDFDocument({ size: "A4", margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN } });
@@ -166,26 +170,48 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
       { width: CONTENT_W },
     );
 
+  // The overview must stay exactly ONE page: every change page reference is
+  // "p. i+2", which only holds while page 1 never overflows. So the agenda
+  // free-text is height-budgeted (leaving room for the docket rows) and the
+  // docket list itself is clipped with a "+ N more" line if it cannot fit.
+  const overviewBottom = 800 - MARGIN - 14; // keep clear of the footer line
+  const ROW_H = 15;
+  const docketHeaderH = 30; // sectionTitle for the docket list
+  const rowsWanted = Math.max(changes.length, 1);
+
   sectionTitle(doc, "Agenda");
-  doc
-    .font("Helvetica")
-    .fontSize(9.5)
-    .fillColor(COLORS.ink)
-    .text((m.agenda || "").trim() || "(none)", MARGIN, doc.y, { width: CONTENT_W, lineGap: 1.5 });
+  {
+    const agendaText = (m.agenda || "").trim() || "(none)";
+    // Reserve space for the docket header + rows (at least a handful of rows).
+    const reservedForDocket = docketHeaderH + Math.min(rowsWanted, 8) * ROW_H;
+    const agendaMaxY = Math.max(doc.y + 24, overviewBottom - reservedForDocket);
+    textBlock(doc, agendaText, agendaMaxY);
+  }
 
   sectionTitle(doc, `Changes to be discussed (${changes.length})`);
   if (changes.length === 0) {
     doc.font("Helvetica-Oblique").fontSize(9.5).fillColor(COLORS.muted).text("No changes on the agenda.", MARGIN, doc.y);
   } else {
-    changes.forEach(({ change: c }, i) => {
+    // Rows that fit on the remaining space, keeping one row for "+ N more".
+    const fit = Math.max(1, Math.floor((overviewBottom - doc.y) / ROW_H));
+    const shown = changes.length <= fit ? changes.length : fit - 1;
+    for (let i = 0; i < shown; i++) {
+      const c = changes[i]!.change;
       const y = doc.y;
       doc.font("Helvetica-Bold").fontSize(9.5).fillColor(COLORS.ink).text(`${i + 1}.`, MARGIN, y, { width: 18 });
       doc.text(c.ref, MARGIN + 18, y, { width: 78 });
-      doc.font("Helvetica").text(c.title, MARGIN + 100, y, { width: CONTENT_W - 250, ellipsis: true });
+      doc.font("Helvetica").text(c.title, MARGIN + 100, y, { width: CONTENT_W - 250, height: ROW_H, ellipsis: true });
       doc.fillColor(riskColor(c.risk)).text(`Risk: ${titleCase(c.risk)}`, MARGIN + CONTENT_W - 145, y, { width: 75 });
       doc.fillColor(COLORS.muted).text(`p. ${i + 2}`, MARGIN + CONTENT_W - 40, y, { width: 40, align: "right" });
-      doc.y = y + 15;
-    });
+      doc.y = y + ROW_H;
+    }
+    if (shown < changes.length) {
+      doc
+        .font("Helvetica-Oblique")
+        .fontSize(9)
+        .fillColor(COLORS.muted)
+        .text(`… and ${changes.length - shown} more — see the following pages.`, MARGIN, doc.y, { width: CONTENT_W });
+    }
   }
   doc
     .font("Helvetica-Oblique")
