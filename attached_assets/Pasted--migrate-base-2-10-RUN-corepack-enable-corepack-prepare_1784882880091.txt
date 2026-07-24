@@ -1,0 +1,70 @@
+ => [migrate base  2/10] RUN corepack enable && corepack prepare pnpm@10.26.1 --activate                                                                                                    1.2s
+ => CACHED [api api 2/5] WORKDIR /app                                                                                                                                                       0.0s
+ => [web web 2/6] RUN apk add --no-cache openssl postgresql16-client                                                                                                                        1.3s
+ => [web base  3/10] WORKDIR /repo                                                                                                                                                          0.0s
+ => [migrate base  4/10] COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc* ./                                                                                                    0.0s
+ => [api base  5/10] COPY artifacts/api-server/package.json artifacts/api-server/package.json                                                                                               0.0s
+ => [migrate base  6/10] COPY artifacts/change-mgmt/package.json artifacts/change-mgmt/package.json                                                                                         0.0s
+ => [api base  7/10] COPY lib/db/package.json lib/db/package.json                                                                                                                           0.0s
+ => [web base  8/10] COPY lib/api-zod/package.json lib/api-zod/package.json                                                                                                                 0.0s
+ => [web base  9/10] COPY lib/api-spec/package.json lib/api-spec/package.json                                                                                                               0.0s
+ => [web web 3/6] COPY docker/nginx.conf /etc/nginx/nginx.conf                                                                                                                              0.0s
+ => ERROR [web base 10/10] RUN --mount=type=cache,id=pnpm,target=/pnpm/store     pnpm install --frozen-lockfile --ignore-scripts                                                            3.4s
+ => [web web 4/6] COPY docker/entrypoint-web.sh /entrypoint-web.sh                                                                                                                          0.0s
+ => [web web 5/6] RUN chmod +x /entrypoint-web.sh                                                                                                                                           0.2s
+------
+ > [web base 10/10] RUN --mount=type=cache,id=pnpm,target=/pnpm/store     pnpm install --frozen-lockfile --ignore-scripts:
+0.592 Scope: all 6 workspace projects
+0.656 Lockfile is up to date, resolution step is skipped
+0.689 Progress: resolved 1, reused 0, downloaded 0, added 0
+0.733 Packages: +601
+0.733 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+0.987
+0.987    ╭───────────────────────────────────────────────╮
+0.987    │                                               │
+0.987    │     Update available! 10.26.1 → 11.17.0.      │
+0.987    │     Changelog: https://pnpm.io/v/11.17.0      │
+0.987    │   To update, run: corepack use pnpm@11.17.0   │
+0.987    │                                               │
+0.987    ╰───────────────────────────────────────────────╯
+0.987
+1.689 Progress: resolved 601, reused 0, downloaded 280, added 279
+2.659  WARN  GET https://registry.npmjs.org/date-fns/-/date-fns-3.6.0.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+2.664  WARN  GET https://registry.npmjs.org/date-fns/-/date-fns-4.1.0.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+2.689 Progress: resolved 601, reused 0, downloaded 450, added 412
+2.942  WARN  GET https://registry.npmjs.org/typedoc/-/typedoc-0.28.17.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+2.945  WARN  GET https://registry.npmjs.org/entities/-/entities-4.5.0.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+2.946  WARN  GET https://registry.npmjs.org/lucide-react/-/lucide-react-0.545.0.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+2.946  WARN  GET https://registry.npmjs.org/@babel/runtime/-/runtime-7.28.6.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+2.970  WARN  GET https://registry.npmjs.org/react-icons/-/react-icons-5.6.0.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.018  WARN  GET https://registry.npmjs.org/@shikijs/langs/-/langs-3.23.0.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.037  WARN  GET https://registry.npmjs.org/@orval/solid-start/-/solid-start-8.5.3.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.046  WARN  GET https://registry.npmjs.org/@scalar/openapi-parser/-/openapi-parser-0.24.17.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.046  WARN  GET https://registry.npmjs.org/@orval/mcp/-/mcp-8.5.3.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.048  WARN  GET https://registry.npmjs.org/@scalar/helpers/-/helpers-0.2.18.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.068  WARN  GET https://registry.npmjs.org/@orval/zod/-/zod-8.5.3.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.113  WARN  GET https://registry.npmjs.org/@scalar/openapi-upgrader/-/openapi-upgrader-0.1.11.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.116  WARN  GET https://registry.npmjs.org/@gerrit0/mini-shiki/-/mini-shiki-3.23.0.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.133  WARN  GET https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.137  WARN  GET https://registry.npmjs.org/@scalar/openapi-types/-/openapi-types-0.5.4.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.146  WARN  GET https://registry.npmjs.org/remeda/-/remeda-2.33.6.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.176  WARN  GET https://registry.npmjs.org/@orval/fetch/-/fetch-8.5.3.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.227  WARN  GET https://registry.npmjs.org/@orval/query/-/query-8.5.3.tgz error (ERR_PNPM_ENOSPC). Will retry in 10 seconds. 2 retries left.
+3.314  ERR_PNPM_ENOSPC  ENOSPC: no space left on device, copyfile '/pnpm/store/v10/files/4f/dab8783129678911005da0fe0a4348bba88274464fb805f46a66d22be2374d192161280a69a760d3741e16b74f3a25c7b867545fa32dcae949ba1df13cf81d' -> '/repo/node_modules/.pnpm/victory-vendor@36.9.2/node_modules/victory-vendor_tmp_7/lib-vendor/d3-interpolate/src/value.js'
+------
+Dockerfile:26
+
+--------------------
+
+  25 |
+
+  26 | >>> RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
+
+  27 | >>>     pnpm install --frozen-lockfile --ignore-scripts
+
+  28 |
+
+--------------------
+
+target api: failed to solve: process "/bin/sh -c pnpm install --frozen-lockfile --ignore-scripts" did not complete successfully: exit code: 1
+
