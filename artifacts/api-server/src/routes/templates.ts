@@ -1,7 +1,11 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, standardTemplatesTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../lib/auth";
+import { requireAuth, requireRole } from "../lib/auth";
+
+// Template management is a governance duty: admins always pass (requireRole
+// bypass) and Change Managers get the same edit/add/delete rights.
+const requireTemplateManager = requireRole(["change_manager"]);
 import { audit } from "../lib/audit";
 
 const router: IRouter = Router();
@@ -11,7 +15,7 @@ router.get("/templates", requireAuth, async (_req, res): Promise<void> => {
   res.json(rows);
 });
 
-router.post("/templates", requireAdmin, async (req, res): Promise<void> => {
+router.post("/templates", requireTemplateManager, async (req, res): Promise<void> => {
   const b = req.body ?? {};
   if (!b.name) {
     res.status(400).json({ error: "name required" });
@@ -61,7 +65,7 @@ router.get("/templates/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(row);
 });
 
-router.patch("/templates/:id", requireAdmin, async (req, res): Promise<void> => {
+router.patch("/templates/:id", requireTemplateManager, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });
@@ -110,7 +114,7 @@ router.patch("/templates/:id", requireAdmin, async (req, res): Promise<void> => 
   res.json(updated);
 });
 
-router.delete("/templates/:id", requireAdmin, async (req, res): Promise<void> => {
+router.delete("/templates/:id", requireTemplateManager, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
     res.status(400).json({ error: "Invalid id" });

@@ -34,7 +34,8 @@ const EMPTY: StandardTemplate = {
 export function TemplatesPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
-  const isAdmin = user?.isAdmin === true;
+  // Admins and Change Managers can manage templates (matches the API gate).
+  const isAdmin = user?.isAdmin === true || (user?.roles ?? []).includes("change_manager");
   const q = useQuery({ queryKey: ["templates"], queryFn: () => api.get<StandardTemplate[]>("/templates") });
   const [editing, setEditing] = useState<StandardTemplate | null>(null);
   const [search, setSearch] = useState("");
