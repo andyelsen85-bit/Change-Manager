@@ -25,15 +25,19 @@ import {
 // never diverge.
 // ---------------------------------------------------------------------------
 
+// Change-it (CHdN) brand palette — mirrors artifacts/change-mgmt/src/index.css:
+// olive green #96B423 primary, brown #966E3C accent / dark-brown sidebar,
+// ochre #C8963C warning, espresso ink and warm sand-tinted lines.
 const COLORS = {
-  ink: "#1a2433",
-  muted: "#5b6875",
-  line: "#d7dde3",
-  headerBg: "#0f2a43",
-  headerFg: "#ffffff",
-  badgeHigh: "#b3261e",
-  badgeMedium: "#9a6a00",
-  badgeLow: "#1b6e3c",
+  ink: "#262019", // espresso foreground (hsl 30 25% 12%)
+  muted: "#6D6155", // muted foreground (hsl 30 12% 38%)
+  line: "#E4DDD3", // warm sand border (hsl 35 25% 86%)
+  headerBg: "#503C20", // dark brand brown, same as the app sidebar
+  headerFg: "#F7F4EC", // warm off-white sidebar foreground
+  accent: "#96B423", // CHdN olive green — accent rule under the header
+  badgeHigh: "#D93025", // destructive red
+  badgeMedium: "#C8963C", // CHdN ochre (warning)
+  badgeLow: "#79901E", // darker brand green (success)
 };
 
 const MARGIN = 50; // pt — comfortable A4 margin
@@ -66,6 +70,8 @@ type Doc = InstanceType<typeof PDFDocument>;
 function pageHeader(doc: Doc, meetingTitle: string, right: string): void {
   doc.save();
   doc.rect(0, 0, A4_WIDTH, 34).fill(COLORS.headerBg);
+  // Brand green accent rule under the brown band — echoes the app's logo wave.
+  doc.rect(0, 34, A4_WIDTH, 2.5).fill(COLORS.accent);
   doc
     .fillColor(COLORS.headerFg)
     .font("Helvetica-Bold")
