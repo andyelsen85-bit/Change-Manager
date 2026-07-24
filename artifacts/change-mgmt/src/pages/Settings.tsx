@@ -1243,8 +1243,8 @@ const PENTEST_ROUTABLE_EVENTS = new Set(["pentest.requested", "pentest.status_ch
 const isPentestEvent = (evt: string) => PENTEST_ROUTABLE_EVENTS.has(evt);
 
 const CHANGE_KIND_OPTIONS: Array<{ value: RoutingRule["kind"]; label: string; needsRole: boolean }> = [
-  { value: "owner", label: "Change owner", needsRole: false },
-  { value: "assignee", label: "Change assignee", needsRole: false },
+  { value: "owner", label: "Change creator", needsRole: false },
+  { value: "assignee", label: "Change owner", needsRole: false },
   { value: "role", label: "Role pool", needsRole: true },
   { value: "per_change_role", label: "Per-change role (with role-pool fallback)", needsRole: true },
 ];
@@ -1552,7 +1552,7 @@ function NotificationRoutingEditor() {
           </li>
           <li>
             <span className="font-mono">cab.invited / cab.reminder / cab.minutes</span> — sent to the standing
-            CAB or eCAB roster of the meeting, plus owners of changes on the agenda. Inherent to the meeting.
+            CAB or eCAB roster of the meeting, plus creators of changes on the agenda. Inherent to the meeting.
           </li>
         </ul>
         <div className="mt-2">

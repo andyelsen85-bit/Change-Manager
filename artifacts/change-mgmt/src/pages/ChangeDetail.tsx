@@ -553,8 +553,8 @@ export function ChangeDetailPage() {
                 <p className="max-w-3xl text-sm text-muted-foreground">{c.description || "No description provided."}</p>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <div className="text-xs text-muted-foreground">Owner: {c.ownerName ?? "—"}</div>
-                <div className="text-xs text-muted-foreground">Assignee: {c.assigneeName ?? "Unassigned"}</div>
+                <div className="text-xs text-muted-foreground">Creator: {c.ownerName ?? "—"}</div>
+                <div className="text-xs text-muted-foreground">Owner: {c.assigneeName ?? "Unassigned"}</div>
                 {c.requesterName && (
                   <div className="text-xs text-muted-foreground">
                     Requester: {c.requesterName}
