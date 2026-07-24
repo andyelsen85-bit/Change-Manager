@@ -291,6 +291,7 @@ export type ChangeAccessReason =
   | "admin"
   | GovernanceRole
   | ChangeViewerRole
+  | "authenticated"
   | null;
 
 export async function getChangeAccess(
@@ -324,7 +325,12 @@ export async function getChangeViewAccess(
   for (const role of CHANGE_VIEWER_ROLES) {
     if (userRoles.includes(role)) return role;
   }
-  return null;
+  // Change visibility is org-wide by design: every authenticated user can
+  // READ every change (list + detail + subresources). Write endpoints keep
+  // using getChangeAccess, so this never grants edit/transition rights.
+  // NOTE: pentest records have their own, stricter need-to-know gate — this
+  // fallback only applies to change requests.
+  return "authenticated";
 }
 
 // Returns true when the access reason represents a privileged caller — admin

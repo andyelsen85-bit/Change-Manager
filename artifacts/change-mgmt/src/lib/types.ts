@@ -97,6 +97,7 @@ export type ChangeRequest = {
   preprodEnvUrl?: string | null;
   ticketLink?: string | null;
   sdpRequestId?: string | null;
+  closureNote?: string | null;
   requesterType?: "internal" | "external" | null;
   requesterName?: string | null;
   plannedStart: string | null;
