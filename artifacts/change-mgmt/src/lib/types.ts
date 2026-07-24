@@ -110,6 +110,9 @@ export type ChangeRequest = {
 
 export type ChangeDetail = ChangeRequest & {
   template?: StandardTemplate | null;
+  // Most recent track switch (if any). The ref keeps its original prefix, so
+  // the detail page shows this note instead.
+  trackChange?: { from: ChangeTrack | null; to: ChangeTrack | null; at: string; by: string } | null;
 };
 
 // Directory (LDAP) search hit returned by GET /users/ldap-search. Used by the

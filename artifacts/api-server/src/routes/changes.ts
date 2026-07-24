@@ -17,6 +17,7 @@ import {
   discussionReadsTable,
   changeAssigneesTable,
   attachmentsTable,
+  auditLogTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin, getChangeAccess, getChangeViewAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
@@ -347,8 +348,31 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(usersTable, eq(usersTable.id, commentsTable.authorId))
     .where(eq(commentsTable.changeId, id))
     .orderBy(desc(commentsTable.createdAt));
+  // Most recent track switch (if any) — surfaced as a note on the detail page
+  // since the ref keeps its original prefix after a switch.
+  const [trackAudit] = await db
+    .select()
+    .from(auditLogTable)
+    .where(
+      and(
+        eq(auditLogTable.action, "change.track_changed"),
+        eq(auditLogTable.entityType, "change"),
+        eq(auditLogTable.entityId, id),
+      ),
+    )
+    .orderBy(desc(auditLogTable.timestamp))
+    .limit(1);
+  const trackChange = trackAudit
+    ? {
+        from: (trackAudit.before as { track?: string } | null)?.track ?? null,
+        to: (trackAudit.after as { track?: string } | null)?.track ?? null,
+        at: trackAudit.timestamp,
+        by: trackAudit.actorName,
+      }
+    : null;
   res.json({
     ...dto,
+    trackChange,
     planning: planning ?? { changeId: id, scope: "", implementationPlan: "", rollbackPlan: "", riskAssessment: "", impactedServices: "", communicationsPlan: "", successCriteria: "", signedOff: false },
     testing: testing ?? { changeId: id, testPlan: "", environment: "", overallResult: "pending", notes: "", cases: [] },
     pir: pir ?? { changeId: id, outcome: "successful", objectivesMet: "", issuesEncountered: "", lessonsLearned: "", followupActions: "" },
@@ -452,6 +476,100 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     entityType: "change",
     entityId: id,
     summary: `Updated change ${before.ref}`,
+    before,
+    after: updated,
+  });
+  res.json(await expandChangeRow(updated));
+});
+
+// POST /changes/:id/track — switch a change between tracks (normal / standard /
+// emergency). Admin or Change Manager only. Governance reset by design:
+//   * status goes back to draft (the old status may not exist in the new track)
+//   * all approval rows are cleared and re-seeded for the new track
+//   * template link is detached when leaving the standard track
+//   * any CAB docket entries are removed (a draft has no business on an agenda)
+//   * the ref keeps its original prefix — it is a permanent identifier; the
+//     detail page surfaces the switch via the audit log instead.
+// Only allowed from draft or submitted: later in the lifecycle the collected
+// approvals/testing evidence would be governed by the wrong track's rules.
+router.post("/changes/:id/track", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const session = req.session!;
+  const userRoles = session.isAdmin ? [] : await loadUserRoles(session.uid);
+  if (!session.isAdmin && !userRoles.includes("change_manager")) {
+    res.status(403).json({ error: "Only an admin or the Change Manager can switch a change's track." });
+    return;
+  }
+  const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!before || before.deletedAt) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  const newTrack = req.body?.track as ChangeTrack | undefined;
+  if (newTrack !== "normal" && newTrack !== "standard" && newTrack !== "emergency") {
+    res.status(400).json({ error: "track must be one of: normal, standard, emergency." });
+    return;
+  }
+  if (newTrack === before.track) {
+    res.status(400).json({ error: `Change is already on the ${newTrack} track.` });
+    return;
+  }
+  if (before.status !== "draft" && before.status !== "submitted") {
+    res.status(409).json({
+      error: "The track can only be switched while the change is in Draft or Submitted.",
+    });
+    return;
+  }
+
+  const updates: Partial<typeof changeRequestsTable.$inferInsert> = {
+    track: newTrack,
+    status: "draft",
+    updatedAt: new Date(),
+  };
+  // Leaving the standard track: the template no longer applies.
+  if (before.track === "standard") updates.templateId = null;
+  // A draft has no business sitting on a CAB agenda.
+  updates.cabMeetingId = null;
+
+  // Transactional + guarded: the UPDATE itself re-checks status/deletedAt so a
+  // concurrent transition (or delete) between our read and this write cannot
+  // slip a track switch past the draft/submitted rule; approvals are cleared
+  // and re-seeded in the same transaction so they always match the new track.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(changeRequestsTable)
+      .set(updates)
+      .where(
+        and(
+          eq(changeRequestsTable.id, id),
+          inArray(changeRequestsTable.status, ["draft", "submitted"]),
+          isNull(changeRequestsTable.deletedAt),
+        ),
+      )
+      .returning();
+    if (!row) return null;
+    await tx.delete(cabChangesTable).where(eq(cabChangesTable.changeId, id));
+    // Approvals are governance artifacts of the old track — clear and re-seed.
+    await tx.delete(approvalsTable).where(eq(approvalsTable.changeId, id));
+    for (const roleKey of APPROVER_ROLES_BY_TRACK[newTrack] ?? []) {
+      await tx.insert(approvalsTable).values({ changeId: id, roleKey, decision: "pending" });
+    }
+    return row;
+  });
+  if (!updated) {
+    res.status(409).json({ error: "The change moved out of Draft/Submitted — track not switched." });
+    return;
+  }
+
+  await audit(req, {
+    action: "change.track_changed",
+    entityType: "change",
+    entityId: id,
+    summary: `Track changed from ${before.track} to ${newTrack} on ${before.ref}; status reset to draft, approvals cleared`,
     before,
     after: updated,
   });

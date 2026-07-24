@@ -320,6 +320,21 @@ paths:
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
         "204": { description: Deleted }
+  /changes/{id}/track:
+    post:
+      operationId: changeTrack
+      tags: [changes]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/ChangeTrackBody" } } }
+      responses:
+        "200":
+          description: Track switched; change reset to draft, approvals cleared
+          content: { application/json: { schema: { $ref: "#/components/schemas/ChangeRequest" } } }
+        "400": { description: Invalid track, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "409": { description: Change is past Draft/Submitted, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   /changes/{id}/transition:
     post:
       operationId: transitionChange
@@ -983,6 +998,13 @@ components:
             comments:
               type: array
               items: { $ref: "#/components/schemas/Comment" }
+            trackChange:
+              type: ["object", "null"]
+              properties:
+                from: { type: ["string", "null"] }
+                to: { type: ["string", "null"] }
+                at: { type: string, format: date-time }
+                by: { type: string }
 
     CreateChangeBody:
       type: object
@@ -1020,6 +1042,12 @@ components:
         toStatus: { type: string }
         note: { type: ["string", "null"] }
       required: [toStatus]
+
+    ChangeTrackBody:
+      type: object
+      properties:
+        track: { type: string, enum: [normal, standard, emergency] }
+      required: [track]
 
     RevertBody:
       type: object

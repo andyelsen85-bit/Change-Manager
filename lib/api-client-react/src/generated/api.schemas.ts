@@ -211,6 +211,18 @@ export interface ChangeRequest {
   updatedAt: string;
 }
 
+/**
+ * @nullable
+ */
+export type ChangeDetailTrackChange = {
+  /** @nullable */
+  from?: string | null;
+  /** @nullable */
+  to?: string | null;
+  at?: string;
+  by?: string;
+} | null;
+
 export interface PlanningRecord {
   changeId: number;
   scope: string;
@@ -332,6 +344,8 @@ export type ChangeDetail = ChangeRequest & {
   pir?: PirRecord;
   approvals?: Approval[];
   comments?: Comment[];
+  /** @nullable */
+  trackChange?: ChangeDetailTrackChange;
 };
 
 export type CreateChangeBodyTrack =
@@ -438,6 +452,19 @@ export interface TransitionBody {
   toStatus: string;
   /** @nullable */
   note?: string | null;
+}
+
+export type ChangeTrackBodyTrack =
+  (typeof ChangeTrackBodyTrack)[keyof typeof ChangeTrackBodyTrack];
+
+export const ChangeTrackBodyTrack = {
+  normal: "normal",
+  standard: "standard",
+  emergency: "emergency",
+} as const;
+
+export interface ChangeTrackBody {
+  track: ChangeTrackBodyTrack;
 }
 
 export interface RevertBody {
