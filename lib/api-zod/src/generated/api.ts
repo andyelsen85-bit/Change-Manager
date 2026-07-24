@@ -815,8 +815,6 @@ export const ListCabMeetingsResponseItem = zod.object({
   scheduledEnd: zod.coerce.date(),
   location: zod.string(),
   agenda: zod.string(),
-  chairUserId: zod.number().nullish(),
-  chairUserName: zod.string().nullish(),
   status: zod.enum(["scheduled", "in_progress", "completed", "cancelled"]),
   createdAt: zod.coerce.date(),
 });
@@ -829,7 +827,15 @@ export const CreateCabMeetingBody = zod.object({
   scheduledEnd: zod.coerce.date(),
   location: zod.string(),
   agenda: zod.string(),
-  chairUserId: zod.number().nullish(),
+  timeZone: zod
+    .string()
+    .optional()
+    .describe(
+      "Creator's IANA timezone; recurring occurrences keep the same wall-clock time in this zone across DST changes.",
+    ),
+  recurring: zod.boolean().optional(),
+  recurrenceIntervalWeeks: zod.number().optional(),
+  recurrenceUntil: zod.coerce.date().optional(),
   memberUserIds: zod.array(zod.number()),
   changeIds: zod.array(zod.number()),
 });
@@ -847,8 +853,6 @@ export const GetCabMeetingResponse = zod
     scheduledEnd: zod.coerce.date(),
     location: zod.string(),
     agenda: zod.string(),
-    chairUserId: zod.number().nullish(),
-    chairUserName: zod.string().nullish(),
     status: zod.enum(["scheduled", "in_progress", "completed", "cancelled"]),
     createdAt: zod.coerce.date(),
   })
@@ -909,7 +913,6 @@ export const UpdateCabMeetingBody = zod.object({
   scheduledEnd: zod.coerce.date().optional(),
   location: zod.string().optional(),
   agenda: zod.string().optional(),
-  chairUserId: zod.number().nullish(),
   status: zod
     .enum(["scheduled", "in_progress", "completed", "cancelled"])
     .optional(),
@@ -926,8 +929,6 @@ export const UpdateCabMeetingResponse = zod.object({
   scheduledEnd: zod.coerce.date(),
   location: zod.string(),
   agenda: zod.string(),
-  chairUserId: zod.number().nullish(),
-  chairUserName: zod.string().nullish(),
   status: zod.enum(["scheduled", "in_progress", "completed", "cancelled"]),
   createdAt: zod.coerce.date(),
 });
@@ -1024,8 +1025,6 @@ export const GetUpcomingCabResponseItem = zod.object({
   scheduledEnd: zod.coerce.date(),
   location: zod.string(),
   agenda: zod.string(),
-  chairUserId: zod.number().nullish(),
-  chairUserName: zod.string().nullish(),
   status: zod.enum(["scheduled", "in_progress", "completed", "cancelled"]),
   createdAt: zod.coerce.date(),
 });

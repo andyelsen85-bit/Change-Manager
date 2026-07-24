@@ -122,14 +122,8 @@ async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
     .from(cabChangesTable)
     .innerJoin(changeRequestsTable, eq(changeRequestsTable.id, cabChangesTable.changeId))
     .where(eq(cabChangesTable.meetingId, m.id));
-  let chairName: string | null = null;
-  if (m.chairUserId != null) {
-    const [c] = await db.select().from(usersTable).where(eq(usersTable.id, m.chairUserId));
-    chairName = c?.fullName ?? null;
-  }
   return {
     ...m,
-    chairName,
     members: memberRows.map((r) => ({
       ...r,
       userName: r.userName ?? "Unknown",
@@ -137,6 +131,43 @@ async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
     })),
     changes: changeRows,
   };
+}
+
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// UTC offset (in ms) that `timeZone` has at instant `d`. Positive east of
+// UTC (e.g. Europe/Luxembourg is +3600000 in winter, +7200000 in summer).
+function tzOffsetMs(d: Date, timeZone: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(d)
+      .map((p) => [p.type, p.value]),
+  ) as Record<string, string>;
+  const asUtc = Date.UTC(
+    Number(parts["year"]),
+    Number(parts["month"]) - 1,
+    Number(parts["day"]),
+    Number(parts["hour"]) % 24,
+    Number(parts["minute"]),
+    Number(parts["second"]),
+  );
+  return asUtc - d.getTime();
 }
 
 router.get("/cab-meetings", requireAuth, async (req, res): Promise<void> => {
@@ -213,15 +244,47 @@ router.post("/cab-meetings", requireCabManager, async (req, res): Promise<void> 
       return;
     }
   }
+  // The creator's IANA timezone (sent by the frontend). Recurring
+  // occurrences must keep the same *wall-clock* time in that zone across
+  // DST transitions — a naive "+N weeks in milliseconds" drifts by ±1 hour
+  // when summer/winter time flips between two occurrences. An unknown zone
+  // is rejected rather than silently ignored (silent fallback would
+  // reintroduce the drift without any signal to the user).
+  let timeZone: string | null = null;
+  if (typeof b.timeZone === "string" && b.timeZone) {
+    if (!isValidTimeZone(b.timeZone)) {
+      res.status(400).json({ error: `Unknown timeZone "${b.timeZone}"` });
+      return;
+    }
+    timeZone = b.timeZone;
+  }
   // Build occurrence start dates: first occurrence then +N weeks while
   // <= recurrenceUntil. Cap at 200 to keep an honest mistake from blowing up.
   const starts: Date[] = [firstStart];
   if (recurring && recurrenceUntil) {
-    const untilMs = recurrenceUntil.getTime() + 24 * 60 * 60_000 - 1; // inclusive end-of-day
-    let next = new Date(firstStart.getTime() + intervalWeeks * 7 * 24 * 60 * 60_000);
-    while (next.getTime() <= untilMs && starts.length < 200) {
+    // Inclusive cutoff: end of the recurrenceUntil day in the creator's
+    // timezone (falling back to UTC), so an occurrence late on the "until"
+    // day in a negative-offset zone is not dropped by a UTC-day comparison.
+    const untilEndOfDayOffset = timeZone ? tzOffsetMs(recurrenceUntil, timeZone) : 0;
+    const untilMs = recurrenceUntil.getTime() + 24 * 60 * 60_000 - 1 - untilEndOfDayOffset;
+    const stepMs = intervalWeeks * 7 * 24 * 60 * 60_000;
+    // Step through an UNADJUSTED base sequence (first + k*step) and apply
+    // the DST correction to each candidate independently — adjusting
+    // relative to the previous (already corrected) occurrence would apply
+    // the offset delta twice once the timezone has switched.
+    let base = firstStart;
+    while (starts.length < 200) {
+      base = new Date(base.getTime() + stepMs);
+      let next = base;
+      if (timeZone) {
+        // Preserve wall-clock time: shift by the UTC-offset delta between
+        // the first occurrence and the candidate (e.g. CEST 14:00 stays
+        // 14:00 CET after the October switch).
+        const delta = tzOffsetMs(firstStart, timeZone) - tzOffsetMs(base, timeZone);
+        if (delta !== 0) next = new Date(base.getTime() + delta);
+      }
+      if (next.getTime() > untilMs) break;
       starts.push(next);
-      next = new Date(next.getTime() + intervalWeeks * 7 * 24 * 60 * 60_000);
     }
   }
   const groupId = recurring ? randomUUID() : null;
@@ -237,7 +300,6 @@ router.post("/cab-meetings", requireCabManager, async (req, res): Promise<void> 
         scheduledEnd: computeEnd(s),
         location: b.location ?? "",
         agenda: b.agenda ?? "",
-        chairUserId: typeof b.chairUserId === "number" ? b.chairUserId : null,
         recurrenceIntervalWeeks: recurring ? intervalWeeks : null,
         recurrenceUntil: recurring && recurrenceUntil
           ? recurrenceUntil.toISOString().slice(0, 10)
@@ -311,8 +373,6 @@ router.patch("/cab-meetings/:id", requireCabManager, async (req, res): Promise<v
   if (typeof b.status === "string") updates.status = b.status;
   if (b.scheduledStart) updates.scheduledStart = new Date(b.scheduledStart);
   if (b.scheduledEnd) updates.scheduledEnd = new Date(b.scheduledEnd);
-  if (typeof b.chairUserId === "number") updates.chairUserId = b.chairUserId;
-  if (b.chairUserId === null) updates.chairUserId = null;
   const [updated] = await db.update(cabMeetingsTable).set(updates).where(eq(cabMeetingsTable.id, id)).returning();
   if (Array.isArray(b.memberIds)) {
     await db.delete(cabMembersTable).where(eq(cabMembersTable.meetingId, id));

@@ -1197,8 +1197,6 @@ components:
         scheduledEnd: { type: string, format: date-time }
         location: { type: string }
         agenda: { type: string }
-        chairUserId: { type: ["integer", "null"] }
-        chairUserName: { type: ["string", "null"] }
         status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
         createdAt: { type: string, format: date-time }
       required: [id, title, kind, scheduledStart, scheduledEnd, location, agenda, status, createdAt]
@@ -1236,7 +1234,12 @@ components:
         scheduledEnd: { type: string, format: date-time }
         location: { type: string }
         agenda: { type: string }
-        chairUserId: { type: ["integer", "null"] }
+        timeZone:
+          type: string
+          description: Creator's IANA timezone; recurring occurrences keep the same wall-clock time in this zone across DST changes.
+        recurring: { type: boolean }
+        recurrenceIntervalWeeks: { type: integer }
+        recurrenceUntil: { type: string, format: date }
         memberUserIds:
           type: array
           items: { type: integer }
@@ -1253,7 +1256,6 @@ components:
         scheduledEnd: { type: string, format: date-time }
         location: { type: string }
         agenda: { type: string }
-        chairUserId: { type: ["integer", "null"] }
         status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
         memberUserIds:
           type: array
