@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarDays, CheckCircle2, Loader2, Mail, Play, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarDays, CheckCircle2, FileDown, Loader2, Mail, Play, Trash2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Approval, CabMeetingDetail, ChangeRequest, User } from "@/lib/types";
@@ -143,6 +143,14 @@ export function CabDetailPage() {
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={() => api.download(`/cab-meetings/${id}/ics`, `cab-${id}.ics`)} data-testid="button-download-ics">
               <CalendarDays className="mr-2 h-4 w-4" /> Download .ics
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => api.download(`/cab-meetings/${id}/agenda-pdf`, `cab-agenda-${id}.pdf`)}
+              data-testid="button-download-agenda-pdf"
+            >
+              <FileDown className="mr-2 h-4 w-4" /> Agenda PDF
             </Button>
             <Button onClick={() => sendAgenda.mutate()} disabled={sendAgenda.isPending} data-testid="button-send-agenda">
               {sendAgenda.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}

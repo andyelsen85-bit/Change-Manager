@@ -70,8 +70,11 @@ export async function notify(opts: {
   text: string;
   html?: string;
   ics?: { content: string; filename: string };
+  pdf?: { content: Buffer; filename: string };
 }): Promise<{ sent: number; skipped: number; errors: number }> {
-  if (opts.ics) {
+  // Any attachment forces the immediate path — the notification queue only
+  // persists subject/body text, so attachments would silently be dropped.
+  if (opts.ics || opts.pdf) {
     return sendImmediate(opts);
   }
   const seen = new Set<number>();
@@ -117,6 +120,7 @@ async function sendImmediate(opts: {
   text: string;
   html?: string;
   ics?: { content: string; filename: string };
+  pdf?: { content: Buffer; filename: string };
 }): Promise<{ sent: number; skipped: number; errors: number }> {
   const transporter = await buildTransporter();
   const cfg = await getSmtp();
@@ -145,15 +149,29 @@ async function sendImmediate(opts: {
         subject: opts.subject,
         text: opts.text,
         html: opts.html,
-        attachments: opts.ics
-          ? [
-              {
-                filename: opts.ics.filename,
-                content: opts.ics.content,
-                contentType: "text/calendar; charset=utf-8; method=REQUEST",
-              },
-            ]
-          : undefined,
+        attachments:
+          opts.ics || opts.pdf
+            ? [
+                ...(opts.ics
+                  ? [
+                      {
+                        filename: opts.ics.filename,
+                        content: opts.ics.content,
+                        contentType: "text/calendar; charset=utf-8; method=REQUEST",
+                      },
+                    ]
+                  : []),
+                ...(opts.pdf
+                  ? [
+                      {
+                        filename: opts.pdf.filename,
+                        content: opts.pdf.content,
+                        contentType: "application/pdf",
+                      },
+                    ]
+                  : []),
+              ]
+            : undefined,
       });
       sent++;
     } catch (err) {
