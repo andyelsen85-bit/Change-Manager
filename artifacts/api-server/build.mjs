@@ -98,10 +98,15 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
-      // pdfkit bundles font data via fontkit/brotli which require() @swc/helpers
-      // cjs files by path — unbundleable, keep it a runtime dependency.
-      "pdfkit",
     ],
+    // pdfkit's normal build reads .afm font files from disk and pulls in
+    // fontkit/brotli (which require @swc/helpers by path) — neither survives
+    // bundling. The standalone build embeds all font data and is fully
+    // self-contained, so the production bundle has no pdfkit runtime dep
+    // (externalizing it broke deployments: /app has no node_modules for it).
+    alias: {
+      pdfkit: "pdfkit/js/pdfkit.standalone.js",
+    },
     sourcemap: "linked",
     plugins: [
       // pino relies on workers to handle logging, instead of externalizing it we use a plugin to handle it
