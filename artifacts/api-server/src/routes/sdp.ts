@@ -192,6 +192,7 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
   // Owner: prefer the SD+ technician (matched by email), then the requester,
   // then fall back to the first active admin so the draft is never orphaned.
   let owner: typeof usersTable.$inferSelect | undefined;
+  let matchedTechnician = false;
   for (const email of [technicianEmail, requesterEmail]) {
     if (!email) continue;
     const [u] = await db
@@ -200,6 +201,7 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
       .where(and(eq(usersTable.email, email), eq(usersTable.isActive, true)));
     if (u) {
       owner = u;
+      matchedTechnician = email === technicianEmail;
       break;
     }
   }
@@ -265,6 +267,10 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
       priority: "medium",
       category,
       ownerId: owner.id,
+      // The SD+ technician handling the request becomes both Creator and
+      // Owner; if we only matched via requester email or the admin fallback,
+      // the Owner stays unassigned so the handler picks one deliberately.
+      assigneeId: matchedTechnician ? owner.id : null,
       sdpRequestId: requestId,
       ticketLink: sdpRequestUrl(cfg, requestId),
       requesterType: requesterName ? "external" : null,
