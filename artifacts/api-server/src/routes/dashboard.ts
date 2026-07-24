@@ -7,6 +7,7 @@ import {
   approvalsTable,
   auditLogTable,
   roleAssignmentsTable,
+  changeAssigneesTable,
   testRecordsTable,
   pirRecordsTable,
 } from "@workspace/db";
@@ -161,8 +162,33 @@ router.get("/dashboard/my-tasks", requireAuth, async (req, res): Promise<void> =
     .select()
     .from(roleAssignmentsTable)
     .where(eq(roleAssignmentsTable.userId, session.uid));
+  const myRoles = Array.from(new Set(myAssignments.map((a) => a.roleKey)));
+
+  // Change managers (and admins) review incoming changes: everything sitting
+  // in submitted / in_review is waiting on them to either send it to approval
+  // or reject it.
+  if (session.isAdmin || myRoles.includes("change_manager")) {
+    const toReview = await db
+      .select()
+      .from(changeRequestsTable)
+      .where(
+        and(
+          inArray(changeRequestsTable.status, ["submitted", "in_review"]),
+          isNull(changeRequestsTable.deletedAt),
+        ),
+      );
+    for (const c of toReview) {
+      tasks.push({
+        kind: "review",
+        changeId: c.id,
+        ref: c.ref,
+        title: c.title,
+        note: c.status === "submitted" ? "Submitted — review required" : "In review — send to approval or reject",
+      });
+    }
+  }
+
   if (myAssignments.length > 0) {
-    const myRoles = Array.from(new Set(myAssignments.map((a) => a.roleKey)));
     const pending = await db
       .select({
         approvalId: approvalsTable.id,
@@ -208,7 +234,10 @@ router.get("/dashboard/my-tasks", requireAuth, async (req, res): Promise<void> =
     );
   for (const c of myChanges) {
     if (c.status === "in_testing" || (c.status === "implemented" && c.track !== "standard")) {
-      const [t] = await db.select().from(testRecordsTable).where(eq(testRecordsTable.changeId, c.id));
+      const [t] = await db
+        .select()
+        .from(testRecordsTable)
+        .where(and(eq(testRecordsTable.changeId, c.id), eq(testRecordsTable.kind, "production")));
       if (!t || t.overallResult === "pending") {
         tasks.push({ kind: "testing", changeId: c.id, ref: c.ref, title: c.title, note: "Testing pending" });
       }
@@ -220,6 +249,52 @@ router.get("/dashboard/my-tasks", requireAuth, async (req, res): Promise<void> =
       }
     }
   }
+
+  // Changes where I'm the per-change Implementer or Tester (change_assignees),
+  // surfaced in the statuses where that role is expected to act.
+  const perChange = await db
+    .select({
+      roleKey: changeAssigneesTable.roleKey,
+      change: changeRequestsTable,
+    })
+    .from(changeAssigneesTable)
+    .innerJoin(changeRequestsTable, eq(changeRequestsTable.id, changeAssigneesTable.changeId))
+    .where(and(eq(changeAssigneesTable.userId, session.uid), isNull(changeRequestsTable.deletedAt)));
+  const IMPLEMENTER_STATUS_NOTES: Record<string, string> = {
+    approved: "Approved — schedule or start pre-prod testing",
+    in_preprod_testing: "Pre-prod testing in progress",
+    scheduled: "Scheduled — implementation upcoming",
+    awaiting_implementation: "Awaiting implementation",
+    in_progress: "Implementation in progress",
+  };
+  for (const { roleKey, change: c } of perChange) {
+    if (roleKey === "implementer") {
+      const note = IMPLEMENTER_STATUS_NOTES[c.status];
+      if (note) {
+        tasks.push({ kind: "implementation", changeId: c.id, ref: c.ref, title: c.title, note });
+      }
+    } else if (roleKey === "tester") {
+      if (c.status === "in_testing" || (c.status === "implemented" && c.track !== "standard")) {
+        // Same pending-test check as the owner/assignee branch above.
+        const [t] = await db
+          .select()
+          .from(testRecordsTable)
+          .where(and(eq(testRecordsTable.changeId, c.id), eq(testRecordsTable.kind, "production")));
+        if (!t || t.overallResult === "pending") {
+          // Avoid a duplicate row when the tester is also the owner/assignee.
+          if (!tasks.some((task) => task.kind === "testing" && task.changeId === c.id)) {
+            tasks.push({ kind: "testing", changeId: c.id, ref: c.ref, title: c.title, note: "Testing pending" });
+          }
+        }
+      }
+    }
+  }
+  // Cap the list at 20, but rank by actionability first so a big review
+  // backlog (change managers) can't starve approval/testing/PIR tasks.
+  const KIND_PRIORITY: Record<string, number> = { approval: 0, testing: 1, pir: 2, implementation: 3, review: 4 };
+  tasks.sort(
+    (a, b) => (KIND_PRIORITY[a.kind] ?? 99) - (KIND_PRIORITY[b.kind] ?? 99) || a.changeId - b.changeId,
+  );
   res.json(tasks.slice(0, 20));
 });
 
