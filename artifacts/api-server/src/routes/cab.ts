@@ -541,8 +541,15 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
 
   // Attach the same A4 agenda PDF (one page per change) that the Change
   // Manager can download and validate on the meeting page — the email
-  // attachment and the download must never diverge.
-  const pdf = await buildCabAgendaPdf(id);
+  // attachment and the download must never diverge. If PDF generation
+  // fails, still send the agenda email (degraded, without attachment)
+  // rather than failing the whole request.
+  let pdf: { filename: string; content: Buffer } | null = null;
+  try {
+    pdf = await buildCabAgendaPdf(id);
+  } catch (err) {
+    console.error(`Failed to build agenda PDF for meeting ${id}; sending agenda without attachment`, err);
+  }
 
   const result = await notify({
     eventKey: "cab.invited",
