@@ -426,14 +426,23 @@ export function ChangeDetailPage() {
   });
 
   const transition = useMutation({
-    mutationFn: (status: ChangeStatus) => api.post(`/changes/${id}/transition`, { toStatus: status }),
+    mutationFn: (payload: { toStatus: ChangeStatus; note?: string }) =>
+      api.post(`/changes/${id}/transition`, payload),
     onSuccess: () => {
       toast.success("Status updated");
+      setCloseTarget(null);
+      setCloseReason("");
       qc.invalidateQueries({ queryKey: ["change", id] });
       qc.invalidateQueries({ queryKey: ["change.approvals", id] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Transition failed"),
   });
+
+  // Cancelling or rejecting requires a mandatory reason: it is stored on the
+  // change, displayed on this page, and written into the SD+ resolution field
+  // for changes opened from a ServiceDesk Plus ticket.
+  const [closeTarget, setCloseTarget] = useState<"cancelled" | "rejected" | null>(null);
+  const [closeReason, setCloseReason] = useState("");
 
   // Revert (Change Manager / Admin only). Walks the change BACK to an
   // earlier status; the backend is the source of truth on what's allowed
@@ -571,13 +580,28 @@ export function ChangeDetailPage() {
                 assignees={assigneesQ.data ?? []}
               />
             </div>
+            {(c.status === "cancelled" || c.status === "rejected") && c.closureNote && (
+              <div
+                className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm"
+                data-testid="closure-note"
+              >
+                <div className="font-medium text-destructive">
+                  {c.status === "rejected" ? "Rejection reason" : "Cancellation reason"}
+                </div>
+                <div className="mt-1 whitespace-pre-wrap">{c.closureNote}</div>
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap gap-2">
               {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).map((next) => (
                 <Button
                   key={next}
                   variant={next === "cancelled" || next === "rejected" || next === "rolled_back" ? "destructive" : next === "completed" || next === "approved" ? "default" : "secondary"}
                   size="sm"
-                  onClick={() => transition.mutate(next)}
+                  onClick={() =>
+                    next === "cancelled" || next === "rejected"
+                      ? (setCloseReason(""), setCloseTarget(next))
+                      : transition.mutate({ toStatus: next })
+                  }
                   disabled={transition.isPending}
                   data-testid={`button-transition-${next}`}
                 >
@@ -658,6 +682,51 @@ export function ChangeDetailPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <Dialog open={closeTarget !== null} onOpenChange={(open) => !open && setCloseTarget(null)}>
+          <DialogContent data-testid="dialog-close-reason">
+            <DialogHeader>
+              <DialogTitle>
+                {closeTarget === "rejected" ? "Reject" : "Cancel"} change {c.ref}
+              </DialogTitle>
+              <DialogDescription>
+                A reason is required. It will be shown on the change
+                {c.sdpRequestId ? " and written into the resolution field of the linked ServiceDesk Plus request" : ""}.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-1.5 py-2">
+              <Label htmlFor="close-reason">Reason (required, min 5 chars)</Label>
+              <Textarea
+                id="close-reason"
+                rows={3}
+                value={closeReason}
+                onChange={(e) => setCloseReason(e.target.value)}
+                placeholder={
+                  closeTarget === "rejected"
+                    ? "e.g. Risk assessment insufficient — resubmit with a rollback plan."
+                    : "e.g. No longer needed — superseded by CHG-00123."
+                }
+                data-testid="textarea-close-reason"
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setCloseTarget(null)} data-testid="button-close-reason-cancel">
+                Back
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={closeReason.trim().length < 5 || transition.isPending}
+                onClick={() =>
+                  closeTarget && transition.mutate({ toStatus: closeTarget, note: closeReason.trim() })
+                }
+                data-testid="button-close-reason-confirm"
+              >
+                {transition.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {closeTarget === "rejected" ? "Reject change" : "Cancel change"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={revertOpen} onOpenChange={setRevertOpen}>
           <DialogContent data-testid="dialog-revert">

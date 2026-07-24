@@ -169,7 +169,7 @@ function escapeHtml(s: string): string {
 // the mandatory rejection note.
 export async function sdpSyncTerminalState(
   change: ChangeRow,
-  outcome: "Resolved" | "Rejected",
+  outcome: "Resolved" | "Rejected" | "Cancelled",
   note?: string | null,
 ): Promise<{ success: boolean; message: string }> {
   if (!change.sdpRequestId) return { success: false, message: "No linked SD+ request." };
@@ -182,9 +182,12 @@ export async function sdpSyncTerminalState(
     lines.push(
       outcome === "Resolved"
         ? `Change ${change.ref} (“${change.title}”) was completed in Change-it.`
-        : `Change ${change.ref} (“${change.title}”) was REJECTED in Change-it.`,
+        : outcome === "Rejected"
+          ? `Change ${change.ref} (“${change.title}”) was REJECTED in Change-it.`
+          : `Change ${change.ref} (“${change.title}”) was CANCELLED in Change-it.`,
     );
     if (outcome === "Rejected" && note) lines.push(`\nRejection note:\n${note}`);
+    if (outcome === "Cancelled" && note) lines.push(`\nCancellation note:\n${note}`);
     if (base) lines.push(`\nChange link: ${base}/changes/${change.id}`);
     if (milestones) lines.push(`\nChange history:\n${milestones}`);
     const content = lines.join("\n");

@@ -183,7 +183,13 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
     if (current?.status === "awaiting_approval") {
       await db
         .update(changeRequestsTable)
-        .set({ status: newStatus })
+        .set(
+          // Persist the mandatory rejection comment as the change's closure
+          // note so it is visible on the detail page and in the SD+ write-back.
+          newStatus === "rejected"
+            ? { status: newStatus, closureNote: typeof comment === "string" ? comment : null }
+            : { status: newStatus },
+        )
         .where(eq(changeRequestsTable.id, ap.changeId));
     } else {
       // Vote was recorded but change isn't in awaiting_approval — don't auto-flip status.

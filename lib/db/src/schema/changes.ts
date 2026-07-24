@@ -22,6 +22,10 @@ export const changeRequestsTable = pgTable("change_requests", {
   // ticket (via the inbound webhook). Drives the automatic resolve/reject
   // write-back when the change reaches a terminal state.
   sdpRequestId: text("sdp_request_id"),
+  // Mandatory reason captured when a change is cancelled or rejected. Shown
+  // on the change detail page and written back into the SD+ resolution field.
+  // Cleared when a cancelled/rejected change is reopened to draft.
+  closureNote: text("closure_note"),
   // Who requested the change. requesterType is 'internal' (picked from the AD
   // directory) or 'external' (free-text). requesterName holds the chosen
   // directory display name or the free-text value. Both nullable — optional.

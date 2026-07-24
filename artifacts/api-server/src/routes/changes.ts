@@ -599,6 +599,19 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
     res.status(400).json({ error: "toStatus is required" });
     return;
   }
+  // Cancelling or rejecting requires an explanatory note (>= 5 chars). It is
+  // stored on the change, shown on the detail page, and written back into
+  // the SD+ resolution field for changes that originated from an SD+ ticket.
+  const trimmedNote = typeof note === "string" ? note.trim() : "";
+  if ((toStatus === "cancelled" || toStatus === "rejected") && trimmedNote.length < 5) {
+    res.status(400).json({
+      error:
+        toStatus === "cancelled"
+          ? "A cancellation reason (at least 5 characters) is required."
+          : "A rejection reason (at least 5 characters) is required.",
+    });
+    return;
+  }
   const [before] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
   if (!before || before.deletedAt) {
     res.status(404).json({ error: "Not found" });
@@ -694,6 +707,11 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   const updates: Partial<typeof changeRequestsTable.$inferInsert> = { status: toStatus };
   if (toStatus === "in_progress" && !before.actualStart) updates.actualStart = new Date();
   if ((toStatus === "implemented" || toStatus === "completed") && !before.actualEnd) updates.actualEnd = new Date();
+  // Persist the mandatory cancel/reject reason so it is visible on the change
+  // and can be written back to SD+. Reopening a cancelled/rejected change to
+  // draft clears the stale note.
+  if (toStatus === "cancelled" || toStatus === "rejected") updates.closureNote = trimmedNote;
+  if ((fromStatus === "cancelled" || fromStatus === "rejected") && toStatus === "draft") updates.closureNote = null;
   const [updated] = await db
     .update(changeRequestsTable)
     .set(updates)
@@ -759,9 +777,9 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   // RFC ticket reaches a terminal state, resolve/reject the ticket with the
   // milestone history (and rejection note) in the resolution field.
   // Fire-and-forget — a slow or unreachable SD+ server never blocks the UI.
-  if (updated.sdpRequestId && (toStatus === "completed" || toStatus === "rejected")) {
-    const outcome = toStatus === "completed" ? "Resolved" : "Rejected";
-    void sdpSyncTerminalState(updated, outcome, note ?? null).then(async (r) => {
+  if (updated.sdpRequestId && (toStatus === "completed" || toStatus === "rejected" || toStatus === "cancelled")) {
+    const outcome = toStatus === "completed" ? "Resolved" : toStatus === "rejected" ? "Rejected" : "Cancelled";
+    void sdpSyncTerminalState(updated, outcome, trimmedNote || null).then(async (r) => {
       await audit(req, {
         action: r.success ? "integration.sdp_synced" : "integration.sdp_sync_failed",
         entityType: "change",
@@ -854,6 +872,11 @@ router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> 
     updates.actualEnd = null;
   } else if (targetStatus === "in_progress") {
     updates.actualEnd = null;
+  }
+  // Reverting a cancelled/rejected change back to an active status clears the
+  // stale closure note.
+  if (fromStatus === "cancelled" || fromStatus === "rejected") {
+    updates.closureNote = null;
   }
   // If we are reverting BACK past awaiting_approval, reset existing approvals
   // to pending so the change cannot leap forward on stale votes.

@@ -178,6 +178,11 @@ router.get("/dashboard/my-tasks", requireAuth, async (req, res): Promise<void> =
           eq(approvalsTable.decision, "pending"),
           inArray(approvalsTable.roleKey, myRoles),
           isNull(changeRequestsTable.deletedAt),
+          // A pending approval row is only an actionable task while the
+          // change is actually awaiting approval. Approval rows are created
+          // at draft time, and sibling rows stay "pending" after a rejection
+          // flips the change — neither should surface as a task.
+          eq(changeRequestsTable.status, "awaiting_approval"),
         ),
       );
     for (const p of pending) {
