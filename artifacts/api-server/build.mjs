@@ -98,6 +98,9 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      // pdfkit bundles font data via fontkit/brotli which require() @swc/helpers
+      // cjs files by path — unbundleable, keep it a runtime dependency.
+      "pdfkit",
     ],
     sourcemap: "linked",
     plugins: [

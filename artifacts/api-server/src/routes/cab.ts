@@ -12,6 +12,7 @@ import {
 import { requireAuth, requireRole } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
+import { buildCabAgendaPdf } from "../lib/agenda-pdf";
 import { notify, getUserEmail } from "../lib/email";
 
 // Format a date for emails as dd/MM/yyyy HH:mm in 24-hour time. We do
@@ -398,6 +399,25 @@ router.get("/cab-meetings/:id/ics", requireAuth, async (req, res): Promise<void>
   res.send(ics);
 });
 
+// Download the meeting agenda as an A4 PDF: overview page + one page per
+// docketed change with its full details. Lets the Change Manager validate
+// the exact document that Send-Agenda will attach to the email.
+router.get("/cab-meetings/:id/agenda-pdf", requireCabManager, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const pdf = await buildCabAgendaPdf(id);
+  if (!pdf) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${pdf.filename}"`);
+  res.send(pdf.content);
+});
+
 // Send the full meeting agenda (including every change on the docket with
 // its title, description, planned dates, risk and impact) to every member,
 // so they can review the material before the meeting starts. No calendar
@@ -519,12 +539,18 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     : '<div style="padding:12px;font-style:italic;color:#8a96a4;">(no changes on the agenda)</div>';
   const html = `<div>${meetingHeaderHtml}${agendaItemsHtml}</div>`;
 
+  // Attach the same A4 agenda PDF (one page per change) that the Change
+  // Manager can download and validate on the meeting page — the email
+  // attachment and the download must never diverge.
+  const pdf = await buildCabAgendaPdf(id);
+
   const result = await notify({
     eventKey: "cab.invited",
     to: targets,
     subject: `${m.kind === "ecab" ? "[eCAB Agenda]" : "[CAB Agenda]"} ${m.title} — ${fmtAgendaDate(m.scheduledStart)}`,
     text,
     html,
+    pdf: pdf ?? undefined,
   });
   await audit(req, {
     action: "cab.agenda_sent",

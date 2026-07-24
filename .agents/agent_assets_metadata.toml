@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "UWFckUMkj0_nCWDCnc-OM"
+uri = "file://attached_assets/cab-agenda-preview.pdf"
+type = "pdf"
+title = "CAB agenda PDF — Weekly CAB (preview)"
