@@ -12,11 +12,22 @@ export interface QueuedResult {
   data: unknown;
 }
 
+export interface ChainLogEntry {
+  call: DbCall;
+  method: string;
+  args: unknown[];
+}
+
 export class DbMock {
   queue: QueuedResult[] = [];
+  // Every chained method invocation (e.g. .values(...), .set(...),
+  // .onConflictDoUpdate(...)) is recorded here so tests can assert on the
+  // arguments passed to the query builder, not just the queued results.
+  log: ChainLogEntry[] = [];
 
   reset(): void {
     this.queue = [];
+    this.log = [];
   }
 
   enqueue(call: DbCall, data: unknown): void {
@@ -25,6 +36,7 @@ export class DbMock {
 
   private chain(call: DbCall): unknown {
     const queue = this.queue;
+    const log = this.log;
     const handler: ProxyHandler<object> = {
       get(target, prop) {
         if (prop === "then") {
@@ -44,7 +56,10 @@ export class DbMock {
         if (prop === Symbol.toPrimitive || prop === "toString") {
           return target[prop as keyof typeof target];
         }
-        return () => proxy;
+        return (...args: unknown[]) => {
+          log.push({ call, method: String(prop), args });
+          return proxy;
+        };
       },
     };
     const proxy: unknown = new Proxy({}, handler);
@@ -52,9 +67,18 @@ export class DbMock {
   }
 
   select = (..._args: unknown[]): unknown => this.chain("select");
-  insert = (..._args: unknown[]): unknown => this.chain("insert");
+  insert = (..._args: unknown[]): unknown => {
+    this.log.push({ call: "insert", method: "insert", args: _args });
+    return this.chain("insert");
+  };
   update = (..._args: unknown[]): unknown => this.chain("update");
-  delete = (..._args: unknown[]): unknown => this.chain("delete");
+  delete = (..._args: unknown[]): unknown => {
+    this.log.push({ call: "delete", method: "delete", args: _args });
+    return this.chain("delete");
+  };
+  // Routes run multi-statement writes inside db.transaction(async (tx) => …).
+  // The mock just passes itself through — queued results are shared.
+  transaction = async <T>(fn: (tx: this) => Promise<T>): Promise<T> => fn(this);
 }
 
 // Build a test Express app with a fixed session and CSRF disabled.
