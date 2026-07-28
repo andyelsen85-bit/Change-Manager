@@ -216,7 +216,25 @@ export type CabMeetingDetail = CabMeeting & {
   agenda: string;
   minutes: string;
   members: CabMember[];
-  changes: { id: number; ref: string; title: string; track: ChangeTrack; status: ChangeStatus; risk: string }[];
+  changes: {
+    id: number;
+    ref: string;
+    title: string;
+    track: ChangeTrack;
+    status: ChangeStatus;
+    risk: string;
+    outcome: string | null;
+    outcomeNote: string | null;
+    postponedToMeetingId: number | null;
+  }[];
+};
+
+export type CabAttendee = {
+  userId: number | null;
+  name: string;
+  email: string;
+  present: boolean;
+  adHoc: boolean;
 };
 
 export type DashboardSummary = {

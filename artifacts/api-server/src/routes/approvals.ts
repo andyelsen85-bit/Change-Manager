@@ -60,7 +60,9 @@ router.post("/approvals/:id/vote", requireAuth, async (req, res): Promise<void> 
   }
   const session = req.session!;
   const { decision, comment } = req.body ?? {};
-  if (!["approved", "rejected", "abstain"].includes(decision)) {
+  // "abstain" was removed as a voting option: approvers must approve or
+  // reject. Historical abstain rows remain readable for the audit trail.
+  if (!["approved", "rejected"].includes(decision)) {
     res.status(400).json({ error: "Invalid decision" });
     return;
   }

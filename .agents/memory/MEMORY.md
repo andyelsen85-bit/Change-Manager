@@ -3,4 +3,5 @@
 - [Soft-delete visibility gate](soft-delete-visibility.md) — every route that loads a change (incl. subresources & dashboard joins) must 404 on deletedAt; restore/purge use conditional writes on deleted_at for race safety.
 - [Stale TS project references](ts-project-references.md) — after editing lib/db schema, rebuild refs (`pnpm exec tsc -b lib/db --force`) or dependent packages typecheck against old declarations.
 - [CAB recurrence timezone](cab-recurrence-timezone.md) — recurring occurrences keep wall-clock time via per-candidate offset delta vs first occurrence; never step from the adjusted previous.
+- [CAB outcomes & attendance](cab-outcomes-attendance.md) — only "postponed" stored; approved/rejected derived from votes; PATCH must diff cab_changes; externals get negative userIds + email dedup.
 - [ServiceDesk Plus integration](sdp-integration.md) — on-prem SD+ webhook + resolve/reject write-back: header-only secret, CSRF exemption, partial unique index for idempotency, sync hooks in 2 places.

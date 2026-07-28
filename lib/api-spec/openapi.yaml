@@ -1211,7 +1211,7 @@ components:
     VoteBody:
       type: object
       properties:
-        decision: { type: string, enum: [approved, rejected, abstain] }
+        decision: { type: string, enum: [approved, rejected] }
         comment: { type: ["string", "null"] }
       required: [decision]
 

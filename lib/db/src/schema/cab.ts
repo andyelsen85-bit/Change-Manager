@@ -35,9 +35,31 @@ export const cabChangesTable = pgTable(
     id: serial("id").primaryKey(),
     meetingId: integer("meeting_id").notNull(),
     changeId: integer("change_id").notNull(),
+    // Meeting-level outcome for this docket entry. Currently only "postponed"
+    // is stored explicitly (approved/rejected are derived from the approvals
+    // table at read time so the two can never diverge).
+    outcome: text("outcome"),
+    outcomeNote: text("outcome_note"),
+    postponedToMeetingId: integer("postponed_to_meeting_id"),
   },
   (t) => ({ uniq: unique().on(t.meetingId, t.changeId) }),
 );
 
+// Attendance list of a meeting: seeded from users holding CAB roles, plus
+// ad-hoc people added via the LDAP directory search (userId NULL for those).
+export const cabAttendeesTable = pgTable(
+  "cab_attendees",
+  {
+    id: serial("id").primaryKey(),
+    meetingId: integer("meeting_id").notNull(),
+    userId: integer("user_id"),
+    name: text("name").notNull(),
+    email: text("email").notNull().default(""),
+    present: boolean("present").notNull().default(false),
+  },
+  (t) => ({ uniq: unique().on(t.meetingId, t.userId, t.email) }),
+);
+
 export type CabMeetingRow = typeof cabMeetingsTable.$inferSelect;
 export type CabMemberRow = typeof cabMembersTable.$inferSelect;
+export type CabAttendeeRow = typeof cabAttendeesTable.$inferSelect;

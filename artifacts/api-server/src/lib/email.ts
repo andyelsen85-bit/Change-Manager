@@ -138,7 +138,9 @@ async function sendImmediate(opts: {
     skipped = 0,
     errors = 0;
   for (const t of unique) {
-    if (!(await userWantsEmail(t.userId, opts.eventKey))) {
+    // Negative pseudo-ids mark external recipients (e.g. ad-hoc CAB attendees
+    // from the directory search) that have no local account or preferences.
+    if (t.userId > 0 && !(await userWantsEmail(t.userId, opts.eventKey))) {
       skipped++;
       continue;
     }

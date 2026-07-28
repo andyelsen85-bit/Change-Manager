@@ -662,7 +662,6 @@ export type VoteBodyDecision =
 export const VoteBodyDecision = {
   approved: "approved",
   rejected: "rejected",
-  abstain: "abstain",
 } as const;
 
 export interface VoteBody {

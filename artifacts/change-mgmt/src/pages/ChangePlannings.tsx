@@ -13,7 +13,7 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { CalendarRange, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarRange, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ChangeRequest } from "@/lib/types";
 import { STATUS_LABELS } from "@/lib/types";
@@ -73,11 +73,13 @@ export function ChangePlanningsPage() {
   const [, setLocation] = useLocation();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
 
-  // Open changes only — the API's `status=active` view already excludes
-  // completed / cancelled / rejected / rolled_back.
+  // All changes, then filtered client-side: open changes plus completed ones
+  // (shown with a green check mark). Cancelled / rejected / rolled-back
+  // changes stay hidden — their planned window never happened.
   const changesQ = useQuery({
-    queryKey: ["changes", "/changes?status=active"],
-    queryFn: () => api.get<ChangeRequest[]>("/changes?status=active"),
+    queryKey: ["changes", "/changes"],
+    queryFn: () => api.get<ChangeRequest[]>("/changes"),
+    select: (rows) => rows.filter((c) => !["cancelled", "rejected", "rolled_back"].includes(c.status)),
   });
 
   const gridStart = useMemo(() => startOfWeek(startOfMonth(cursor), { weekStartsOn: 1 }), [cursor]);
@@ -234,7 +236,9 @@ export function ChangePlanningsPage() {
                             data-testid={`planning-bar-${seg.change.id}`}
                             className={cn(
                               "pointer-events-auto absolute flex h-[22px] items-center truncate px-2 text-[11px] font-medium shadow-sm transition-colors",
-                              barColor(seg.change.id),
+                              seg.change.status === "completed"
+                                ? "bg-emerald-600/80 hover:bg-emerald-600 text-white"
+                                : barColor(seg.change.id),
                               seg.isStart ? "rounded-l-md" : "rounded-l-none",
                               seg.isEnd ? "rounded-r-md" : "rounded-r-none",
                             )}
@@ -244,6 +248,9 @@ export function ChangePlanningsPage() {
                               top: seg.lane * 26,
                             }}
                           >
+                            {seg.change.status === "completed" && (
+                              <CheckCircle2 className="mr-1 h-3.5 w-3.5 shrink-0 text-green-200" data-testid={`icon-completed-${seg.change.id}`} />
+                            )}
                             <span className="truncate">
                               {!seg.isStart && "… "}
                               <span className="font-mono">{seg.change.ref}</span> {seg.change.title}
