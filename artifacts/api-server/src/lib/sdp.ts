@@ -159,6 +159,34 @@ export async function sdpAddBackLinkNote(requestId: string, change: ChangeRow): 
   }
 }
 
+// Set the SD+ request status right after a change is created from it, so
+// the ticket visibly shows a change is prepared in Change-it (e.g.
+// "Waiting for Change-it"). The status must exist in SD+ (Admin → Helpdesk
+// Customizer → Request Status); an empty configured name disables this.
+// Best-effort like the back-link note — failures are logged, never block.
+export async function sdpSetInitialStatus(requestId: string): Promise<void> {
+  const cfg = await getSdpConfig();
+  if (!cfg?.enabled) return;
+  const statusName = (cfg.onCreateStatusName ?? "").trim();
+  if (!statusName) return;
+  try {
+    const r = await sdpFetch(cfg, `/api/v3/requests/${encodeURIComponent(requestId)}`, {
+      method: "PUT",
+      inputData: { request: { status: { name: statusName } } },
+    });
+    if (r.ok) {
+      logger.info({ requestId, statusName }, "SD+ request status set on change creation");
+    } else {
+      logger.warn(
+        { requestId, statusName, status: r.status, body: r.body.slice(0, 300) },
+        "SD+ on-create status update failed — check that the status exists in SD+ (exact name match)",
+      );
+    }
+  } catch (err) {
+    logger.warn({ requestId, statusName, err: String(err) }, "SD+ on-create status update failed");
+  }
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

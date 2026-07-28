@@ -322,6 +322,7 @@ export type SdpSettings = {
   technicianKeySet: boolean;
   webhookSecret: string;
   tlsRejectUnauthorized: boolean;
+  onCreateStatusName: string;
   lastWebhookAt: string | null;
   lastWebhookRequestId: string | null;
   lastWebhookStatus: string | null;

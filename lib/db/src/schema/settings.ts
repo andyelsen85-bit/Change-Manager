@@ -76,6 +76,10 @@ export const sdpSettingsTable = pgTable("sdp_settings", {
   technicianKeyEnc: text("technician_key_enc"),
   webhookSecret: text("webhook_secret").notNull().default(""),
   tlsRejectUnauthorized: boolean("tls_reject_unauthorized").notNull().default(true),
+  // SD+ status name applied to the originating request right after a change
+  // is created from it (e.g. "Waiting for Change-it"). Must exist in SD+
+  // (Admin → Helpdesk Customizer → Request Status). Empty = skip the update.
+  onCreateStatusName: text("on_create_status_name").notNull().default("Waiting for Change-it"),
   lastWebhookAt: timestamp("last_webhook_at", { withTimezone: true }),
   lastWebhookRequestId: text("last_webhook_request_id"),
   lastWebhookStatus: text("last_webhook_status"),

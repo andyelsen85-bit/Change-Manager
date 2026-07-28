@@ -88,10 +88,12 @@ CREATE TABLE IF NOT EXISTS sdp_settings (
   technician_key_enc       text,
   webhook_secret           text NOT NULL DEFAULT '',
   tls_reject_unauthorized  boolean NOT NULL DEFAULT true,
+  on_create_status_name    text NOT NULL DEFAULT 'Waiting for Change-it',
   last_webhook_at          timestamptz,
   last_webhook_request_id  text,
   last_webhook_status      text
 );
+ALTER TABLE sdp_settings ADD COLUMN IF NOT EXISTS on_create_status_name text NOT NULL DEFAULT 'Waiting for Change-it';
 ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS sdp_request_id text;
 -- At most ONE active (non-deleted) change per SD+ request — makes the
 -- webhook idempotent even under concurrent replay delivery.
