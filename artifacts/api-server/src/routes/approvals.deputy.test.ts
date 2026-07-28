@@ -18,9 +18,14 @@ vi.mock("@workspace/db", () => ({
   rolesTable: { _t: "roles" },
   usersTable: { _t: "users" },
   roleAssignmentsTable: { _t: "role_assignments" },
+  notificationRoutingRulesTable: { _t: "notification_routing_rules" },
+  changeAssigneesTable: { _t: "change_assignees" },
+  pentestCollaboratorsTable: { _t: "pentest_collaborators" },
+  sdpSettingsTable: { _t: "sdp_settings" },
+  auditLogTable: { _t: "audit_log" },
 }));
 
-vi.mock("drizzle-orm", () => ({ eq: () => ({}) }));
+vi.mock("drizzle-orm", () => ({ eq: () => ({}), and: () => ({}) }));
 
 vi.mock("../lib/auth", async () => {
   const actual =
@@ -36,6 +41,7 @@ vi.mock("../lib/audit", () => ({ audit: vi.fn().mockResolvedValue(undefined) }))
 vi.mock("../lib/email", () => ({
   notify: vi.fn().mockResolvedValue(undefined),
   getUserEmail: vi.fn().mockResolvedValue(null),
+  getUserEmails: vi.fn().mockResolvedValue([]),
 }));
 
 const { default: approvalsRouter } = await import("./approvals");
@@ -91,6 +97,9 @@ describe("POST /approvals/:id/vote — input validation & gates", () => {
       { id: 7, changeId: 1, roleKey: "change_manager", decision: "pending" },
     ]);
     dbMock.enqueue("select", [{ ...sampleAwaiting, status: "draft" }]);
+    // The route resolves the linked CAB meeting before the status gate; a
+    // meeting that hasn't started means no auto-promotion out of draft.
+    dbMock.enqueue("select", [{ id: 5, status: "scheduled" }]);
     const app = buildTestApp(approvalsRouter, ADMIN_SESSION);
     const res = await request(app)
       .post("/api/approvals/7/vote")
@@ -148,6 +157,7 @@ describe("POST /approvals/:id/vote — deputy & auto-flip", () => {
     dbMock.enqueue("select", [{ status: "awaiting_approval" }]);
     dbMock.enqueue("update", undefined); // change.status -> approved
     dbMock.enqueue("select", [sampleAwaiting]); // change for audit/notify
+    dbMock.enqueue("select", []); // notification routing rules (approval.granted)
 
     const app = buildTestApp(approvalsRouter, DEPUTY_SESSION);
     const res = await request(app)
@@ -183,6 +193,7 @@ describe("POST /approvals/:id/vote — deputy & auto-flip", () => {
     dbMock.enqueue("select", [{ status: "awaiting_approval" }]);
     dbMock.enqueue("update", undefined);
     dbMock.enqueue("select", [sampleAwaiting]);
+    dbMock.enqueue("select", []); // notification routing rules (approval.granted)
 
     const app = buildTestApp(approvalsRouter, PRIMARY_SESSION);
     const res = await request(app)
@@ -225,6 +236,7 @@ describe("POST /approvals/:id/vote — deputy & auto-flip", () => {
     dbMock.enqueue("select", [{ status: "awaiting_approval" }]);
     dbMock.enqueue("update", undefined);
     dbMock.enqueue("select", [sampleAwaiting]);
+    dbMock.enqueue("select", []); // notification routing rules (approval.rejected)
 
     const app = buildTestApp(approvalsRouter, {
       uid: 50,
