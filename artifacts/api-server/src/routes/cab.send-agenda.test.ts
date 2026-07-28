@@ -148,8 +148,8 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
     expect(body).toContain("Changes for review (2):");
     // Change 1 details
     expect(body).toContain("[CHG-0500] Upgrade ingress controller");
-    expect(body).toContain("Risk: Medium");
-    expect(body).toContain("Impact: High");
+    expect(body).toMatch(/Risk:\s+Medium/);
+    expect(body).toMatch(/Impact:\s+High/);
     expect(body).toContain("Planned start:");
     expect(body).toContain("Planned end:");
     expect(body).toContain("Replace the current nginx ingress");

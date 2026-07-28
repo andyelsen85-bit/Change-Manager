@@ -7,3 +7,8 @@ Rule: every `*.test.ts` in `artifacts/api-server/src/routes/` mocks `@workspace/
 **Why:** The DbMock is queue-based and the module mocks are allowlists; unmocked imports are `undefined` or hit the real module at import time.
 
 **How to apply:** After adding any import to a route file, grep its test files and add the table to the `vi.mock("@workspace/db", ...)` map, the operator to the `drizzle-orm` mock (`and`, `sql`, ...), and `vi.mock` for new lib modules (e.g. `resolveRecipients: vi.fn().mockResolvedValue([])`). Note: 18 unrelated pre-existing test failures exist at baseline (July 2026) — compare against HEAD via `git archive` to /tmp before assuming regressions.
+
+## DbMock helper capabilities (added while testing CAB attendance/postpone)
+- `DbMock` in `test-helpers.ts` now records every chained builder call in `dbMock.log` (`{call, method, args}`), so tests can assert `.values(...)`, `.set(...)`, `.onConflictDoUpdate(...)` arguments instead of only queued results.
+- It also implements `transaction(fn)` by passing itself through — routes using `db.transaction` work against the same result queue.
+- Mock drizzle `inArray`/`notInArray` as vi.fn wrappers to assert diff-based deletes (e.g. docket diff must use notInArray, never delete-all).
