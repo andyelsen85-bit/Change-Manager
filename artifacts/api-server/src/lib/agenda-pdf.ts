@@ -480,11 +480,17 @@ export async function buildCabResultsPdf(meetingId: number): Promise<{ filename:
     doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.ink).text(`${i + 1}. [${c.ref}] ${c.title}`, MARGIN, y0, {
       width: CONTENT_W - 110,
     });
+    // Remember where the (possibly multi-line) title ended BEFORE drawing the
+    // outcome badge back up at y0 — the badge is a single line, so leaving
+    // doc.y where the badge finishes would make the following lines overprint
+    // the title's wrapped lines.
+    const yTitleEnd = doc.y;
     doc
       .font("Helvetica-Bold")
       .fontSize(11)
       .fillColor(outcomeColor(derived))
       .text(derived.toUpperCase(), MARGIN + CONTENT_W - 100, y0, { width: 100, align: "right" });
+    doc.y = Math.max(yTitleEnd, doc.y);
     doc.moveDown(0.3);
 
     doc.font("Helvetica").fontSize(9).fillColor(COLORS.muted).text(
