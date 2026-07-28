@@ -8,7 +8,6 @@ import {
   smtpSettingsTable,
   ldapSettingsTable,
   sslSettingsTable,
-  workflowTimeoutsTable,
   changeCategoriesTable,
   pentestTestTypesTable,
 } from "@workspace/db";
@@ -305,7 +304,6 @@ export async function runSeed(): Promise<void> {
   await db.insert(smtpSettingsTable).values({ key: "global" }).onConflictDoNothing();
   await db.insert(ldapSettingsTable).values({ key: "global" }).onConflictDoNothing();
   await db.insert(sslSettingsTable).values({ key: "global" }).onConflictDoNothing();
-  await db.insert(workflowTimeoutsTable).values({ key: "global" }).onConflictDoNothing();
 
   // Default notification routing rules — idempotent: only inserted when the
   // notification_routing_rules table is completely empty. Admins can edit

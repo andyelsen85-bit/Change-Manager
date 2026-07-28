@@ -1230,30 +1230,6 @@ export const UpdateSslSettingsResponse = zod.object({
   hstsEnabled: zod.boolean(),
 });
 
-export const GetWorkflowTimeoutsResponse = zod.object({
-  approvalReminderHours: zod.number(),
-  approvalEscalationHours: zod.number(),
-  cabReminderHours: zod.number(),
-  pirDueDays: zod.number(),
-  emergencyApprovalMinutes: zod.number(),
-});
-
-export const UpdateWorkflowTimeoutsBody = zod.object({
-  approvalReminderHours: zod.number(),
-  approvalEscalationHours: zod.number(),
-  cabReminderHours: zod.number(),
-  pirDueDays: zod.number(),
-  emergencyApprovalMinutes: zod.number(),
-});
-
-export const UpdateWorkflowTimeoutsResponse = zod.object({
-  approvalReminderHours: zod.number(),
-  approvalEscalationHours: zod.number(),
-  cabReminderHours: zod.number(),
-  pirDueDays: zod.number(),
-  emergencyApprovalMinutes: zod.number(),
-});
-
 export const ListAuditLogQueryParams = zod.object({
   actorId: zod.coerce.number().optional(),
   action: zod.coerce.string().optional(),

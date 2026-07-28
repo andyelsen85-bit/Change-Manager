@@ -39,7 +39,6 @@ const TABLES = [
   "smtp_settings",
   "ldap_settings",
   "ssl_settings",
-  "workflow_timeouts",
   "notification_settings",
   "sdp_settings",
   "notification_queue",

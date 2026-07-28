@@ -923,14 +923,6 @@ export interface UpdateSslBody {
   hstsEnabled?: boolean;
 }
 
-export interface WorkflowTimeouts {
-  approvalReminderHours: number;
-  approvalEscalationHours: number;
-  cabReminderHours: number;
-  pirDueDays: number;
-  emergencyApprovalMinutes: number;
-}
-
 export interface AuditEntry {
   id: number;
   timestamp: string;

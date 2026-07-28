@@ -360,14 +360,6 @@ export type SslSettings = {
   hstsEnabled: boolean;
 };
 
-export type WorkflowTimeouts = {
-  approvalReminderHours: number;
-  approvalEscalationHours: number;
-  cabReminderHours: number;
-  pirDueDays: number;
-  emergencyApprovalMinutes: number;
-};
-
 export const NOTIFICATION_EVENTS: { key: string; label: string; group: string }[] = [
   { key: "change.submitted", label: "Change submitted", group: "Lifecycle" },
   { key: "change.cancelled", label: "Change cancelled", group: "Lifecycle" },

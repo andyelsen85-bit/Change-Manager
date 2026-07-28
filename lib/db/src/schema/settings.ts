@@ -80,12 +80,3 @@ export const sdpSettingsTable = pgTable("sdp_settings", {
   lastWebhookRequestId: text("last_webhook_request_id"),
   lastWebhookStatus: text("last_webhook_status"),
 });
-
-export const workflowTimeoutsTable = pgTable("workflow_timeouts", {
-  key: text("key").primaryKey().default("global"),
-  approvalReminderHours: integer("approval_reminder_hours").notNull().default(24),
-  approvalEscalationHours: integer("approval_escalation_hours").notNull().default(48),
-  cabReminderHours: integer("cab_reminder_hours").notNull().default(24),
-  pirDueDays: integer("pir_due_days").notNull().default(7),
-  emergencyApprovalMinutes: integer("emergency_approval_minutes").notNull().default(60),
-});

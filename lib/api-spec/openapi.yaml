@@ -756,24 +756,6 @@ paths:
         "200":
           description: Updated
           content: { application/json: { schema: { $ref: "#/components/schemas/SslSettings" } } }
-  /settings/workflow-timeouts:
-    get:
-      operationId: getWorkflowTimeouts
-      tags: [settings]
-      responses:
-        "200":
-          description: Timeouts
-          content: { application/json: { schema: { $ref: "#/components/schemas/WorkflowTimeouts" } } }
-    put:
-      operationId: updateWorkflowTimeouts
-      tags: [settings]
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: "#/components/schemas/WorkflowTimeouts" } } }
-      responses:
-        "200":
-          description: Updated
-          content: { application/json: { schema: { $ref: "#/components/schemas/WorkflowTimeouts" } } }
 
   # ---------- AUDIT ----------
   /audit-log:
@@ -1453,16 +1435,6 @@ components:
         chainPem: { type: ["string", "null"] }
         forceHttps: { type: boolean }
         hstsEnabled: { type: boolean }
-
-    WorkflowTimeouts:
-      type: object
-      properties:
-        approvalReminderHours: { type: integer }
-        approvalEscalationHours: { type: integer }
-        cabReminderHours: { type: integer }
-        pirDueDays: { type: integer }
-        emergencyApprovalMinutes: { type: integer }
-      required: [approvalReminderHours, approvalEscalationHours, cabReminderHours, pirDueDays, emergencyApprovalMinutes]
 
     AuditEntry:
       type: object
