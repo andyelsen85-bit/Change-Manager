@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Save, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Save, Trash2, Upload, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
@@ -1089,6 +1089,20 @@ function NotificationsBatchPanel() {
     onError: (err) => toast.error(err instanceof Error ? err.message : "Flush failed"),
   });
 
+  // Discard the pending queue without sending — for systems where SMTP is
+  // disabled and queued digests would only pile up.
+  const clear = useMutation({
+    mutationFn: () => api.post<{ discarded: number; status: NotificationBatchStatus }>(
+      "/settings/notifications/clear",
+      {},
+    ),
+    onSuccess: (r) => {
+      toast.success(r.discarded === 0 ? "Queue is already empty" : `Discarded ${r.discarded} pending notification(s)`);
+      qc.invalidateQueries({ queryKey: ["settings.notifications"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Clear failed"),
+  });
+
   if (!q.data || interval === null) return <Skeleton className="mt-4 h-64 w-full" />;
 
   const nextMs = new Date(q.data.nextRunAt).getTime();
@@ -1164,6 +1178,19 @@ function NotificationsBatchPanel() {
           >
             {flush.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Send digest now
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (window.confirm(`Discard ${q.data.queuedCount} pending notification(s) without sending them? This cannot be undone.`)) {
+                clear.mutate();
+              }
+            }}
+            disabled={clear.isPending || q.data.queuedCount === 0}
+            data-testid="button-clear-queue"
+          >
+            {clear.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+            Discard queue
           </Button>
           <Button
             onClick={() => save.mutate(interval)}

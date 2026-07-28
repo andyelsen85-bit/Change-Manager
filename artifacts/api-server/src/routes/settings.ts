@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import {
   db,
@@ -8,6 +8,7 @@ import {
   sslSettingsTable,
   workflowTimeoutsTable,
   sdpSettingsTable,
+  notificationQueueTable,
 } from "@workspace/db";
 import { testSdpConnection } from "../lib/sdp";
 import { requireAdmin } from "../lib/auth";
@@ -423,6 +424,24 @@ router.put("/settings/notifications", requireAdmin, async (req, res): Promise<vo
     after,
   });
   res.json(after);
+});
+
+// Discard all pending (unsent) queued notifications without emailing them.
+// Meant for test systems where SMTP is disabled and the queue would otherwise
+// fill up with digests that will never be sent. Already-sent rows are kept.
+router.post("/settings/notifications/clear", requireAdmin, async (req, res): Promise<void> => {
+  const deleted = await db
+    .delete(notificationQueueTable)
+    .where(isNull(notificationQueueTable.sentAt))
+    .returning({ id: notificationQueueTable.id });
+  await audit(req, {
+    action: "settings.notifications_cleared",
+    entityType: "settings",
+    entityId: null,
+    summary: `Discarded ${deleted.length} pending notification(s) from the queue`,
+    after: { discarded: deleted.length },
+  });
+  res.json({ discarded: deleted.length, status: await notificationStatus() });
 });
 
 router.post("/settings/notifications/flush", requireAdmin, async (req, res): Promise<void> => {
