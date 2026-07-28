@@ -361,7 +361,6 @@ single source of truth for tables and types. The core tables are:
 | `smtp_settings`             | Singleton SMTP configuration (password encrypted at rest)       |
 | `ldap_settings`             | Singleton LDAP configuration (bind password encrypted)          |
 | `ssl_settings`              | Stored cert/key + CSR private key                               |
-| `workflow_timeouts`         | Reminder / escalation / PIR-window / emergency-window settings  |
 
 ---
 
@@ -748,7 +747,6 @@ All endpoints live under `/api`. Auth is cookie-based; mutations require the
 - `GET/PUT /api/settings/smtp` · `POST /api/settings/smtp/test`
 - `GET/PUT /api/settings/ldap` · `POST /api/settings/ldap/test`
 - `GET/PUT /api/settings/ssl` · `POST /api/settings/ssl/csr`
-- `GET/PUT /api/settings/workflow-timeouts`
 
 ### Audit (admin-only)
 

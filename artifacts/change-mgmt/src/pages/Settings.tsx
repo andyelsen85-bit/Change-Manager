@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Sa
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
-import type { CategoryItem, LdapSettings, LdapTestResult, PentestTestType, SdpSettings, SmtpSettings, SslSettings, WorkflowTimeouts } from "@/lib/types";
+import type { CategoryItem, LdapSettings, LdapTestResult, PentestTestType, SdpSettings, SmtpSettings, SslSettings } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -52,14 +52,13 @@ export function SettingsPage() {
     <div className="space-y-4" data-testid="page-settings">
       <div>
         <h2 className="text-2xl font-semibold tracking-tight">System settings</h2>
-        <p className="text-sm text-muted-foreground">Administrator-only configuration for SMTP, LDAP, SSL, and timeouts.</p>
+        <p className="text-sm text-muted-foreground">Administrator-only configuration for SMTP, LDAP, SSL, and more.</p>
       </div>
       <Tabs defaultValue="smtp">
         <TabsList>
           <TabsTrigger value="smtp" data-testid="tab-smtp">SMTP</TabsTrigger>
           <TabsTrigger value="ldap" data-testid="tab-ldap">LDAP</TabsTrigger>
           <TabsTrigger value="ssl" data-testid="tab-ssl">SSL/TLS</TabsTrigger>
-          <TabsTrigger value="timeouts" data-testid="tab-timeouts">Workflow timeouts</TabsTrigger>
           <TabsTrigger value="notifications" data-testid="tab-notifications">Notifications</TabsTrigger>
           <TabsTrigger value="categories" data-testid="tab-categories">Categories</TabsTrigger>
           <TabsTrigger value="pentest-types" data-testid="tab-pentest-types">PenTest types</TabsTrigger>
@@ -69,7 +68,6 @@ export function SettingsPage() {
         <TabsContent value="smtp"><SmtpPanel /></TabsContent>
         <TabsContent value="ldap"><LdapPanel /></TabsContent>
         <TabsContent value="ssl"><SslPanel /></TabsContent>
-        <TabsContent value="timeouts"><TimeoutsPanel /></TabsContent>
         <TabsContent value="notifications"><NotificationsBatchPanel /></TabsContent>
         <TabsContent value="categories"><CategoriesPanel /></TabsContent>
         <TabsContent value="pentest-types"><PentestTypesPanel /></TabsContent>
@@ -973,54 +971,6 @@ function CsrDialog({ onGenerated }: { onGenerated: () => void }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function TimeoutsPanel() {
-  const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["settings.timeouts"], queryFn: () => api.get<WorkflowTimeouts>("/settings/workflow-timeouts") });
-  const [form, setForm] = useState<WorkflowTimeouts | null>(null);
-  useEffect(() => {
-    if (q.data && !form) setForm(q.data);
-  }, [q.data, form]);
-  const save = useMutation({
-    mutationFn: () => api.put<WorkflowTimeouts>("/settings/workflow-timeouts", form),
-    onSuccess: () => {
-      toast.success("Saved");
-      qc.invalidateQueries({ queryKey: ["settings.timeouts"] });
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
-  });
-  if (!form) return <Skeleton className="mt-4 h-64 w-full" />;
-  const NField = ({ k, label, suffix }: { k: keyof WorkflowTimeouts; label: string; suffix: string }) => (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <div className="flex items-center gap-2">
-        <Input type="number" value={form[k]} onChange={(e) => setForm({ ...form, [k]: Number(e.target.value) })} className="max-w-xs" />
-        <span className="text-xs text-muted-foreground">{suffix}</span>
-      </div>
-    </div>
-  );
-  return (
-    <Card className="mt-4">
-      <CardHeader>
-        <CardTitle className="text-base">Workflow timeouts</CardTitle>
-        <CardDescription>Reminders, escalations, and review windows.</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-2">
-        <NField k="approvalReminderHours" label="Approval reminder" suffix="hours" />
-        <NField k="approvalEscalationHours" label="Approval escalation" suffix="hours" />
-        <NField k="cabReminderHours" label="CAB reminder" suffix="hours" />
-        <NField k="pirDueDays" label="PIR due window" suffix="days" />
-        <NField k="emergencyApprovalMinutes" label="Emergency approval window" suffix="minutes" />
-        <div className="md:col-span-2 flex justify-end border-t border-border pt-4">
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            <Save className="mr-2 h-4 w-4" /> Save
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 

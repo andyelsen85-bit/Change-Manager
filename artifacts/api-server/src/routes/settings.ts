@@ -6,7 +6,6 @@ import {
   smtpSettingsTable,
   ldapSettingsTable,
   sslSettingsTable,
-  workflowTimeoutsTable,
   sdpSettingsTable,
   notificationQueueTable,
 } from "@workspace/db";
@@ -338,46 +337,6 @@ router.post("/settings/ssl/csr", requireAdmin, async (req, res): Promise<void> =
     subjectAltNames: result.subjectAltNames,
     keyBits: result.keyBits,
   });
-});
-
-router.get("/settings/workflow-timeouts", requireAdmin, async (_req, res): Promise<void> => {
-  const [row] = await db.select().from(workflowTimeoutsTable).where(eq(workflowTimeoutsTable.key, KEY));
-  res.json(
-    row ?? {
-      approvalReminderHours: 24,
-      approvalEscalationHours: 48,
-      cabReminderHours: 24,
-      pirDueDays: 7,
-      emergencyApprovalMinutes: 60,
-    },
-  );
-});
-
-router.put("/settings/workflow-timeouts", requireAdmin, async (req, res): Promise<void> => {
-  const b = req.body ?? {};
-  const [before] = await db.select().from(workflowTimeoutsTable).where(eq(workflowTimeoutsTable.key, KEY));
-  const values = {
-    key: KEY,
-    approvalReminderHours: typeof b.approvalReminderHours === "number" ? b.approvalReminderHours : 24,
-    approvalEscalationHours: typeof b.approvalEscalationHours === "number" ? b.approvalEscalationHours : 48,
-    cabReminderHours: typeof b.cabReminderHours === "number" ? b.cabReminderHours : 24,
-    pirDueDays: typeof b.pirDueDays === "number" ? b.pirDueDays : 7,
-    emergencyApprovalMinutes: typeof b.emergencyApprovalMinutes === "number" ? b.emergencyApprovalMinutes : 60,
-  };
-  const [row] = await db
-    .insert(workflowTimeoutsTable)
-    .values(values)
-    .onConflictDoUpdate({ target: workflowTimeoutsTable.key, set: values })
-    .returning();
-  await audit(req, {
-    action: "settings.workflow_timeouts_updated",
-    entityType: "settings",
-    entityId: null,
-    summary: "Updated workflow timeouts",
-    before,
-    after: row,
-  });
-  res.json(row);
 });
 
 // Notification batching: lets admins choose the digest interval and see
