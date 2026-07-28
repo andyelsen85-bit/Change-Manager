@@ -6,3 +6,9 @@ id = "UWFckUMkj0_nCWDCnc-OM"
 uri = "file://attached_assets/cab-agenda-preview.pdf"
 type = "pdf"
 title = "CAB agenda PDF — Weekly CAB (preview)"
+
+[[outputs]]
+id = "cRZGIRGPQ_tcBEDYFyUKb"
+uri = "file://docs/how-to-create-a-change.pdf"
+type = "pdf"
+title = "How to create a change — one-page guide"
