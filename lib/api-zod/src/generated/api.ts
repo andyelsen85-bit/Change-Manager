@@ -826,7 +826,7 @@ export const VoteApprovalParams = zod.object({
 });
 
 export const VoteApprovalBody = zod.object({
-  decision: zod.enum(["approved", "rejected", "abstain"]),
+  decision: zod.enum(["approved", "rejected"]),
   comment: zod.string().nullish(),
 });
 

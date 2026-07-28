@@ -4,6 +4,9 @@ import {
   db,
   cabMeetingsTable,
   cabChangesTable,
+  cabAttendeesTable,
+  approvalsTable,
+  rolesTable,
   changeRequestsTable,
   planningRecordsTable,
   usersTable,
@@ -329,4 +332,219 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
   const content = await done;
   const safeTitle = m.title.replace(/[^\w\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "cab";
   return { filename: `cab-agenda-${safeTitle}-${meetingId}.pdf`, content };
+}
+
+// ---------------------------------------------------------------------------
+// CAB results PDF — generated after (or during) the meeting.
+//
+// Page 1: meeting details (title, kind, schedule, location, notes) plus the
+//         attendance list (present / absent per attendee).
+// Then:   the changes of the meeting with their outcome — Approved, Rejected,
+//         Postponed (with target meeting) or Pending — including the recorded
+//         approval votes and their comments.
+//
+// The same builder backs the download endpoint and the email attachment sent
+// on "Complete meeting" — the two must never diverge.
+// ---------------------------------------------------------------------------
+
+export type CabOutcome = "approved" | "rejected" | "postponed" | "pending";
+
+function outcomeColor(o: CabOutcome): string {
+  if (o === "approved") return COLORS.badgeLow;
+  if (o === "rejected") return COLORS.badgeHigh;
+  if (o === "postponed") return COLORS.badgeMedium;
+  return COLORS.muted;
+}
+
+export async function buildCabResultsPdf(meetingId: number): Promise<{ filename: string; content: Buffer } | null> {
+  const [m] = await db.select().from(cabMeetingsTable).where(eq(cabMeetingsTable.id, meetingId));
+  if (!m) return null;
+
+  const rows = await db
+    .select({
+      change: changeRequestsTable,
+      outcome: cabChangesTable.outcome,
+      outcomeNote: cabChangesTable.outcomeNote,
+      postponedToMeetingId: cabChangesTable.postponedToMeetingId,
+    })
+    .from(cabChangesTable)
+    .innerJoin(changeRequestsTable, eq(changeRequestsTable.id, cabChangesTable.changeId))
+    .where(eq(cabChangesTable.meetingId, meetingId))
+    .orderBy(asc(changeRequestsTable.plannedStart), asc(changeRequestsTable.ref));
+
+  const attendees = await db
+    .select()
+    .from(cabAttendeesTable)
+    .where(eq(cabAttendeesTable.meetingId, meetingId))
+    .orderBy(asc(cabAttendeesTable.name));
+
+  const kindLabel = m.kind === "ecab" ? "Emergency CAB" : "CAB meeting";
+  const doc = new PDFDocument({
+    size: "A4",
+    margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
+    bufferPages: true,
+  });
+  const chunks: Buffer[] = [];
+  doc.on("data", (c: Buffer) => chunks.push(c));
+  const done = new Promise<Buffer>((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
+  const headerState = { title: "Change-it — CAB results", right: fmt(m.scheduledStart) };
+  doc.on("pageAdded", () => pageHeader(doc, headerState.title, headerState.right));
+
+  // ---- Page 1: meeting details + attendance --------------------------------
+  pageHeader(doc, headerState.title, headerState.right);
+  doc.font("Helvetica-Bold").fontSize(18).fillColor(COLORS.ink).text(`${m.title} — Results`, MARGIN, doc.y, { width: CONTENT_W });
+  doc.moveDown(0.2);
+  doc
+    .font("Helvetica")
+    .fontSize(10)
+    .fillColor(COLORS.muted)
+    .text(
+      `${kindLabel} · ${fmt(m.scheduledStart)} – ${fmt(m.scheduledEnd)}${m.location ? ` · ${m.location}` : ""} · Status: ${statusLabel(m.status)}`,
+      { width: CONTENT_W },
+    );
+
+  sectionTitle(doc, "Notes");
+  textBlock(doc, (m.minutes || "").trim() || "(none)");
+
+  sectionTitle(doc, `Attendance (${attendees.filter((a) => a.present).length} of ${attendees.length} present)`);
+  if (attendees.length === 0) {
+    doc.font("Helvetica-Oblique").fontSize(9.5).fillColor(COLORS.muted).text("No attendance recorded.", MARGIN, doc.y);
+  } else {
+    const bottom = 842 - MARGIN;
+    for (const a of attendees) {
+      if (doc.y > bottom - 20) doc.addPage();
+      const y = doc.y;
+      doc
+        .font("Helvetica-Bold")
+        .fontSize(9.5)
+        .fillColor(a.present ? COLORS.badgeLow : COLORS.badgeHigh)
+        .text(a.present ? "Present" : "Absent", MARGIN, y, { width: 55 });
+      doc.font("Helvetica").fillColor(COLORS.ink).text(a.name + (a.email ? `  ·  ${a.email}` : ""), MARGIN + 62, y, {
+        width: CONTENT_W - 62,
+        height: 14,
+        ellipsis: true,
+      });
+      doc.y = y + 14;
+    }
+  }
+
+  // ---- Page 2+: changes with their outcome ---------------------------------
+  headerState.title = `${m.title} — Results`;
+  if (rows.length > 0) doc.addPage();
+  if (rows.length === 0) {
+    doc.moveDown(1);
+    doc.font("Helvetica-Oblique").fontSize(9.5).fillColor(COLORS.muted).text("No changes were on this meeting.", MARGIN, doc.y);
+  }
+
+  const bottom = 842 - MARGIN;
+  for (let i = 0; i < rows.length; i++) {
+    const { change: c, outcome, outcomeNote, postponedToMeetingId } = rows[i]!;
+
+    // Approval votes for this change (role name, decision, approver, comment).
+    const votes = await db
+      .select({
+        roleKey: approvalsTable.roleKey,
+        roleName: rolesTable.name,
+        decision: approvalsTable.decision,
+        comment: approvalsTable.comment,
+        decidedAt: approvalsTable.decidedAt,
+        approverName: usersTable.fullName,
+      })
+      .from(approvalsTable)
+      .leftJoin(rolesTable, eq(rolesTable.key, approvalsTable.roleKey))
+      .leftJoin(usersTable, eq(usersTable.id, approvalsTable.approverId))
+      .where(eq(approvalsTable.changeId, c.id));
+
+    // Outcome: explicit postpone wins; otherwise derived from approvals so
+    // the PDF can never contradict the recorded votes.
+    let derived: CabOutcome = "pending";
+    if (outcome === "postponed") derived = "postponed";
+    else if (votes.some((v) => v.decision === "rejected") || c.status === "rejected") derived = "rejected";
+    else if (
+      (votes.length > 0 && votes.every((v) => v.decision === "approved")) ||
+      ["approved", "scheduled", "in_progress", "implemented", "awaiting_pir", "completed"].includes(c.status)
+    )
+      derived = "approved";
+
+    let postponedTo = "";
+    if (derived === "postponed" && postponedToMeetingId) {
+      const [target] = await db.select().from(cabMeetingsTable).where(eq(cabMeetingsTable.id, postponedToMeetingId));
+      if (target) postponedTo = `${target.title} (${fmt(target.scheduledStart)})`;
+    }
+
+    // Estimate the block height; start a new page when it will not fit.
+    if (i > 0 && doc.y > bottom - 140) doc.addPage();
+    else if (i > 0) doc.moveDown(1);
+
+    const y0 = doc.y;
+    doc.font("Helvetica-Bold").fontSize(12).fillColor(COLORS.ink).text(`${i + 1}. [${c.ref}] ${c.title}`, MARGIN, y0, {
+      width: CONTENT_W - 110,
+    });
+    doc
+      .font("Helvetica-Bold")
+      .fontSize(11)
+      .fillColor(outcomeColor(derived))
+      .text(derived.toUpperCase(), MARGIN + CONTENT_W - 100, y0, { width: 100, align: "right" });
+    doc.moveDown(0.3);
+
+    doc.font("Helvetica").fontSize(9).fillColor(COLORS.muted).text(
+      `Track: ${titleCase(c.track)}   ·   Risk: ${titleCase(c.risk)}   ·   Status: ${statusLabel(c.status)}${
+        derived === "postponed" && postponedTo ? `   ·   Postponed to: ${postponedTo}` : ""
+      }`,
+      MARGIN,
+      doc.y,
+      { width: CONTENT_W },
+    );
+
+    if (derived === "postponed" && (outcomeNote || "").trim()) {
+      doc.moveDown(0.3);
+      doc.font("Helvetica-Oblique").fontSize(9.5).fillColor(COLORS.ink).text(`Note: ${(outcomeNote || "").trim()}`, MARGIN, doc.y, {
+        width: CONTENT_W,
+        lineGap: 1.5,
+      });
+    }
+
+    if (votes.length > 0) {
+      doc.moveDown(0.4);
+      for (const v of votes) {
+        if (doc.y > bottom - 30) doc.addPage();
+        const y = doc.y;
+        doc
+          .font("Helvetica-Bold")
+          .fontSize(9)
+          .fillColor(
+            v.decision === "approved" ? COLORS.badgeLow : v.decision === "rejected" ? COLORS.badgeHigh : COLORS.muted,
+          )
+          .text(titleCase(v.decision), MARGIN, y, { width: 60 });
+        doc
+          .font("Helvetica")
+          .fillColor(COLORS.ink)
+          .text(
+            `${v.roleName ?? v.roleKey}${v.approverName ? ` — ${v.approverName}` : ""}${v.decidedAt ? ` (${fmt(v.decidedAt)})` : ""}`,
+            MARGIN + 66,
+            y,
+            { width: CONTENT_W - 66 },
+          );
+        if ((v.comment || "").trim()) {
+          doc
+            .font("Helvetica-Oblique")
+            .fontSize(9)
+            .fillColor(COLORS.muted)
+            .text(`“${(v.comment || "").trim()}”`, MARGIN + 66, doc.y, { width: CONTENT_W - 66, lineGap: 1.2 });
+        }
+        doc.moveDown(0.25);
+      }
+    }
+
+    const yLine = doc.y + 6;
+    if (yLine < bottom) {
+      doc.moveTo(MARGIN, yLine).lineTo(A4_WIDTH - MARGIN, yLine).lineWidth(0.5).strokeColor(COLORS.line).stroke();
+      doc.y = yLine + 8;
+    }
+  }
+
+  doc.end();
+  const content = await done;
+  const safeTitle = m.title.replace(/[^\w\-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "cab";
+  return { filename: `cab-results-${safeTitle}-${meetingId}.pdf`, content };
 }

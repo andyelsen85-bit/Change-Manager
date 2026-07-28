@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarDays, CheckCircle2, FileDown, Loader2, Mail, Play, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, CalendarDays, CheckCircle2, FileDown, Loader2, Mail, Play, Trash2, UserPlus, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Approval, CabMeetingDetail, ChangeRequest, User } from "@/lib/types";
+import type { Approval, CabAttendee, CabMeeting, CabMeetingDetail, ChangeRequest, LdapSearchUser, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { fmtDateTime, fromLocalDateTimeInput, toLocalDateTimeInput } from "@/lib/format";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export function CabDetailPage() {
   const [, params] = useRoute("/cab/:id");
@@ -147,6 +157,16 @@ export function CabDetailPage() {
             >
               <FileDown className="mr-2 h-4 w-4" /> Agenda PDF
             </Button>
+            {(m.status === "in_progress" || m.status === "completed") && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => api.download(`/cab-meetings/${id}/results-pdf`, `cab-results-${id}.pdf`)}
+                data-testid="button-download-results-pdf"
+              >
+                <FileDown className="mr-2 h-4 w-4" /> Results PDF
+              </Button>
+            )}
             <Button onClick={() => sendAgenda.mutate()} disabled={sendAgenda.isPending} data-testid="button-send-agenda">
               {sendAgenda.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />}
               Send agenda
@@ -227,7 +247,7 @@ export function CabDetailPage() {
             <Textarea rows={4} value={form.agenda} onChange={(e) => setForm({ ...form, agenda: e.target.value })} />
           </div>
           <div className="space-y-2">
-            <Label>Minutes</Label>
+            <Label>Notes</Label>
             <Textarea rows={6} value={form.minutes} onChange={(e) => setForm({ ...form, minutes: e.target.value })} />
           </div>
         </CardContent>
@@ -270,8 +290,10 @@ export function CabDetailPage() {
         </Card>
       </div>
 
+      <AttendancePanel meetingId={id} />
+
       {m.status === "in_progress" && form.changeIds.length > 0 && (
-        <MeetingApprovalsPanel meetingId={id} changeIds={form.changeIds} />
+        <MeetingApprovalsPanel meetingId={id} changeIds={form.changeIds} meeting={m} />
       )}
 
       {form.changeIds.length === 0 && (
@@ -296,21 +318,35 @@ export function CabDetailPage() {
 // Lets CAB members vote on each docketed change without leaving the meeting
 // page. Reuses the existing /approvals/:id/vote endpoint so audit + email
 // flows stay identical to the change-detail page.
-function MeetingApprovalsPanel({ meetingId, changeIds }: { meetingId: number; changeIds: number[] }) {
+function MeetingApprovalsPanel({ meetingId, changeIds, meeting }: { meetingId: number; changeIds: number[]; meeting: CabMeetingDetail }) {
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Process docketed changes</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         {changeIds.map((cid) => (
-          <MeetingChangeRow key={cid} meetingId={meetingId} changeId={cid} />
+          <MeetingChangeRow
+            key={cid}
+            meetingId={meetingId}
+            changeId={cid}
+            docket={meeting.changes.find((c) => c.id === cid)}
+          />
         ))}
       </CardContent>
     </Card>
   );
 }
 
-function MeetingChangeRow({ meetingId, changeId }: { meetingId: number; changeId: number }) {
+function MeetingChangeRow({
+  meetingId,
+  changeId,
+  docket,
+}: {
+  meetingId: number;
+  changeId: number;
+  docket?: CabMeetingDetail["changes"][number];
+}) {
   const qc = useQueryClient();
+  const [postponeOpen, setPostponeOpen] = useState(false);
   const q = useQuery({
     queryKey: ["change.approvals", changeId],
     queryFn: () => api.get<Approval[]>(`/changes/${changeId}/approvals`),
@@ -329,11 +365,33 @@ function MeetingChangeRow({ meetingId, changeId }: { meetingId: number; changeId
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Vote failed"),
   });
+  const postponed = docket?.outcome === "postponed";
   return (
     <div className="rounded-md border border-border p-3">
-      <Link href={`/changes/${changeId}`} className="text-sm font-medium hover:underline">
-        {cq.data?.ref ?? `Change #${changeId}`} — {cq.data?.title ?? ""}
-      </Link>
+      <div className="flex items-center justify-between gap-2">
+        <Link href={`/changes/${changeId}`} className="text-sm font-medium hover:underline">
+          {cq.data?.ref ?? `Change #${changeId}`} — {cq.data?.title ?? ""}
+        </Link>
+        {postponed ? (
+          <span className="rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs text-warning" data-testid={`badge-postponed-${changeId}`}>
+            Postponed
+          </span>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => setPostponeOpen(true)} data-testid={`button-postpone-${changeId}`}>
+            <CalendarClock className="mr-1 h-3 w-3" /> Postpone
+          </Button>
+        )}
+      </div>
+      {postponed && docket?.outcomeNote && (
+        <p className="mt-1 text-xs text-muted-foreground">Note: {docket.outcomeNote}</p>
+      )}
+      <PostponeDialog
+        open={postponeOpen}
+        onOpenChange={setPostponeOpen}
+        meetingId={meetingId}
+        changeId={changeId}
+        changeRef={cq.data?.ref ?? `#${changeId}`}
+      />
       <div className="mt-2 space-y-2">
         {(q.data ?? []).length === 0 && (
           <p className="text-xs text-muted-foreground">No approvals required.</p>
@@ -345,7 +403,7 @@ function MeetingChangeRow({ meetingId, changeId }: { meetingId: number; changeId
               <span className={a.decision === "approved" ? "text-success" : a.decision === "rejected" ? "text-destructive" : "text-muted-foreground"}>
                 {a.decision}
               </span>
-              {a.decision === "pending" && (
+              {a.decision === "pending" && !postponed && (
                 <>
                   <Button
                     size="sm"
@@ -375,3 +433,221 @@ function MeetingChangeRow({ meetingId, changeId }: { meetingId: number; changeId
   );
 }
 
+
+// Dialog to move a docketed change to another CAB meeting. The current entry
+// is kept and marked "postponed" (it stays in this meeting's results PDF);
+// the change is docketed on the selected target meeting.
+function PostponeDialog({
+  open,
+  onOpenChange,
+  meetingId,
+  changeId,
+  changeRef,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  meetingId: number;
+  changeId: number;
+  changeRef: string;
+}) {
+  const qc = useQueryClient();
+  const [targetId, setTargetId] = useState("");
+  const [note, setNote] = useState("");
+  const meetingsQ = useQuery({
+    queryKey: ["cab-meetings", "upcoming"],
+    queryFn: () => api.get<CabMeeting[]>("/cab-meetings"),
+    enabled: open,
+  });
+  const options: ComboboxOption[] = useMemo(
+    () =>
+      (meetingsQ.data ?? [])
+        .filter((mm) => mm.id !== meetingId && (mm.status === "scheduled" || mm.status === "in_progress"))
+        .map((mm) => ({
+          value: String(mm.id),
+          label: `${mm.title} — ${fmtDateTime(mm.scheduledStart)}`,
+          hint: mm.kind === "ecab" ? "eCAB" : "CAB",
+        })),
+    [meetingsQ.data, meetingId],
+  );
+  const postpone = useMutation({
+    mutationFn: () =>
+      api.post(`/cab-meetings/${meetingId}/changes/${changeId}/postpone`, {
+        targetMeetingId: Number(targetId),
+        note: note.trim() || undefined,
+      }),
+    onSuccess: () => {
+      toast.success(`${changeRef} postponed`);
+      onOpenChange(false);
+      setTargetId("");
+      setNote("");
+      qc.invalidateQueries({ queryKey: ["cab", meetingId] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Postpone failed"),
+  });
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Postpone {changeRef}</DialogTitle>
+          <DialogDescription>
+            Move this change to another CAB meeting. It stays on this meeting's results as “postponed”.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label>Target meeting</Label>
+            <Combobox
+              options={options}
+              value={targetId}
+              onChange={setTargetId}
+              placeholder="Select a meeting…"
+              searchPlaceholder="Search meetings…"
+              emptyText="No upcoming meetings."
+              data-testid="select-postpone-target"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Note (optional)</Label>
+            <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} data-testid="textarea-postpone-note" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            onClick={() => postpone.mutate()}
+            disabled={!targetId || postpone.isPending}
+            data-testid="button-confirm-postpone"
+          >
+            {postpone.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Postpone
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Attendance list: users holding CAB roles plus ad-hoc people added via the
+// Active Directory search (same directory lookup as the internal requester).
+// Every toggle/add/remove saves immediately.
+function AttendancePanel({ meetingId }: { meetingId: number }) {
+  const qc = useQueryClient();
+  const attQ = useQuery({
+    queryKey: ["cab.attendance", meetingId],
+    queryFn: () => api.get<{ attendees: CabAttendee[] }>(`/cab-meetings/${meetingId}/attendance`),
+  });
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => {
+    const h = setTimeout(() => setDebounced(query), 250);
+    return () => clearTimeout(h);
+  }, [query]);
+  const searchQ = useQuery({
+    queryKey: ["ldap-search", debounced],
+    queryFn: () => api.get<{ users: LdapSearchUser[]; note?: string }>(`/users/ldap-search?q=${encodeURIComponent(debounced)}`),
+    enabled: debounced.trim().length >= 2,
+  });
+  const ldapOptions: ComboboxOption[] = useMemo(
+    () =>
+      (searchQ.data?.users ?? []).map((u) => ({
+        value: JSON.stringify({ name: u.fullName || u.username, email: u.email || "" }),
+        label: u.fullName || u.username,
+        hint: [u.username, u.email].filter(Boolean).join(" · "),
+      })),
+    [searchQ.data],
+  );
+
+  const save = useMutation({
+    mutationFn: (attendees: CabAttendee[]) =>
+      api.put(`/cab-meetings/${meetingId}/attendance`, {
+        attendees: attendees.map((a) => ({ userId: a.userId, name: a.name, email: a.email, present: a.present })),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["cab.attendance", meetingId] }),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Could not save attendance");
+      qc.invalidateQueries({ queryKey: ["cab.attendance", meetingId] });
+    },
+  });
+
+  const attendees = attQ.data?.attendees ?? [];
+  const keyOf = (a: CabAttendee) => (a.userId != null ? `u${a.userId}` : `e${a.email.toLowerCase()}|${a.name.toLowerCase()}`);
+
+  const togglePresent = (a: CabAttendee) =>
+    save.mutate(attendees.map((x) => (keyOf(x) === keyOf(a) ? { ...x, present: !x.present } : x)));
+  const remove = (a: CabAttendee) => save.mutate(attendees.filter((x) => keyOf(x) !== keyOf(a)));
+  const addFromLdap = (value: string) => {
+    if (!value) return;
+    try {
+      const { name, email } = JSON.parse(value) as { name: string; email: string };
+      const candidate: CabAttendee = { userId: null, name, email, present: true, adHoc: true };
+      if (attendees.some((x) => x.name === name || (email && x.email.toLowerCase() === email.toLowerCase()))) {
+        toast.info(`${name} is already on the list`);
+        return;
+      }
+      save.mutate([...attendees, candidate]);
+      setQuery("");
+    } catch {
+      /* ignore malformed option */
+    }
+  };
+
+  return (
+    <Card data-testid="card-attendance">
+      <CardHeader className="flex-row items-center justify-between space-y-0">
+        <CardTitle className="text-base">
+          Attendance{attendees.length > 0 ? ` (${attendees.filter((a) => a.present).length}/${attendees.length} present)` : ""}
+        </CardTitle>
+        <div className="w-72">
+          <Combobox
+            options={ldapOptions}
+            value=""
+            onChange={addFromLdap}
+            placeholder="Add person…"
+            searchPlaceholder="Search the directory (min 2 chars)…"
+            emptyText={debounced.trim().length < 2 ? "Type at least 2 characters." : searchQ.data?.note || "No directory matches."}
+            onSearchChange={setQuery}
+            loading={searchQ.isFetching}
+            data-testid="select-add-attendee"
+          />
+        </div>
+      </CardHeader>
+      <CardContent>
+        {attQ.isLoading ? (
+          <Skeleton className="h-24 w-full" />
+        ) : attendees.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No CAB members found — assign the CAB member role in Settings or add people via the directory search.
+          </p>
+        ) : (
+          <div className="grid gap-1 sm:grid-cols-2">
+            {attendees.map((a) => (
+              <div key={keyOf(a)} className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-sm" data-testid={`attendee-${keyOf(a)}`}>
+                <Checkbox
+                  checked={a.present}
+                  onCheckedChange={() => togglePresent(a)}
+                  disabled={save.isPending}
+                  data-testid={`checkbox-present-${keyOf(a)}`}
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  {a.name}
+                  {a.email && <span className="ml-1 text-xs text-muted-foreground">· {a.email}</span>}
+                </span>
+                {a.adHoc && (
+                  <>
+                    <span className="rounded bg-muted px-1 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">guest</span>
+                    <button onClick={() => remove(a)} className="text-muted-foreground hover:text-destructive" aria-label={`Remove ${a.name}`} data-testid={`button-remove-attendee-${keyOf(a)}`}>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="mt-2 text-xs text-muted-foreground">
+          Tick who is present. The list is included in the results PDF and guests also receive the results email.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}

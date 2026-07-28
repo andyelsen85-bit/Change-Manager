@@ -193,40 +193,15 @@ describe("POST /approvals/:id/vote — deputy & auto-flip", () => {
     expect(res.body.viaDeputy).toBe(false);
   });
 
-  it("does not auto-flip the change when an approval is abstained (must be explicitly approved)", async () => {
-    dbMock.enqueue("select", [
-      { id: 7, changeId: 1, roleKey: "change_manager", decision: "pending" },
-    ]);
-    dbMock.enqueue("select", [
-      { ...sampleAwaiting, track: "emergency" },
-    ]);
-    dbMock.enqueue("select", [{ id: 5, status: "completed" }]);
-    dbMock.enqueue("select", [
-      { userId: 50, roleKey: "change_manager", isDeputy: true },
-    ]);
-    dbMock.enqueue("update", [
-      {
-        id: 7,
-        decision: "abstain",
-        viaDeputy: true,
-      },
-    ]);
-    // Two approvals total: this one (abstain) + an existing ecab_member approved.
-    // allExplicitlyApproved must be false because of the abstain.
-    dbMock.enqueue("select", [
-      { id: 7, decision: "abstain" },
-      { id: 8, decision: "approved" },
-    ]);
-    dbMock.enqueue("select", [sampleAwaiting]); // for audit/notify
-
+  it("rejects an abstain vote — approvers must approve or reject", async () => {
+    // Abstain was removed as a voting option; the route validates the
+    // decision before touching the database, so nothing is enqueued.
     const app = buildTestApp(approvalsRouter, DEPUTY_SESSION);
     const res = await request(app)
       .post("/api/approvals/7/vote")
       .send({ decision: "abstain" });
 
-    expect(res.status).toBe(200);
-    // No auto-flip happened — status field should be null on the response.
-    expect(res.body.status).toBeNull();
+    expect(res.status).toBe(400);
   });
 
   it("auto-flips to rejected as soon as any approval is rejected", async () => {

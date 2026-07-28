@@ -1472,7 +1472,6 @@ function ApprovalCard({ approval, canVote, onVote, busy }: { approval: Approval;
           <div className="flex gap-2">
             <Button size="sm" onClick={() => onVote("approved", comment)} disabled={busy} data-testid={`button-approve-${approval.id}`}>Approve</Button>
             <Button size="sm" variant="destructive" onClick={() => onVote("rejected", comment)} disabled={busy} data-testid={`button-reject-${approval.id}`}>Reject</Button>
-            <Button size="sm" variant="outline" onClick={() => onVote("abstain", comment)} disabled={busy} data-testid={`button-abstain-${approval.id}`}>Abstain</Button>
           </div>
         </div>
       )}
