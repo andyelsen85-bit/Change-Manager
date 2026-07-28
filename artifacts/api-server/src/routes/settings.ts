@@ -425,6 +425,7 @@ function maskSdp(row: typeof sdpSettingsTable.$inferSelect | undefined) {
       technicianKeySet: false,
       webhookSecret: "",
       tlsRejectUnauthorized: true,
+      onCreateStatusName: "Waiting for Change-it",
       lastWebhookAt: null as string | null,
       lastWebhookRequestId: null as string | null,
       lastWebhookStatus: null as string | null,
@@ -438,6 +439,7 @@ function maskSdp(row: typeof sdpSettingsTable.$inferSelect | undefined) {
     // paste it into the SD+ custom trigger configuration.
     webhookSecret: row.webhookSecret,
     tlsRejectUnauthorized: row.tlsRejectUnauthorized,
+    onCreateStatusName: row.onCreateStatusName,
     lastWebhookAt: row.lastWebhookAt ? row.lastWebhookAt.toISOString() : null,
     lastWebhookRequestId: row.lastWebhookRequestId,
     lastWebhookStatus: row.lastWebhookStatus,
@@ -464,6 +466,11 @@ router.put("/settings/sdp", requireAdmin, async (req, res): Promise<void> => {
     // an empty (insecure) secret.
     webhookSecret: before?.webhookSecret || randomBytes(24).toString("base64url"),
     tlsRejectUnauthorized: b.tlsRejectUnauthorized === false ? false : true,
+    // Empty string is a valid value (disables the on-create status update).
+    onCreateStatusName:
+      typeof b.onCreateStatusName === "string"
+        ? b.onCreateStatusName.trim()
+        : before?.onCreateStatusName ?? "Waiting for Change-it",
   };
   const [row] = await db
     .insert(sdpSettingsTable)

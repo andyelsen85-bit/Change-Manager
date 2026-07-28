@@ -24,7 +24,7 @@ import {
 import { createApprovalsForChange } from "./changes";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
-import { getSdpConfig, sdpAddBackLinkNote, sdpRequestUrl, appBaseUrl } from "../lib/sdp";
+import { getSdpConfig, sdpAddBackLinkNote, sdpSetInitialStatus, sdpRequestUrl, appBaseUrl } from "../lib/sdp";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -325,8 +325,10 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
   }, { id: null, name: "sdp-webhook" });
   await recordWebhook(requestId, `ok: created ${ref}`);
 
-  // Best-effort back-link note into the SD+ ticket (never blocks the response).
+  // Best-effort back-link note + status update into the SD+ ticket
+  // (never blocks the response).
   void sdpAddBackLinkNote(requestId, created).catch(() => {});
+  void sdpSetInitialStatus(requestId).catch(() => {});
 
   res.status(201).json({
     ok: true,

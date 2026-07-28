@@ -137,6 +137,14 @@ function SdpPanel() {
               <Input type="password" value={form.technicianKey} onChange={(e) => setForm({ ...form, technicianKey: e.target.value })} placeholder={form.technicianKeySet ? "••••••••" : "Technician key from SD+ admin"} data-testid="input-sdp-key" />
             </div>
           </div>
+          <div className="space-y-2">
+            <Label>Status set on change creation</Label>
+            <Input value={form.onCreateStatusName} onChange={(e) => setForm({ ...form, onCreateStatusName: e.target.value })} placeholder="Waiting for Change-it" data-testid="input-sdp-oncreate-status" />
+            <p className="text-xs text-muted-foreground">
+              When a change is created from an SD+ ticket, the ticket's status is set to this value. The status must
+              exist in SD+ (Admin → Helpdesk Customizer → Request Status) with the exact same name. Leave empty to disable.
+            </p>
+          </div>
           <div className="flex items-center gap-3">
             <Switch checked={!form.tlsRejectUnauthorized} onCheckedChange={(v) => setForm({ ...form, tlsRejectUnauthorized: !v })} data-testid="switch-sdp-tls" />
             <div>
