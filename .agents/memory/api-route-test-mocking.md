@@ -12,3 +12,5 @@ Rule: every `*.test.ts` in `artifacts/api-server/src/routes/` mocks `@workspace/
 - `DbMock` in `test-helpers.ts` now records every chained builder call in `dbMock.log` (`{call, method, args}`), so tests can assert `.values(...)`, `.set(...)`, `.onConflictDoUpdate(...)` arguments instead of only queued results.
 - It also implements `transaction(fn)` by passing itself through — routes using `db.transaction` work against the same result queue.
 - Mock drizzle `inArray`/`notInArray` as vi.fn wrappers to assert diff-based deletes (e.g. docket diff must use notInArray, never delete-all).
+
+- Routes that notify via `resolveRecipients` need the test's `@workspace/db` mock to export `notificationRoutingRulesTable` (plus `and` in the drizzle-orm mock and `getUserEmails` in the email mock), and one extra queued select for the routing-rules lookup.
