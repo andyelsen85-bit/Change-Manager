@@ -97,6 +97,27 @@ ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS sdp_request_id text;
 -- webhook idempotent even under concurrent replay delivery.
 CREATE UNIQUE INDEX IF NOT EXISTS change_requests_sdp_request_id_active_uq
   ON change_requests (sdp_request_id) WHERE deleted_at IS NULL AND sdp_request_id IS NOT NULL;
+
+-- CAB outcomes & attendance (v2.1.x): docket-level outcome columns read by
+-- GET /cab-meetings/:id — a deployment whose migrate step did not apply
+-- these would 500 on every meeting fetch, so they self-heal here.
+ALTER TABLE cab_changes ADD COLUMN IF NOT EXISTS outcome text;
+ALTER TABLE cab_changes ADD COLUMN IF NOT EXISTS outcome_note text;
+ALTER TABLE cab_changes ADD COLUMN IF NOT EXISTS postponed_to_meeting_id integer;
+CREATE TABLE IF NOT EXISTS cab_attendees (
+  id         serial PRIMARY KEY,
+  meeting_id integer NOT NULL,
+  user_id    integer,
+  name       text NOT NULL,
+  email      text NOT NULL DEFAULT '',
+  present    boolean NOT NULL DEFAULT false,
+  CONSTRAINT cab_attendees_meeting_id_user_id_email_unique UNIQUE (meeting_id, user_id, email)
+);
+
+-- The Workflow Timings settings feature was removed in v2.1.6; dropping the
+-- table here keeps drizzle-kit push from prompting interactively (and thus
+-- hanging the non-TTY migrate container) about the table removal.
+DROP TABLE IF EXISTS workflow_timeouts;
 `;
 
 // Cleanup: per policy update, Technical Reviewer and Business Owner are no longer
