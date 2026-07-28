@@ -31,6 +31,14 @@ const STATEMENTS: { label: string; sql: string }[] = [
         END IF;
       END $$;`,
   },
+  {
+    // Feature removed in v2.1.6. Dropping it BEFORE drizzle-kit push runs
+    // means push never sees a table-removal diff, so it cannot stall on the
+    // interactive "DATA LOSS" confirmation inside the non-TTY migrate
+    // container.
+    label: "drop removed workflow_timeouts table",
+    sql: `DROP TABLE IF EXISTS workflow_timeouts;`,
+  },
 ];
 
 async function main() {
