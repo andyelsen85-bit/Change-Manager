@@ -39,6 +39,22 @@ export function TemplatesPage() {
   const q = useQuery({ queryKey: ["templates"], queryFn: () => api.get<StandardTemplate[]>("/templates") });
   const [editing, setEditing] = useState<StandardTemplate | null>(null);
   const [search, setSearch] = useState("");
+  // Global promotion threshold for the "Potential Standard Change" workflow.
+  const settingsQ = useQuery({
+    queryKey: ["templates.settings"],
+    queryFn: () => api.get<{ promotionThreshold: number }>("/templates/settings"),
+  });
+  const [thresholdInput, setThresholdInput] = useState<string>("");
+  const saveThreshold = useMutation({
+    mutationFn: (n: number) => api.put("/templates/settings", { promotionThreshold: n }),
+    onSuccess: () => {
+      toast.success("Promotion threshold saved");
+      qc.invalidateQueries({ queryKey: ["templates.settings"] });
+      qc.invalidateQueries({ queryKey: ["templates"] });
+      setThresholdInput("");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
+  });
 
   const needle = search.trim().toLowerCase();
   const filtered = (q.data ?? []).filter((t) => {
@@ -103,64 +119,143 @@ export function TemplatesPage() {
         />
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          {q.isLoading ? (
-            <Skeleton className="h-64 w-full" />
-          ) : filtered.length === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground" data-testid="text-no-templates">
+      {isAdmin && (
+        <Card>
+          <CardContent className="flex flex-wrap items-end gap-3 p-4">
+            <div className="space-y-1">
+              <Label htmlFor="promotion-threshold">Standard-promotion threshold</Label>
+              <p className="text-xs text-muted-foreground">
+                Number of completed changes linked to a disabled template before the CAB is flagged to enable it.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                id="promotion-threshold"
+                type="number"
+                min={1}
+                max={1000}
+                className="w-24"
+                placeholder={String(settingsQ.data?.promotionThreshold ?? "")}
+                value={thresholdInput}
+                onChange={(e) => setThresholdInput(e.target.value)}
+                data-testid="input-promotion-threshold"
+              />
+              <Button
+                variant="outline"
+                disabled={
+                  saveThreshold.isPending ||
+                  !Number.isInteger(Number(thresholdInput)) ||
+                  Number(thresholdInput) < 1 ||
+                  Number(thresholdInput) === settingsQ.data?.promotionThreshold
+                }
+                onClick={() => saveThreshold.mutate(Number(thresholdInput))}
+                data-testid="button-save-promotion-threshold"
+              >
+                {saveThreshold.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Current: {settingsQ.data?.promotionThreshold ?? "…"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {q.isLoading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : filtered.length === 0 ? (
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-sm text-muted-foreground" data-testid="text-no-templates">
               {needle ? "No templates match your search." : "No templates yet."}
             </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Risk / Impact</TableHead>
-                  <TableHead>Behavior</TableHead>
-                  <TableHead>Active</TableHead>
-                  {isAdmin && <TableHead className="w-32 text-right">Actions</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((t) => (
-                  <TableRow key={t.id} data-testid={`row-template-${t.id}`}>
-                    <TableCell>
-                      <div className="font-medium">{t.name}</div>
-                      <div className="text-xs text-muted-foreground">{t.description}</div>
-                    </TableCell>
-                    <TableCell className="text-sm">{t.category ?? "—"}</TableCell>
-                    <TableCell className="text-sm capitalize">{t.risk} / {t.impact}</TableCell>
-                    <TableCell className="text-xs">
-                      {t.autoApprove ? <span className="mr-1 text-success">auto-approve</span> : <span className="mr-1 text-muted-foreground">manual</span>}
-                      {t.bypassCab ? <span className="text-success">bypass CAB</span> : <span className="text-muted-foreground">CAB required</span>}
-                    </TableCell>
-                    <TableCell>{t.isActive ? "Yes" : "No"}</TableCell>
-                    {isAdmin && (
-                      <TableCell className="text-right space-x-1">
-                        <Button size="icon" variant="ghost" onClick={() => setEditing({ ...t })} data-testid={`button-edit-template-${t.id}`}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => {
-                            if (confirm("Delete this template?")) del.mutate(t.id);
-                          }}
-                          data-testid={`button-delete-template-${t.id}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {(["enabled", "disabled"] as const).map((group) => {
+            const rows = filtered.filter((t) => (group === "enabled" ? t.isActive : !t.isActive));
+            if (rows.length === 0) return null;
+            return (
+              <Card key={group}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">
+                    {group === "enabled" ? `Enabled templates (${rows.length})` : `Disabled templates (${rows.length})`}
+                  </CardTitle>
+                  {group === "disabled" && (
+                    <p className="text-xs text-muted-foreground">
+                      Not usable for standard changes. The counter shows completed normal changes linked as "Potential
+                      Standard Change" — at {settingsQ.data?.promotionThreshold ?? "…"} the template is flagged to the CAB.
+                    </p>
+                  )}
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Risk / Impact</TableHead>
+                        <TableHead>Behavior</TableHead>
+                        {group === "disabled" && <TableHead>Completed uses</TableHead>}
+                        {isAdmin && <TableHead className="w-32 text-right">Actions</TableHead>}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((t) => (
+                        <TableRow key={t.id} data-testid={`row-template-${t.id}`}>
+                          <TableCell>
+                            <div className="font-medium">{t.name}</div>
+                            <div className="text-xs text-muted-foreground">{t.description}</div>
+                          </TableCell>
+                          <TableCell className="text-sm">{t.category ?? "—"}</TableCell>
+                          <TableCell className="text-sm capitalize">{t.risk} / {t.impact}</TableCell>
+                          <TableCell className="text-xs">
+                            {t.autoApprove ? <span className="mr-1 text-success">auto-approve</span> : <span className="mr-1 text-muted-foreground">manual</span>}
+                            {t.bypassCab ? <span className="text-success">bypass CAB</span> : <span className="text-muted-foreground">CAB required</span>}
+                          </TableCell>
+                          {group === "disabled" && (
+                            <TableCell data-testid={`text-completed-count-${t.id}`}>
+                              <span
+                                className={
+                                  t.promotionReady
+                                    ? "rounded-md border border-warning/40 bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning"
+                                    : "text-sm text-muted-foreground"
+                                }
+                              >
+                                {t.completedLinkedCount ?? 0} / {t.promotionThreshold ?? "…"}
+                                {t.promotionReady ? " — ready for CAB" : ""}
+                              </span>
+                            </TableCell>
+                          )}
+                          {isAdmin && (
+                            <TableCell className="text-right space-x-1">
+                              <Button size="icon" variant="ghost" onClick={() => setEditing({ ...t })} data-testid={`button-edit-template-${t.id}`}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => {
+                                  if (confirm("Delete this template?")) del.mutate(t.id);
+                                }}
+                                data-testid={`button-delete-template-${t.id}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </>
+      )}
 
       <Dialog open={editing != null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="max-w-2xl">

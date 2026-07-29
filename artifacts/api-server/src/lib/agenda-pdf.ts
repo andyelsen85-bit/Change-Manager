@@ -166,6 +166,24 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
   const riskRank = (r: string): number => (r === "high" ? 0 : r === "medium" ? 1 : 2);
   changes.sort((a, b) => riskRank(a.change.risk) - riskRank(b.change.risk));
 
+  // "Potential Standard Change" promotion flags: for docketed changes linked
+  // to a disabled template, show trial progress — and call it out when the
+  // completed-changes threshold is reached so the CAB can decide to enable
+  // the template as a real standard change.
+  const potIds = [...new Set(changes.map((c) => c.change.potentialTemplateId).filter((x): x is number => x != null))];
+  const promoByTemplate = new Map<number, { name: string; completedCount: number; threshold: number; ready: boolean }>();
+  if (potIds.length > 0) {
+    const { getCompletedCountsByTemplate, getPromotionThreshold } = await import("./template-promotion");
+    const { standardTemplatesTable } = await import("@workspace/db");
+    const { inArray } = await import("drizzle-orm");
+    const [counts, threshold] = await Promise.all([getCompletedCountsByTemplate(potIds), getPromotionThreshold()]);
+    const tpls = await db.select().from(standardTemplatesTable).where(inArray(standardTemplatesTable.id, potIds));
+    for (const t of tpls) {
+      const completedCount = counts.get(t.id) ?? 0;
+      promoByTemplate.set(t.id, { name: t.name, completedCount, threshold, ready: completedCount >= threshold });
+    }
+  }
+
   const kindLabel = m.kind === "ecab" ? "Emergency CAB" : "CAB meeting";
   // bufferPages lets us go back to page 1 at the end and fill in the real
   // page number of each change (a change may now span several pages).
@@ -283,6 +301,27 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
       ["Ticket", c.ticketLink || (c.sdpRequestId ? `SD+ #${c.sdpRequestId}` : "—")],
       ["Pre-prod env", c.hasPreprodEnv ? "Yes" : "No"],
     ]);
+
+    // Potential Standard Change callout: trial progress, highlighted when the
+    // promotion threshold is reached so the CAB explicitly discusses enabling
+    // the template.
+    const promo = c.potentialTemplateId != null ? promoByTemplate.get(c.potentialTemplateId) : undefined;
+    if (promo) {
+      doc.moveDown(0.3);
+      const y = doc.y;
+      const text = promo.ready
+        ? `POTENTIAL STANDARD CHANGE — threshold reached: ${promo.completedCount} of ${promo.threshold} completed changes for template "${promo.name}". The CAB should consider enabling this template as a standard change.`
+        : `Potential Standard Change — trial progress: ${promo.completedCount} of ${promo.threshold} completed changes for template "${promo.name}".`;
+      const h = doc.font(promo.ready ? "Helvetica-Bold" : "Helvetica").fontSize(9.5).heightOfString(text, { width: CONTENT_W - 16 }) + 10;
+      doc
+        .save()
+        .rect(MARGIN, y, CONTENT_W, h)
+        .fill(promo.ready ? "#FEF3C7" : "#F1F5F9")
+        .restore();
+      doc.fillColor(promo.ready ? "#92400E" : COLORS.muted).text(text, MARGIN + 8, y + 5, { width: CONTENT_W - 16 });
+      doc.y = y + h + 4;
+      doc.fillColor(COLORS.ink);
+    }
 
     // Full text, no truncation: each section flows onto continuation pages
     // as needed; the next change always starts on a fresh page (addPage

@@ -54,6 +54,11 @@ export type StandardTemplate = {
   prefilledPlanning: string | null;
   prefilledTestPlan: string | null;
   isActive: boolean;
+  // Potential-standard promotion progress (server-computed): completed normal
+  // changes linked via potentialTemplateId vs the global threshold.
+  completedLinkedCount?: number;
+  promotionThreshold?: number;
+  promotionReady?: boolean;
 };
 
 export type ChangeTrack = "normal" | "standard" | "emergency";
@@ -91,6 +96,10 @@ export type ChangeRequest = {
   assigneeId: number | null;
   assigneeName?: string | null;
   templateId: number | null;
+  // "Potential Standard Change": link to a DISABLED template being trialled.
+  potentialTemplateId?: number | null;
+  potentialTemplateName?: string | null;
+  standardPromotion?: { completedCount: number; threshold: number; ready: boolean } | null;
   cabMeetingId: number | null;
   cabMeetingDate?: string | null;
   hasPreprodEnv?: boolean;
@@ -226,6 +235,8 @@ export type CabMeetingDetail = CabMeeting & {
     outcome: string | null;
     outcomeNote: string | null;
     postponedToMeetingId: number | null;
+    potentialTemplateId?: number | null;
+    standardPromotion?: { name: string; completedCount: number; threshold: number; ready: boolean } | null;
   }[];
 };
 

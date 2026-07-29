@@ -65,6 +65,15 @@ export const notificationSettingsTable = pgTable("notification_settings", {
   lastRunAt: timestamp("last_run_at", { withTimezone: true }),
 });
 
+// Standard-template promotion. Single-row table (key='global').
+// `promotionThreshold` = how many NORMAL changes linked to a disabled
+// template must reach status 'completed' before the CAB is flagged that the
+// template is a candidate for being enabled as a standard change.
+export const templateSettingsTable = pgTable("template_settings", {
+  key: text("key").primaryKey().default("global"),
+  promotionThreshold: integer("promotion_threshold").notNull().default(5),
+});
+
 // ManageEngine ServiceDesk Plus (on-premises) integration. Single-row table
 // (key='global'). The technician key is encrypted at rest like other secrets.
 // `webhookSecret` authenticates inbound webhook calls from SD+ custom triggers;

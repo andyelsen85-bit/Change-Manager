@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, standardTemplatesTable } from "@workspace/db";
+import { db, standardTemplatesTable, templateSettingsTable } from "@workspace/db";
 import { requireAuth, requireRole } from "../lib/auth";
+import { getCompletedCountsByTemplate, getPromotionThreshold, DEFAULT_PROMOTION_THRESHOLD } from "../lib/template-promotion";
 
 // Template management is a governance duty: admins always pass (requireRole
 // bypass) and Change Managers get the same edit/add/delete rights.
@@ -12,7 +13,76 @@ const router: IRouter = Router();
 
 router.get("/templates", requireAuth, async (_req, res): Promise<void> => {
   const rows = await db.select().from(standardTemplatesTable);
-  res.json(rows);
+  // Promotion progress for the "Potential Standard Change" workflow: how many
+  // linked normal changes have completed per (disabled) template, and the
+  // global threshold at which the template becomes a promotion candidate.
+  const [counts, threshold] = await Promise.all([getCompletedCountsByTemplate(), getPromotionThreshold()]);
+  res.json(
+    rows.map((t) => ({
+      ...t,
+      completedLinkedCount: counts.get(t.id) ?? 0,
+      promotionThreshold: threshold,
+      promotionReady: !t.isActive && (counts.get(t.id) ?? 0) >= threshold,
+    })),
+  );
+});
+
+// Global promotion threshold. Readable by every authenticated user (the flag
+// is rendered on change detail + CAB pages); writable only by governance.
+router.get("/templates/settings", requireAuth, async (_req, res): Promise<void> => {
+  res.json({ promotionThreshold: await getPromotionThreshold() });
+});
+
+router.put("/templates/settings", requireTemplateManager, async (req, res): Promise<void> => {
+  const n = Number(req.body?.promotionThreshold);
+  if (!Number.isInteger(n) || n < 1 || n > 1000) {
+    res.status(400).json({ error: "promotionThreshold must be an integer between 1 and 1000." });
+    return;
+  }
+  await db
+    .insert(templateSettingsTable)
+    .values({ key: "global", promotionThreshold: n })
+    .onConflictDoUpdate({ target: templateSettingsTable.key, set: { promotionThreshold: n } });
+  await audit(req, {
+    action: "template.settings_updated",
+    entityType: "template",
+    entityId: 0,
+    summary: `Standard-promotion threshold set to ${n} completed changes`,
+    after: { promotionThreshold: n },
+  });
+  res.json({ promotionThreshold: n });
+});
+
+// Ad-hoc creation of a DISABLED template from the change form ("Potential
+// Standard Change" → "create new"). Open to every authenticated user — the
+// template starts disabled, so it cannot be used to run standard changes; it
+// only serves as the bucket that counts completed trial runs. Enabling it
+// remains a governance action (PATCH /templates/:id, admin/change manager).
+router.post("/templates/potential", requireAuth, async (req, res): Promise<void> => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  if (name.length < 3) {
+    res.status(400).json({ error: "Template name is required (min 3 characters)." });
+    return;
+  }
+  const [created] = await db
+    .insert(standardTemplatesTable)
+    .values({
+      name,
+      description: typeof req.body?.description === "string" ? req.body.description.trim() : "",
+      category: typeof req.body?.category === "string" && req.body.category ? req.body.category : "general",
+      autoApprove: true,
+      bypassCab: true,
+      isActive: false,
+    })
+    .returning();
+  await audit(req, {
+    action: "template.created",
+    entityType: "template",
+    entityId: created.id,
+    summary: `Created potential standard template "${created.name}" (disabled)`,
+    after: created,
+  });
+  res.status(201).json({ ...created, completedLinkedCount: 0, promotionThreshold: DEFAULT_PROMOTION_THRESHOLD, promotionReady: false });
 });
 
 router.post("/templates", requireTemplateManager, async (req, res): Promise<void> => {
