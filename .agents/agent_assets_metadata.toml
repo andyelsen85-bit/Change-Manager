@@ -12,3 +12,9 @@ id = "cRZGIRGPQ_tcBEDYFyUKb"
 uri = "file://docs/how-to-create-a-change.pdf"
 type = "pdf"
 title = "How to create a change — one-page guide"
+
+[[outputs]]
+id = "aBvadquQKy-G5TjUsKbJl"
+uri = "file://.local/assets/change-it-whats-new-2.2.2.pdf"
+type = "pdf"
+title = "Change-it — What's new (v2.2.0 → 2.2.2)"
