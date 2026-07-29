@@ -87,24 +87,49 @@ function toDay(value: string | null | undefined): Date | null {
   }
 }
 
-// ISO string -> value for <input type="datetime-local"> in local time.
-function toLocalInput(iso: string | null | undefined): string {
-  if (!iso) return "";
+// ISO string -> local date ("yyyy-MM-dd") and 24h time ("HH:mm") parts.
+// Split date + explicit 24h time fields are used instead of a native
+// datetime-local input, whose time picker renders AM/PM in many browser
+// locales and cannot be forced to 24h.
+function toLocalParts(iso: string | null | undefined): { date: string; time: string } {
+  if (!iso) return { date: "", time: "" };
   const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
+  if (isNaN(d.getTime())) return { date: "", time: "" };
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+  };
+}
+
+const TIME_24H = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// Local date + 24h time -> ISO string ("" time defaults to 00:00).
+function partsToIso(date: string, time: string): string | null {
+  if (!date) return null;
+  const d = new Date(`${date}T${time || "00:00"}`);
+  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 type ExternalForm = {
   title: string;
   provider: string;
   description: string;
-  startAt: string; // datetime-local value
-  endAt: string; // datetime-local value
+  startDate: string; // yyyy-MM-dd
+  startTime: string; // HH:mm (24h)
+  endDate: string;
+  endTime: string;
 };
 
-const EMPTY_FORM: ExternalForm = { title: "", provider: "", description: "", startAt: "", endAt: "" };
+const EMPTY_FORM: ExternalForm = {
+  title: "",
+  provider: "",
+  description: "",
+  startDate: "",
+  startTime: "",
+  endDate: "",
+  endTime: "",
+};
 
 export function ChangePlanningsPage() {
   const [, setLocation] = useLocation();
@@ -137,8 +162,8 @@ export function ChangePlanningsPage() {
         title: form.title.trim(),
         provider: form.provider.trim(),
         description: form.description.trim(),
-        startAt: form.startAt ? new Date(form.startAt).toISOString() : "",
-        endAt: form.endAt ? new Date(form.endAt).toISOString() : null,
+        startAt: partsToIso(form.startDate, form.startTime) ?? "",
+        endAt: partsToIso(form.endDate, form.endTime),
       };
       if (editing === "new") return api.post<ExternalChange>("/external-changes", payload);
       return api.patch<ExternalChange>(`/external-changes/${(editing as ExternalChange).id}`, payload);
@@ -171,8 +196,10 @@ export function ChangePlanningsPage() {
       title: ext.title,
       provider: ext.provider,
       description: ext.description ?? "",
-      startAt: toLocalInput(ext.startAt),
-      endAt: toLocalInput(ext.endAt),
+      startDate: toLocalParts(ext.startAt).date,
+      startTime: toLocalParts(ext.startAt).time,
+      endDate: toLocalParts(ext.endAt).date,
+      endTime: toLocalParts(ext.endAt).time,
     });
     setEditing(ext);
   }
@@ -255,7 +282,9 @@ export function ChangePlanningsPage() {
 
   const totalPlanned = planned.length;
   const isLoading = changesQ.isLoading || externalsQ.isLoading;
-  const canSave = form.title.trim().length > 0 && form.startAt.length > 0;
+  const startTimeOk = form.startTime === "" || TIME_24H.test(form.startTime);
+  const endTimeOk = form.endTime === "" || TIME_24H.test(form.endTime);
+  const canSave = form.title.trim().length > 0 && form.startDate.length > 0 && startTimeOk && endTimeOk;
 
   return (
     <div className="space-y-4" data-testid="page-change-plannings">
@@ -311,6 +340,9 @@ export function ChangePlanningsPage() {
                   const laneCount = segs.reduce((m, s) => Math.max(m, s.lane + 1), 0);
                   // Reserve vertical room for the stacked bars beneath the date row.
                   const barsAreaHeight = laneCount * 26 + (laneCount ? 6 : 0);
+                  // Day cells must grow with the bars so borders always enclose them:
+                  // 28px date row + bars area + 8px bottom padding, min 112px.
+                  const cellMinHeight = Math.max(112, 28 + barsAreaHeight + 8);
                   return (
                     <div key={wi} className="relative border-t border-border first:border-t-0">
                       {/* Day cells (background) */}
@@ -322,9 +354,10 @@ export function ChangePlanningsPage() {
                             <div
                               key={day.toISOString()}
                               className={cn(
-                                "min-h-[112px] border-l border-border p-1.5 first:border-l-0",
+                                "border-l border-border p-1.5 first:border-l-0",
                                 !inMonth && "bg-muted/40 text-muted-foreground",
                               )}
+                              style={{ minHeight: cellMinHeight }}
                               data-testid={`day-${format(day, "yyyy-MM-dd")}`}
                             >
                               <div className={cn("flex justify-end text-xs font-medium", today && "text-primary")}>
@@ -401,8 +434,6 @@ export function ChangePlanningsPage() {
                           );
                         })}
                       </div>
-                      {/* Spacer to push cell height to fit bars when many lanes stack */}
-                      {barsAreaHeight > 84 && <div style={{ height: barsAreaHeight - 84 }} aria-hidden="true" />}
                     </div>
                   );
                 })}
@@ -452,21 +483,41 @@ export function ChangePlanningsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Start *</Label>
-                <Input
-                  type="datetime-local"
-                  value={form.startAt}
-                  onChange={(e) => setForm({ ...form, startAt: e.target.value })}
-                  data-testid="input-external-start"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    type="date"
+                    value={form.startDate}
+                    onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                    data-testid="input-external-start-date"
+                  />
+                  <Input
+                    value={form.startTime}
+                    onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                    placeholder="HH:MM"
+                    maxLength={5}
+                    className={cn("w-24 shrink-0", !startTimeOk && "border-destructive")}
+                    data-testid="input-external-start-time"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>End</Label>
-                <Input
-                  type="datetime-local"
-                  value={form.endAt}
-                  onChange={(e) => setForm({ ...form, endAt: e.target.value })}
-                  data-testid="input-external-end"
-                />
+                <div className="flex gap-2">
+                  <Input
+                    type="date"
+                    value={form.endDate}
+                    onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                    data-testid="input-external-end-date"
+                  />
+                  <Input
+                    value={form.endTime}
+                    onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                    placeholder="HH:MM"
+                    maxLength={5}
+                    className={cn("w-24 shrink-0", !endTimeOk && "border-destructive")}
+                    data-testid="input-external-end-time"
+                  />
+                </div>
               </div>
             </div>
             <div className="space-y-2">
