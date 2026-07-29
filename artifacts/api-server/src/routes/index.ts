@@ -18,6 +18,7 @@ import assigneesRouter from "./assignees";
 import attachmentsRouter from "./attachments";
 import notificationRoutingRouter from "./notification-routing";
 import pentestRouter from "./pentest";
+import externalChangesRouter from "./external-changes";
 import discussionsRouter from "./discussions";
 import sdpRouter from "./sdp";
 
@@ -42,6 +43,7 @@ router.use(assigneesRouter);
 router.use(attachmentsRouter);
 router.use(notificationRoutingRouter);
 router.use(pentestRouter);
+router.use(externalChangesRouter);
 router.use(discussionsRouter);
 router.use(sdpRouter);
 

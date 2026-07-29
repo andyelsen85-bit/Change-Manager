@@ -316,6 +316,18 @@ export type SmtpSettings = {
   caCertInstalled: boolean;
 };
 
+export type ExternalChange = {
+  id: number;
+  title: string;
+  provider: string;
+  description: string | null;
+  startAt: string;
+  endAt: string | null;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SdpSettings = {
   enabled: boolean;
   baseUrl: string;

@@ -17,3 +17,4 @@ export * from "./attachments";
 export * from "./notification_queue";
 export * from "./notification_routing";
 export * from "./pentest";
+export * from "./external_changes";

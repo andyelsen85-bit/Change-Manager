@@ -95,6 +95,20 @@ CREATE TABLE IF NOT EXISTS sdp_settings (
 );
 ALTER TABLE sdp_settings ADD COLUMN IF NOT EXISTS on_create_status_name text NOT NULL DEFAULT 'Waiting for Change-it';
 ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS sdp_request_id text;
+
+-- External changes: third-party maintenance windows shown on the Change
+-- Plannings calendar for visibility only (no workflow/approvals).
+CREATE TABLE IF NOT EXISTS external_changes (
+  id          serial PRIMARY KEY,
+  title       text NOT NULL,
+  provider    text NOT NULL DEFAULT '',
+  description text,
+  start_at    timestamptz NOT NULL,
+  end_at      timestamptz,
+  created_by  integer,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
 -- At most ONE active (non-deleted) change per SD+ request — makes the
 -- webhook idempotent even under concurrent replay delivery.
 CREATE UNIQUE INDEX IF NOT EXISTS change_requests_sdp_request_id_active_uq
