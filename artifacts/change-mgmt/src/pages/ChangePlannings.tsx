@@ -453,7 +453,7 @@ export function ChangePlanningsPage() {
 
       {/* External change create / edit dialog */}
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent className="sm:max-w-lg" data-testid="dialog-external-change">
+        <DialogContent className="sm:max-w-2xl" data-testid="dialog-external-change">
           <DialogHeader>
             <DialogTitle>{editing === "new" ? "Add external change" : "Edit external change"}</DialogTitle>
             <DialogDescription>
