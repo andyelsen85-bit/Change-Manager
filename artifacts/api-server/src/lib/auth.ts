@@ -2,8 +2,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
-import { eq } from "drizzle-orm";
-import { db, usersTable, roleAssignmentsTable } from "@workspace/db";
+import { and, eq } from "drizzle-orm";
+import { db, usersTable, roleAssignmentsTable, changeAssigneesTable } from "@workspace/db";
 
 const NODE_ENV = process.env["NODE_ENV"] ?? "development";
 const RAW_SECRET = process.env["JWT_SECRET"];
@@ -288,6 +288,7 @@ export type ChangeViewerRole = (typeof CHANGE_VIEWER_ROLES)[number];
 export type ChangeAccessReason =
   | "owner"
   | "assignee"
+  | "per_change_assignee"
   | "admin"
   | GovernanceRole
   | ChangeViewerRole
@@ -296,7 +297,7 @@ export type ChangeAccessReason =
 
 export async function getChangeAccess(
   session: SessionPayload,
-  change: { ownerId: number; assigneeId: number | null },
+  change: { id?: number; ownerId: number; assigneeId: number | null },
 ): Promise<ChangeAccessReason> {
   if (session.isAdmin) return "admin";
   if (change.ownerId === session.uid) return "owner";
@@ -304,6 +305,20 @@ export async function getChangeAccess(
   const userRoles = await loadUserRoles(session.uid);
   for (const role of GOVERNANCE_ROLES) {
     if (userRoles.includes(role)) return role;
+  }
+  // Per-change assignees (Implementer / Tester picked in the Assignees tab)
+  // get full working access to THEIR change — they must be able to start
+  // implementation, fill in testing records, and transition statuses.
+  // Explicit user requirement (July 2026). Not privileged: isPrivilegedAccess
+  // stays admin/governance-only, so they cannot delete, move a change into
+  // approval, or override a signed-off planning record.
+  if (typeof change.id === "number") {
+    const [row] = await db
+      .select({ id: changeAssigneesTable.id })
+      .from(changeAssigneesTable)
+      .where(and(eq(changeAssigneesTable.changeId, change.id), eq(changeAssigneesTable.userId, session.uid)))
+      .limit(1);
+    if (row) return "per_change_assignee";
   }
   return null;
 }
