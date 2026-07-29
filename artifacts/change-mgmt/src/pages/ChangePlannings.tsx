@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
   addDays,
@@ -13,26 +13,37 @@ import {
   startOfMonth,
   startOfWeek,
 } from "date-fns";
-import { CalendarRange, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarRange, CheckCircle2, ChevronLeft, ChevronRight, Globe, Loader2, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { ChangeRequest } from "@/lib/types";
+import type { ChangeRequest, ExternalChange } from "@/lib/types";
 import { STATUS_LABELS } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 import { fmtDateShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-// A planning bar is a single change clipped to one calendar week. A change that
+// A calendar bar is either one of our change requests or an external change
+// (third-party maintenance window, visibility only).
+type CalItem =
+  | { kind: "change"; id: string; change: ChangeRequest }
+  | { kind: "external"; id: string; external: ExternalChange };
+
+// A planning bar is a single item clipped to one calendar week. An item that
 // spans several weeks produces one segment per week, each laid out on its own
 // row of the grid. `lane` is the vertical slot within the week so overlapping
-// changes stack instead of colliding.
+// items stack instead of colliding.
 type WeekSegment = {
-  change: ChangeRequest;
+  item: CalItem;
   startCol: number; // 0-6 (Mon..Sun)
   span: number; // number of day columns
-  isStart: boolean; // true if the change actually starts in this segment
-  isEnd: boolean; // true if the change actually ends in this segment
+  isStart: boolean; // true if the item actually starts in this segment
+  isEnd: boolean; // true if the item actually ends in this segment
   lane: number;
 };
 
@@ -55,8 +66,15 @@ function barColor(id: number): string {
   return BAR_PALETTE[id % BAR_PALETTE.length];
 }
 
+// External changes render as red hazard stripes — a deliberate "barrier tape"
+// look that reads as "not ours, caution" and cannot be confused with any
+// palette colour used for our own changes.
+const EXTERNAL_BAR_STYLE: React.CSSProperties = {
+  backgroundImage: "repeating-linear-gradient(135deg, #dc2626 0px, #dc2626 10px, #991b1b 10px, #991b1b 20px)",
+};
+
 // Parse a planned timestamp to a local-day boundary. Returns null when the
-// value is missing or unparseable so the caller can skip the change.
+// value is missing or unparseable so the caller can skip the item.
 function toDay(value: string | null | undefined): Date | null {
   if (!value) return null;
   try {
@@ -69,9 +87,35 @@ function toDay(value: string | null | undefined): Date | null {
   }
 }
 
+// ISO string -> value for <input type="datetime-local"> in local time.
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+type ExternalForm = {
+  title: string;
+  provider: string;
+  description: string;
+  startAt: string; // datetime-local value
+  endAt: string; // datetime-local value
+};
+
+const EMPTY_FORM: ExternalForm = { title: "", provider: "", description: "", startAt: "", endAt: "" };
+
 export function ChangePlanningsPage() {
   const [, setLocation] = useLocation();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  // Dialog state: null = closed, "new" = create, otherwise the external
+  // change being edited.
+  const [editing, setEditing] = useState<ExternalChange | "new" | null>(null);
+  const [form, setForm] = useState<ExternalForm>(EMPTY_FORM);
 
   // All changes, then filtered client-side: open changes plus completed ones
   // (shown with a green check mark). Cancelled / rejected / rolled-back
@@ -82,6 +126,57 @@ export function ChangePlanningsPage() {
     select: (rows) => rows.filter((c) => !["cancelled", "rejected", "rolled_back"].includes(c.status)),
   });
 
+  const externalsQ = useQuery({
+    queryKey: ["external-changes"],
+    queryFn: () => api.get<ExternalChange[]>("/external-changes"),
+  });
+
+  const saveExternal = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        title: form.title.trim(),
+        provider: form.provider.trim(),
+        description: form.description.trim(),
+        startAt: form.startAt ? new Date(form.startAt).toISOString() : "",
+        endAt: form.endAt ? new Date(form.endAt).toISOString() : null,
+      };
+      if (editing === "new") return api.post<ExternalChange>("/external-changes", payload);
+      return api.patch<ExternalChange>(`/external-changes/${(editing as ExternalChange).id}`, payload);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["external-changes"] });
+      setEditing(null);
+      toast({ title: editing === "new" ? "External change added" : "External change updated" });
+    },
+    onError: (e: Error) => toast({ title: "Save failed", description: e.message, variant: "destructive" }),
+  });
+
+  const deleteExternal = useMutation({
+    mutationFn: async () => api.delete(`/external-changes/${(editing as ExternalChange).id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["external-changes"] });
+      setEditing(null);
+      toast({ title: "External change deleted" });
+    },
+    onError: (e: Error) => toast({ title: "Delete failed", description: e.message, variant: "destructive" }),
+  });
+
+  function openNew() {
+    setForm(EMPTY_FORM);
+    setEditing("new");
+  }
+
+  function openEdit(ext: ExternalChange) {
+    setForm({
+      title: ext.title,
+      provider: ext.provider,
+      description: ext.description ?? "",
+      startAt: toLocalInput(ext.startAt),
+      endAt: toLocalInput(ext.endAt),
+    });
+    setEditing(ext);
+  }
+
   const gridStart = useMemo(() => startOfWeek(startOfMonth(cursor), { weekStartsOn: 1 }), [cursor]);
   const days = useMemo(() => Array.from({ length: 42 }, (_, i) => addDays(gridStart, i)), [gridStart]);
   const weeks = useMemo(() => {
@@ -90,22 +185,29 @@ export function ChangePlanningsPage() {
     return out;
   }, [days]);
 
-  // Changes that have a planned window and overlap the visible 6-week grid.
+  // Items that have a planned window and overlap the visible 6-week grid.
   const planned = useMemo(() => {
     const gridEnd = addDays(gridStart, 41);
-    return (changesQ.data ?? [])
-      .map((c) => {
-        const start = toDay(c.plannedStart);
-        if (!start) return null;
-        // Open-ended (no plannedEnd) renders as a single day.
-        const end = toDay(c.plannedEnd) ?? start;
-        const lo = start <= end ? start : end;
-        const hi = start <= end ? end : start;
-        return { change: c, start: lo, end: hi };
-      })
-      .filter((x): x is { change: ChangeRequest; start: Date; end: Date } => x !== null)
-      .filter((x) => x.end >= gridStart && x.start <= gridEnd);
-  }, [changesQ.data, gridStart]);
+    const items: { item: CalItem; start: Date; end: Date }[] = [];
+    for (const c of changesQ.data ?? []) {
+      const start = toDay(c.plannedStart);
+      if (!start) continue;
+      // Open-ended (no plannedEnd) renders as a single day.
+      const end = toDay(c.plannedEnd) ?? start;
+      const lo = start <= end ? start : end;
+      const hi = start <= end ? end : start;
+      items.push({ item: { kind: "change", id: `c-${c.id}`, change: c }, start: lo, end: hi });
+    }
+    for (const x of externalsQ.data ?? []) {
+      const start = toDay(x.startAt);
+      if (!start) continue;
+      const end = toDay(x.endAt) ?? start;
+      const lo = start <= end ? start : end;
+      const hi = start <= end ? end : start;
+      items.push({ item: { kind: "external", id: `x-${x.id}`, external: x }, start: lo, end: hi });
+    }
+    return items.filter((x) => x.end >= gridStart && x.start <= gridEnd);
+  }, [changesQ.data, externalsQ.data, gridStart]);
 
   // Build per-week segments with lane assignment so overlapping bars stack.
   const segmentsByWeek = useMemo(() => {
@@ -113,14 +215,14 @@ export function ChangePlanningsPage() {
       const weekStart = week[0];
       const weekEnd = week[6];
       const segs: WeekSegment[] = [];
-      for (const { change, start, end } of planned) {
+      for (const { item, start, end } of planned) {
         if (end < weekStart || start > weekEnd) continue;
         const segStart = start < weekStart ? weekStart : start;
         const segEnd = end > weekEnd ? weekEnd : end;
         const startCol = differenceInCalendarDays(segStart, weekStart);
         const span = differenceInCalendarDays(segEnd, segStart) + 1;
         segs.push({
-          change,
+          item,
           startCol,
           span,
           isStart: isSameDay(segStart, start),
@@ -152,6 +254,8 @@ export function ChangePlanningsPage() {
   }, [weeks, planned]);
 
   const totalPlanned = planned.length;
+  const isLoading = changesQ.isLoading || externalsQ.isLoading;
+  const canSave = form.title.trim().length > 0 && form.startAt.length > 0;
 
   return (
     <div className="space-y-4" data-testid="page-change-plannings">
@@ -162,25 +266,35 @@ export function ChangePlanningsPage() {
             Planned windows for all open changes. Each bar spans a change's scheduled start to end — click it to open the change.
           </p>
         </div>
+        <Button onClick={openNew} data-testid="button-add-external">
+          <Plus className="mr-2 h-4 w-4" />
+          Add external change
+        </Button>
       </div>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">{format(cursor, "MMMM yyyy")}</CardTitle>
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={() => setCursor((c) => addMonths(c, -1))} data-testid="button-prev-month">
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setCursor(startOfMonth(new Date()))} data-testid="button-today">
-              Today
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => setCursor((c) => addMonths(c, 1))} data-testid="button-next-month">
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+          <div className="flex items-center gap-3">
+            <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" data-testid="legend-external">
+              <span className="inline-block h-3 w-6 rounded-sm" style={EXTERNAL_BAR_STYLE} />
+              External change (provider / third party)
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" onClick={() => setCursor((c) => addMonths(c, -1))} data-testid="button-prev-month">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setCursor(startOfMonth(new Date()))} data-testid="button-today">
+                Today
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => setCursor((c) => addMonths(c, 1))} data-testid="button-next-month">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
-          {changesQ.isLoading ? (
+          {isLoading ? (
             <Skeleton className="h-[520px] w-full" />
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
@@ -228,35 +342,64 @@ export function ChangePlanningsPage() {
                       </div>
                       {/* Bars overlay */}
                       <div className="pointer-events-none absolute inset-x-0 top-7 px-1" style={{ height: barsAreaHeight }}>
-                        {segs.map((seg) => (
-                          <button
-                            key={`${seg.change.id}-${seg.startCol}`}
-                            onClick={() => setLocation(`/changes/${seg.change.id}`)}
-                            title={`${seg.change.ref} · ${seg.change.title} · ${STATUS_LABELS[seg.change.status] ?? seg.change.status}\n${fmtDateShort(seg.change.plannedStart)} → ${fmtDateShort(seg.change.plannedEnd ?? seg.change.plannedStart)}`}
-                            data-testid={`planning-bar-${seg.change.id}`}
-                            className={cn(
+                        {segs.map((seg) => {
+                          const common = {
+                            className: cn(
                               "pointer-events-auto absolute flex h-[22px] items-center truncate px-2 text-[11px] font-medium shadow-sm transition-colors",
-                              seg.change.status === "completed"
-                                ? "bg-emerald-600/80 hover:bg-emerald-600 text-white"
-                                : barColor(seg.change.id),
                               seg.isStart ? "rounded-l-md" : "rounded-l-none",
                               seg.isEnd ? "rounded-r-md" : "rounded-r-none",
-                            )}
-                            style={{
+                            ),
+                            style: {
                               left: `calc(${(seg.startCol / 7) * 100}% + 2px)`,
                               width: `calc(${(seg.span / 7) * 100}% - 4px)`,
                               top: seg.lane * 26,
-                            }}
-                          >
-                            {seg.change.status === "completed" && (
-                              <CheckCircle2 className="mr-1 h-3.5 w-3.5 shrink-0 text-green-200" data-testid={`icon-completed-${seg.change.id}`} />
-                            )}
-                            <span className="truncate">
-                              {!seg.isStart && "… "}
-                              <span className="font-mono">{seg.change.ref}</span> {seg.change.title}
-                            </span>
-                          </button>
-                        ))}
+                            } as React.CSSProperties,
+                          };
+                          if (seg.item.kind === "external") {
+                            const x = seg.item.external;
+                            return (
+                              <button
+                                key={`${seg.item.id}-${seg.startCol}`}
+                                onClick={() => openEdit(x)}
+                                title={`External change · ${x.title}${x.provider ? ` · ${x.provider}` : ""}\n${fmtDateShort(x.startAt)} → ${fmtDateShort(x.endAt ?? x.startAt)}\nClick to edit`}
+                                data-testid={`external-bar-${x.id}`}
+                                className={cn(common.className, "text-white hover:brightness-110")}
+                                style={{ ...common.style, ...EXTERNAL_BAR_STYLE }}
+                              >
+                                <Globe className="mr-1 h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">
+                                  {!seg.isStart && "… "}
+                                  <span className="font-semibold">EXT</span> {x.title}
+                                  {x.provider ? ` — ${x.provider}` : ""}
+                                </span>
+                              </button>
+                            );
+                          }
+                          const c = seg.item.change;
+                          return (
+                            <button
+                              key={`${seg.item.id}-${seg.startCol}`}
+                              onClick={() => setLocation(`/changes/${c.id}`)}
+                              title={`${c.ref} · ${c.title} · ${STATUS_LABELS[c.status] ?? c.status}\n${fmtDateShort(c.plannedStart)} → ${fmtDateShort(c.plannedEnd ?? c.plannedStart)}`}
+                              data-testid={`planning-bar-${c.id}`}
+                              className={cn(
+                                common.className,
+                                c.status === "completed"
+                                  ? "bg-emerald-600/80 hover:bg-emerald-600 text-white"
+                                  : barColor(c.id),
+                              )}
+                              style={common.style}
+                            >
+                              {c.status === "completed" && (
+                                <CheckCircle2 className="mr-1 h-3.5 w-3.5 shrink-0 text-green-200" data-testid={`icon-completed-${c.id}`} />
+                              )}
+                              <span className="truncate">
+                                {!seg.isStart && "… "}
+                                <span className="font-mono">{c.ref}</span> {c.title}
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                       {/* Spacer to push cell height to fit bars when many lanes stack */}
                       {barsAreaHeight > 84 && <div style={{ height: barsAreaHeight - 84 }} aria-hidden="true" />}
@@ -267,7 +410,7 @@ export function ChangePlanningsPage() {
             </div>
           )}
 
-          {!changesQ.isLoading && totalPlanned === 0 && (
+          {!isLoading && totalPlanned === 0 && (
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-muted-foreground">
               <CalendarRange className="h-8 w-8" />
               <p className="text-sm">No open changes have a planned window in view.</p>
@@ -276,6 +419,93 @@ export function ChangePlanningsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* External change create / edit dialog */}
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="sm:max-w-lg" data-testid="dialog-external-change">
+          <DialogHeader>
+            <DialogTitle>{editing === "new" ? "Add external change" : "Edit external change"}</DialogTitle>
+            <DialogDescription>
+              A third-party maintenance window (provider, vendor, carrier…) shown on the calendar for visibility only.
+              It is not planned or approved in Change-it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Title *</Label>
+              <Input
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="SBC maintenance"
+                data-testid="input-external-title"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Provider / responsible party</Label>
+              <Input
+                value={form.provider}
+                onChange={(e) => setForm({ ...form, provider: e.target.value })}
+                placeholder="Telecom provider"
+                data-testid="input-external-provider"
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Start *</Label>
+                <Input
+                  type="datetime-local"
+                  value={form.startAt}
+                  onChange={(e) => setForm({ ...form, startAt: e.target.value })}
+                  data-testid="input-external-start"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>End</Label>
+                <Input
+                  type="datetime-local"
+                  value={form.endAt}
+                  onChange={(e) => setForm({ ...form, endAt: e.target.value })}
+                  data-testid="input-external-end"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Textarea
+                rows={3}
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Expected impact on our systems…"
+                data-testid="input-external-description"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            {editing !== "new" && editing !== null ? (
+              <Button
+                variant="destructive"
+                onClick={() => deleteExternal.mutate()}
+                disabled={deleteExternal.isPending}
+                data-testid="button-external-delete"
+              >
+                {deleteExternal.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                Delete
+              </Button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditing(null)} data-testid="button-external-cancel">
+                Cancel
+              </Button>
+              <Button onClick={() => saveExternal.mutate()} disabled={!canSave || saveExternal.isPending} data-testid="button-external-save">
+                {saveExternal.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {editing === "new" ? "Add" : "Save"}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
