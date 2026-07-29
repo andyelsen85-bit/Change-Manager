@@ -4,4 +4,5 @@
 - [Stale TS project references](ts-project-references.md) — after editing lib/db schema, rebuild refs (`pnpm exec tsc -b lib/db --force`) or dependent packages typecheck against old declarations.
 - [CAB recurrence timezone](cab-recurrence-timezone.md) — recurring occurrences keep wall-clock time via per-candidate offset delta vs first occurrence; never step from the adjusted previous.
 - [CAB outcomes & attendance](cab-outcomes-attendance.md) — only "postponed" stored; approved/rejected derived from votes; PATCH must diff cab_changes; externals get negative userIds + email dedup.
+- [pnpm lockfile drizzle split](pnpm-lockfile-drizzle-split.md) — temp add/remove of a dep in one package can split drizzle-orm peer instances; fix by reverting pnpm-lock.yaml + pnpm install.
 - [ServiceDesk Plus integration](sdp-integration.md) — on-prem SD+ webhook + resolve/reject write-back: header-only secret, CSRF exemption, partial unique index for idempotency, sync hooks in 2 places.
