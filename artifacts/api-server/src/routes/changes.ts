@@ -564,6 +564,44 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(await expandChangeRow(updated));
 });
 
+// GET /changes/:id/ecab-teams-url — server-built Teams "new meeting" deep link
+// with all active eCAB members (primaries + deputies) as attendees. Built here
+// because the non-admin /users listing deliberately omits email addresses, so
+// the frontend cannot assemble the attendee list itself — previously only
+// admins got a link with invitees.
+router.get("/changes/:id/ecab-teams-url", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [c] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!c || c.deletedAt) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (c.track !== "emergency") {
+    res.status(400).json({ error: "eCAB Teams meetings only apply to emergency changes." });
+    return;
+  }
+  const members = await db
+    .select({ email: usersTable.email, isActive: usersTable.isActive })
+    .from(roleAssignmentsTable)
+    .innerJoin(usersTable, eq(usersTable.id, roleAssignmentsTable.userId))
+    .where(eq(roleAssignmentsTable.roleKey, "ecab_member"));
+  const emails = [
+    ...new Set(
+      members
+        .filter((m) => m.isActive && typeof m.email === "string" && m.email.length > 0)
+        .map((m) => m.email as string),
+    ),
+  ];
+  const subject = encodeURIComponent(`eCAB URGENT — ${c.ref} ${c.title}`);
+  const attendees = encodeURIComponent(emails.join(","));
+  const url = `https://teams.microsoft.com/l/meeting/new?subject=${subject}${attendees ? `&attendees=${attendees}` : ""}`;
+  res.json({ url, attendeeCount: emails.length });
+});
+
 // POST /changes/:id/track — switch a change between tracks (normal / standard /
 // emergency). Admin or Change Manager only. Governance reset by design:
 //   * status goes back to draft (the old status may not exist in the new track)

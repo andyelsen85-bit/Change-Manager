@@ -417,11 +417,12 @@ export function ChangeDetailPage() {
     enabled: Number.isFinite(id),
   });
   // For emergency changes we surface a "Launch Teams meeting" button that
-  // pre-fills the eCAB members as attendees. Fetched lazily — only triggered
-  // when an emergency change is being viewed.
-  const ecabMembersQ = useQuery({
-    queryKey: ["users.ecab_member"],
-    queryFn: () => api.get<User[]>("/users?role=ecab_member"),
+  // pre-fills the eCAB members as attendees. The link is built SERVER-side:
+  // non-admin /users responses omit email addresses, so building it in the
+  // browser only worked for admins (everyone else got a link with no invitees).
+  const teamsUrlQ = useQuery({
+    queryKey: ["change.ecab-teams-url", id],
+    queryFn: () => api.get<{ url: string; attendeeCount: number }>(`/changes/${id}/ecab-teams-url`),
     enabled: Number.isFinite(id) && changeQ.data?.track === "emergency",
   });
 
@@ -514,19 +515,9 @@ export function ChangeDetailPage() {
   useEffect(() => {
     if (tabFromUrl) setActiveTab(tabFromUrl);
   }, [tabFromUrl]);
-  // Build a Teams "new meeting" deep-link with eCAB member emails as the
-  // attendee list. https://teams.microsoft.com/l/meeting/new?subject=…&attendees=…
-  const teamsMeetingUrl = (() => {
-    if (!c || c.track !== "emergency") return null;
-    const emails = (ecabMembersQ.data ?? [])
-      .map((u) => u.email)
-      .filter((e): e is string => typeof e === "string" && e.length > 0);
-    const subject = encodeURIComponent(`eCAB URGENT — ${c.ref} ${c.title}`);
-    const attendees = encodeURIComponent(emails.join(","));
-    return `https://teams.microsoft.com/l/meeting/new?subject=${subject}${
-      attendees ? `&attendees=${attendees}` : ""
-    }`;
-  })();
+  // Server-built Teams "new meeting" deep-link with eCAB member emails as the
+  // attendee list (see teamsUrlQ above).
+  const teamsMeetingUrl = c && c.track === "emergency" ? (teamsUrlQ.data?.url ?? null) : null;
   if (!Number.isFinite(id)) return <div className="p-8">Invalid change id.</div>;
 
   return (
