@@ -18,3 +18,9 @@ id = "aBvadquQKy-G5TjUsKbJl"
 uri = "file://.local/assets/change-it-whats-new-2.2.2.pdf"
 type = "pdf"
 title = "Change-it — What's new (v2.2.0 → 2.2.2)"
+
+[[outputs]]
+id = "7FaTihemN9v-f0TTT7EAD"
+uri = "file://.local/assets/change-it-new-features-july-2026.pdf"
+type = "pdf"
+title = "Change-it — New features (last week & this week)"
