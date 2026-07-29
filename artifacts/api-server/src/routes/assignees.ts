@@ -6,7 +6,7 @@ import {
   changeRequestsTable,
   usersTable,
 } from "@workspace/db";
-import { requireAuth, getChangeAccess, getChangeViewAccess } from "../lib/auth";
+import { requireAuth, getChangeViewAccess } from "../lib/auth";
 import { audit } from "../lib/audit";
 
 // Roles that can be assigned per-change. Mirrors the seeded role keys but
@@ -57,10 +57,9 @@ router.put("/changes/:id/assignees", requireAuth, async (req, res): Promise<void
     res.status(404).json({ error: "Not found" });
     return;
   }
-  if (!(await getChangeAccess(req.session!, chg))) {
-    res.status(403).json({ error: "Forbidden" });
-    return;
-  }
+  // Per-change assignees (Implementer / Tester) can be set by ANY
+  // authenticated user — explicit user requirement: teams reassign each
+  // other's changes freely; the audit log records who did it.
   const body = req.body ?? {};
   // Body shape: { assignments: { roleKey: userId | null, ... } }
   const assignments: Record<string, unknown> = body.assignments ?? body ?? {};
