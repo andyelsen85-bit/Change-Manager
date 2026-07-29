@@ -139,6 +139,9 @@ async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
     const [counts, threshold] = await Promise.all([getCompletedCountsByTemplate(potIds), getPromotionThreshold()]);
     const tpls = await db.select().from(standardTemplatesTable).where(inArray(standardTemplatesTable.id, potIds));
     for (const t of tpls) {
+      // Once a template has been enabled (promoted), stop flagging it — the
+      // trial links are kept for history but the CAB no longer needs to act.
+      if (t.isActive) continue;
       const completedCount = counts.get(t.id) ?? 0;
       promo.set(t.id, { name: t.name, completedCount, threshold, ready: completedCount >= threshold });
     }

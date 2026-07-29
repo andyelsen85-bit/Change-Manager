@@ -548,7 +548,7 @@ export function ChangeDetailPage() {
                   <StatusBadge status={c.status} />
                   <RiskBadge risk={c.risk} />
                   <PirCountdownBadge change={c} data-testid="badge-pir-detail" />
-                  {c.potentialTemplateId != null && (
+                  {c.potentialTemplateId != null && c.standardPromotion != null && (
                     <span
                       className={
                         c.standardPromotion?.ready

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CalendarClock, CalendarDays, CheckCircle2, FileDown, Loader2, Mail, Play, Trash2, UserPlus, X, XCircle } from "lucide-react";
+import { ArrowLeft, CalendarClock, CalendarDays, CheckCircle2, FileDown, Loader2, Mail, Play, Sparkles, Trash2, UserPlus, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { Approval, CabAttendee, CabMeeting, CabMeetingDetail, ChangeRequest, LdapSearchUser, User } from "@/lib/types";
@@ -17,6 +17,7 @@ import { fmtDateTime, fromLocalDateTimeInput, toLocalDateTimeInput } from "@/lib
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useAuth } from "@/lib/auth-context";
 import {
   Dialog,
   DialogContent,
@@ -346,7 +347,12 @@ function MeetingChangeRow({
   docket?: CabMeetingDetail["changes"][number];
 }) {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  // Enabling a template is a governance action — mirror the API gate
+  // (admins and Change Managers) so we don't show a button that would 403.
+  const canEnableTemplate = user?.isAdmin === true || (user?.roles ?? []).includes("change_manager");
   const [postponeOpen, setPostponeOpen] = useState(false);
+  const [enableOpen, setEnableOpen] = useState(false);
   const q = useQuery({
     queryKey: ["change.approvals", changeId],
     queryFn: () => api.get<Approval[]>(`/changes/${changeId}/approvals`),
@@ -387,6 +393,11 @@ function MeetingChangeRow({
               : `Potential standard ${docket.standardPromotion.completedCount}/${docket.standardPromotion.threshold}`}
           </span>
         )}
+        {docket?.standardPromotion?.ready && docket.potentialTemplateId != null && canEnableTemplate && (
+          <Button size="sm" variant="default" onClick={() => setEnableOpen(true)} data-testid={`button-enable-template-${changeId}`}>
+            <Sparkles className="mr-1 h-3 w-3" /> Enable template
+          </Button>
+        )}
         {postponed ? (
           <span className="rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs text-warning" data-testid={`badge-postponed-${changeId}`}>
             Postponed
@@ -407,6 +418,18 @@ function MeetingChangeRow({
         changeId={changeId}
         changeRef={cq.data?.ref ?? `#${changeId}`}
       />
+      {docket?.standardPromotion && docket.potentialTemplateId != null && (
+        <EnableTemplateDialog
+          open={enableOpen}
+          onOpenChange={setEnableOpen}
+          meetingId={meetingId}
+          changeId={changeId}
+          templateId={docket.potentialTemplateId}
+          templateName={docket.standardPromotion.name}
+          completedCount={docket.standardPromotion.completedCount}
+          threshold={docket.standardPromotion.threshold}
+        />
+      )}
       <div className="mt-2 space-y-2">
         {(q.data ?? []).length === 0 && (
           <p className="text-xs text-muted-foreground">No approvals required.</p>
@@ -448,6 +471,67 @@ function MeetingChangeRow({
   );
 }
 
+
+// Confirm dialog for the one-click "Potential Standard Change" promotion:
+// enables the linked disabled template (PATCH /templates/:id, governance
+// gate) and records which CAB meeting the promotion happened from in the
+// audit trail. After enabling, the promotion badge disappears everywhere.
+function EnableTemplateDialog({
+  open,
+  onOpenChange,
+  meetingId,
+  changeId,
+  templateId,
+  templateName,
+  completedCount,
+  threshold,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  meetingId: number;
+  changeId: number;
+  templateId: number;
+  templateName: string;
+  completedCount: number;
+  threshold: number;
+}) {
+  const qc = useQueryClient();
+  const enable = useMutation({
+    mutationFn: () =>
+      api.patch(`/templates/${templateId}`, { isActive: true, promotedFromMeetingId: meetingId }),
+    onSuccess: () => {
+      toast.success(`Template "${templateName}" enabled as a standard change template`);
+      onOpenChange(false);
+      qc.invalidateQueries({ queryKey: ["cab", meetingId] });
+      qc.invalidateQueries({ queryKey: ["templates"] });
+      qc.invalidateQueries({ queryKey: ["change", changeId] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Could not enable template"),
+  });
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Enable standard template</DialogTitle>
+          <DialogDescription>
+            Template “{templateName}” has {completedCount} of {threshold} required completed trial changes. Enabling it
+            makes it available as a real standard change template (auto-approve, bypasses CAB). This decision is
+            recorded in the audit trail with this meeting.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="button-enable-template-cancel">
+            Cancel
+          </Button>
+          <Button onClick={() => enable.mutate()} disabled={enable.isPending} data-testid="button-enable-template-confirm">
+            {enable.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            Enable template
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // Dialog to move a docketed change to another CAB meeting. The current entry
 // is kept and marked "postponed" (it stays in this meeting's results PDF);

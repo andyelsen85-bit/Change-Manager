@@ -179,6 +179,8 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
     const [counts, threshold] = await Promise.all([getCompletedCountsByTemplate(potIds), getPromotionThreshold()]);
     const tpls = await db.select().from(standardTemplatesTable).where(inArray(standardTemplatesTable.id, potIds));
     for (const t of tpls) {
+      // Already-enabled (promoted) templates no longer need a callout.
+      if (t.isActive) continue;
       const completedCount = counts.get(t.id) ?? 0;
       promoByTemplate.set(t.id, { name: t.name, completedCount, threshold, ready: completedCount >= threshold });
     }

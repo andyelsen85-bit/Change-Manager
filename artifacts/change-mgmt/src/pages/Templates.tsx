@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { StandardTemplate } from "@/lib/types";
@@ -84,6 +84,15 @@ export function TemplatesPage() {
       setEditing(null);
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Save failed"),
+  });
+  // One-click promotion of a ready "Potential Standard Change" template.
+  const enable = useMutation({
+    mutationFn: (id: number) => api.patch<StandardTemplate>(`/templates/${id}`, { isActive: true }),
+    onSuccess: () => {
+      toast.success("Template enabled as a standard change template");
+      qc.invalidateQueries({ queryKey: ["templates"] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Could not enable template"),
   });
   const del = useMutation({
     mutationFn: (id: number) => api.delete(`/templates/${id}`),
@@ -227,6 +236,22 @@ export function TemplatesPage() {
                                 {t.completedLinkedCount ?? 0} / {t.promotionThreshold ?? "…"}
                                 {t.promotionReady ? " — ready for CAB" : ""}
                               </span>
+                              {t.promotionReady && isAdmin && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="ml-2"
+                                  disabled={enable.isPending}
+                                  onClick={() => {
+                                    if (confirm(`Enable "${t.name}" as a standard change template? It will auto-approve and bypass CAB.`)) {
+                                      enable.mutate(t.id);
+                                    }
+                                  }}
+                                  data-testid={`button-enable-template-${t.id}`}
+                                >
+                                  <Sparkles className="mr-1 h-3 w-3" /> Enable
+                                </Button>
+                              )}
                             </TableCell>
                           )}
                           {isAdmin && (
