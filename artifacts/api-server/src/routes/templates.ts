@@ -173,11 +173,19 @@ router.patch("/templates/:id", requireTemplateManager, async (req, res): Promise
     .set(updates)
     .where(eq(standardTemplatesTable.id, id))
     .returning();
+  // Promotion of a "Potential Standard Change" template: when a disabled
+  // template gets enabled, record a dedicated audit entry — including the CAB
+  // meeting it was promoted from when the client provides it (the one-click
+  // action on the meeting page passes promotedFromMeetingId).
+  const promoted = before.isActive === false && updated.isActive === true;
+  const fromMeetingId = Number(b.promotedFromMeetingId);
   await audit(req, {
-    action: "template.updated",
+    action: promoted ? "template.promoted" : "template.updated",
     entityType: "template",
     entityId: id,
-    summary: `Updated template "${before.name}"`,
+    summary: promoted
+      ? `Enabled template "${before.name}" as a standard change template${Number.isFinite(fromMeetingId) && fromMeetingId > 0 ? ` (promoted from CAB meeting #${fromMeetingId})` : ""}`
+      : `Updated template "${before.name}"`,
     before,
     after: updated,
   });

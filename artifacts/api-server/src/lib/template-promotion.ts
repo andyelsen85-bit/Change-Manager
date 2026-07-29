@@ -1,5 +1,5 @@
 import { and, eq, isNull, inArray, sql } from "drizzle-orm";
-import { db, changeRequestsTable, templateSettingsTable } from "@workspace/db";
+import { db, changeRequestsTable, standardTemplatesTable, templateSettingsTable } from "@workspace/db";
 
 // "Potential Standard Change" promotion logic. A NORMAL change can be linked
 // to a DISABLED standard template (potentialTemplateId). Once the number of
@@ -42,8 +42,14 @@ export async function getCompletedCountsByTemplate(templateIds?: number[]): Prom
   return map;
 }
 
-// Convenience for a single template: { count, threshold, ready }.
-export async function getPromotionStatus(templateId: number): Promise<{ completedCount: number; threshold: number; ready: boolean }> {
+// Convenience for a single template: { count, threshold, ready }, or null
+// when the template no longer needs promotion flags — i.e. it was deleted or
+// has already been enabled as a real standard template. Links from trial
+// changes (potentialTemplateId) are intentionally kept for history; hiding
+// the flags here is what makes badges disappear after promotion.
+export async function getPromotionStatus(templateId: number): Promise<{ completedCount: number; threshold: number; ready: boolean } | null> {
+  const [tpl] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, templateId));
+  if (!tpl || tpl.isActive) return null;
   const [counts, threshold] = await Promise.all([
     getCompletedCountsByTemplate([templateId]),
     getPromotionThreshold(),
