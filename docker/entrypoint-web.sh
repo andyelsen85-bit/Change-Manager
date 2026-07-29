@@ -7,6 +7,37 @@ KEY_FILE="${CERT_DIR}/server.key"
 
 mkdir -p "$CERT_DIR" /var/www/acme /etc/nginx/conf.d
 
+# 0. API upstream. Default matches the docker-compose service name; under
+#    Kubernetes set API_UPSTREAM to the API Service DNS name (host:port),
+#    e.g. API_UPSTREAM=change-manager-api:8080. nginx refuses to start if the
+#    upstream host doesn't resolve, so wait for DNS first and fail with a
+#    clear message instead of a crash-loop of "host not found in upstream".
+API_UPSTREAM="${API_UPSTREAM:-api:8080}"
+API_HOST="${API_UPSTREAM%%:*}"
+echo "[entrypoint-web] API upstream: $API_UPSTREAM"
+cat > /etc/nginx/conf.d/api-upstream.conf <<EOF
+upstream api_upstream {
+  server ${API_UPSTREAM};
+  keepalive 32;
+}
+EOF
+
+tries=0
+resolves() {
+  getent hosts "$1" >/dev/null 2>&1 || nslookup "$1" >/dev/null 2>&1
+}
+until resolves "$API_HOST"; do
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then
+    echo "[entrypoint-web] ERROR: cannot resolve API upstream host '$API_HOST' after 120s." >&2
+    echo "[entrypoint-web] Set API_UPSTREAM=<api-host>:<port> on this container to match your API service's DNS name" >&2
+    echo "[entrypoint-web] (docker-compose default: api:8080; Kubernetes example: change-manager-api:8080 or change-manager-api.<namespace>.svc:8080)." >&2
+    exit 1
+  fi
+  [ "$tries" -eq 1 ] && echo "[entrypoint-web] Waiting for API upstream host '$API_HOST' to resolve..."
+  sleep 2
+done
+
 # 1. Try to pull a user-uploaded cert + private key from the database
 #    (Settings → SSL writes to ssl_settings where key='global'). If both
 #    PEMs are present they overwrite whatever is on disk so re-uploading
