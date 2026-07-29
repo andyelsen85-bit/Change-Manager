@@ -81,6 +81,12 @@ export function NewChangePage() {
   const [requesterType, setRequesterType] = useState<"internal" | "external">("internal");
   const [requesterName, setRequesterName] = useState("");
   const [emergencyConfirmOpen, setEmergencyConfirmOpen] = useState(false);
+  // "Potential Standard Change" (normal track only): link this change to a
+  // DISABLED template that is being trialled for promotion to standard.
+  const [isPotentialStandard, setIsPotentialStandard] = useState(false);
+  const [potentialTemplateId, setPotentialTemplateId] = useState<string>("none");
+  const [newPotentialName, setNewPotentialName] = useState("");
+  const [creatingPotential, setCreatingPotential] = useState(false);
 
   const templatesQ = useQuery({ queryKey: ["templates"], queryFn: () => api.get<StandardTemplate[]>("/templates") });
   const usersQ = useQuery({ queryKey: ["users"], queryFn: () => api.get<User[]>("/users") });
@@ -125,6 +131,15 @@ export function NewChangePage() {
     ],
     [templatesQ.data],
   );
+  const potentialTemplateOptions: ComboboxOption[] = useMemo(
+    () => [
+      { value: "none", label: "— Select a disabled template —" },
+      ...(templatesQ.data ?? [])
+        .filter((t) => !t.isActive)
+        .map((t) => ({ value: String(t.id), label: t.name, hint: t.category ?? undefined })),
+    ],
+    [templatesQ.data],
+  );
   const categoryOptions: ComboboxOption[] = useMemo(
     () =>
       (categoriesQ.data ?? [])
@@ -156,6 +171,10 @@ export function NewChangePage() {
         plannedEnd: fromLocalDateTimeInput(plannedEnd),
         assigneeId: assigneeId === "none" ? null : Number(assigneeId),
         templateId: templateId === "none" ? null : Number(templateId),
+        potentialTemplateId:
+          track === "normal" && isPotentialStandard && potentialTemplateId !== "none"
+            ? Number(potentialTemplateId)
+            : null,
         hasPreprodEnv,
         preprodEnvUrl: hasPreprodEnv ? preprodEnvUrl.trim() || null : null,
         ticketLink: ticketLink.trim() || null,
@@ -462,6 +481,75 @@ export function NewChangePage() {
                   data-testid="switch-has-preprod"
                 />
               </div>
+            </div>
+          )}
+
+          {track === "normal" && (
+            <div className="rounded-md border border-border p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Potential Standard Change</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Link this change to a disabled template being trialled. Once enough linked changes complete
+                    successfully, the CAB is flagged to enable it as a standard change.
+                  </p>
+                </div>
+                <Switch
+                  checked={isPotentialStandard}
+                  onCheckedChange={(v) => {
+                    setIsPotentialStandard(v);
+                    if (!v) setPotentialTemplateId("none");
+                  }}
+                  data-testid="switch-potential-standard"
+                />
+              </div>
+              {isPotentialStandard && (
+                <div className="space-y-2">
+                  <Combobox
+                    options={potentialTemplateOptions}
+                    value={potentialTemplateId}
+                    onChange={setPotentialTemplateId}
+                    placeholder="— Select a disabled template —"
+                    searchPlaceholder="Search disabled templates…"
+                    emptyText="No disabled templates yet — create one below."
+                    data-testid="select-potential-template"
+                  />
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="…or create a new disabled template (name)"
+                      value={newPotentialName}
+                      onChange={(e) => setNewPotentialName(e.target.value)}
+                      data-testid="input-new-potential-template"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={newPotentialName.trim().length < 3 || creatingPotential}
+                      onClick={async () => {
+                        setCreatingPotential(true);
+                        try {
+                          const t = await api.post<StandardTemplate>("/templates/potential", {
+                            name: newPotentialName.trim(),
+                            category,
+                          });
+                          await templatesQ.refetch();
+                          setPotentialTemplateId(String(t.id));
+                          setNewPotentialName("");
+                          toast.success(`Created disabled template "${t.name}"`);
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : "Failed to create template");
+                        } finally {
+                          setCreatingPotential(false);
+                        }
+                      }}
+                      data-testid="button-create-potential-template"
+                    >
+                      {creatingPotential && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Create
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

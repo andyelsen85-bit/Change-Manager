@@ -22,6 +22,7 @@ import {
 import { requireAuth, requireAdmin, getChangeAccess, getChangeViewAccess, isPrivilegedAccess, loadUserRoles } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { nextRef } from "../lib/ref";
+import { getPromotionStatus } from "../lib/template-promotion";
 import { sdpSyncTerminalState } from "../lib/sdp";
 import { notify, getUserEmail, getUserEmails } from "../lib/email";
 import { resolveRecipients } from "../lib/notification-routing";
@@ -83,6 +84,14 @@ async function expandChangeRow(c: typeof changeRequestsTable.$inferSelect) {
     const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, c.templateId));
     templateName = t?.name ?? null;
   }
+  let potentialTemplateName: string | null = null;
+  if (c.potentialTemplateId != null) {
+    const [t] = await db
+      .select()
+      .from(standardTemplatesTable)
+      .where(eq(standardTemplatesTable.id, c.potentialTemplateId));
+    potentialTemplateName = t?.name ?? null;
+  }
   let cabMeetingDate: Date | null = null;
   if (c.cabMeetingId != null) {
     const [m] = await db.select().from(cabMeetingsTable).where(eq(cabMeetingsTable.id, c.cabMeetingId));
@@ -93,6 +102,7 @@ async function expandChangeRow(c: typeof changeRequestsTable.$inferSelect) {
     ownerName: owner?.fullName ?? "Unknown",
     assigneeName,
     templateName,
+    potentialTemplateName,
     cabMeetingDate,
   };
 }
@@ -231,6 +241,25 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
     if (autoApprove) initialStatus = "approved";
     if (bypassCab) initialStatus = autoApprove ? "scheduled" : "awaiting_implementation";
   }
+  // "Potential Standard Change": a NORMAL change may be linked to a DISABLED
+  // template that is being trialled for promotion to a real standard change.
+  // Active templates are rejected here — those belong to the standard track.
+  let potentialTemplateId: number | null = null;
+  if (b.potentialTemplateId != null) {
+    if (track !== "normal") {
+      res.status(400).json({ error: "Potential Standard Change is only available on normal changes." });
+      return;
+    }
+    const [pt] = await db
+      .select()
+      .from(standardTemplatesTable)
+      .where(eq(standardTemplatesTable.id, Number(b.potentialTemplateId)));
+    if (!pt || pt.isActive) {
+      res.status(400).json({ error: "Potential standard template is unknown or already enabled." });
+      return;
+    }
+    potentialTemplateId = pt.id;
+  }
   const ref = await nextRef(track);
   const [created] = await db
     .insert(changeRequestsTable)
@@ -247,6 +276,7 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
       ownerId: session.uid,
       assigneeId: b.assigneeId ?? null,
       templateId,
+      potentialTemplateId,
       hasPreprodEnv: !!b.hasPreprodEnv,
       preprodEnvUrl: typeof b.preprodEnvUrl === "string" ? b.preprodEnvUrl : null,
       ticketLink: typeof b.ticketLink === "string" && b.ticketLink.trim() ? b.ticketLink.trim() : null,
@@ -312,6 +342,13 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   const dto = await expandChangeRow(row);
+  // Promotion progress for the header highlight: completed trial runs vs the
+  // global threshold at which the linked disabled template becomes a
+  // candidate for being enabled as a standard template.
+  let standardPromotion: { completedCount: number; threshold: number; ready: boolean } | null = null;
+  if (row.potentialTemplateId != null) {
+    standardPromotion = await getPromotionStatus(row.potentialTemplateId);
+  }
   const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
   const [testing] = await db
     .select()
@@ -372,6 +409,7 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     : null;
   res.json({
     ...dto,
+    standardPromotion,
     trackChange,
     planning: planning ?? { changeId: id, scope: "", implementationPlan: "", rollbackPlan: "", riskAssessment: "", impactedServices: "", communicationsPlan: "", successCriteria: "", signedOff: false },
     testing: testing ?? { changeId: id, testPlan: "", environment: "", overallResult: "pending", notes: "", cases: [] },
@@ -411,6 +449,23 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   if (typeof b.hasPreprodEnv === "boolean") updates.hasPreprodEnv = b.hasPreprodEnv;
   if (b.assigneeId === null) updates.assigneeId = null;
   else if (typeof b.assigneeId === "number") updates.assigneeId = b.assigneeId;
+  // "Potential Standard Change" link — editable after creation as well.
+  if (b.potentialTemplateId === null) updates.potentialTemplateId = null;
+  else if (typeof b.potentialTemplateId === "number") {
+    if (before.track !== "normal") {
+      res.status(400).json({ error: "Potential Standard Change is only available on normal changes." });
+      return;
+    }
+    const [pt] = await db
+      .select()
+      .from(standardTemplatesTable)
+      .where(eq(standardTemplatesTable.id, b.potentialTemplateId));
+    if (!pt || pt.isActive) {
+      res.status(400).json({ error: "Potential standard template is unknown or already enabled." });
+      return;
+    }
+    updates.potentialTemplateId = pt.id;
+  }
   if (b.cabMeetingId === null) updates.cabMeetingId = null;
   else if (typeof b.cabMeetingId === "number") updates.cabMeetingId = b.cabMeetingId;
   if (b.plannedStart) updates.plannedStart = new Date(b.plannedStart);
@@ -559,6 +614,10 @@ router.post("/changes/:id/track", requireAuth, async (req, res): Promise<void> =
   };
   // Leaving the standard track: the template no longer applies.
   if (before.track === "standard") updates.templateId = null;
+  // Leaving the normal track: the "Potential Standard Change" link only makes
+  // sense for normal changes — clear it so the change can never count toward
+  // template promotion from another track.
+  if (before.track === "normal" && newTrack !== "normal") updates.potentialTemplateId = null;
   // A draft has no business sitting on a CAB agenda.
   updates.cabMeetingId = null;
 

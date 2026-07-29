@@ -34,6 +34,16 @@ CREATE TRIGGER audit_log_no_truncate
 // drizzle-kit migration. Safe to run on every boot.
 const SCHEMA_UPGRADE_SQL = `
 ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS usage_count integer NOT NULL DEFAULT 0;
+
+-- Potential Standard Change: link a normal change to a disabled template being
+-- trialled, plus the single-row promotion-threshold configuration.
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS potential_template_id integer;
+CREATE TABLE IF NOT EXISTS template_settings (
+  key                  text PRIMARY KEY DEFAULT 'global',
+  promotion_threshold  integer NOT NULL DEFAULT 5
+);
+INSERT INTO template_settings (key) VALUES ('global')
+  ON CONFLICT (key) DO NOTHING;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
 
 -- Notification batching: queue + per-install configuration. Created here so a

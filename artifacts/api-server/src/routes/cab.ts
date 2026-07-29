@@ -11,7 +11,9 @@ import {
   roleAssignmentsTable,
   usersTable,
 } from "@workspace/db";
+import { standardTemplatesTable } from "@workspace/db";
 import { requireAuth, requireRole } from "../lib/auth";
+import { getCompletedCountsByTemplate, getPromotionThreshold } from "../lib/template-promotion";
 import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
 import { buildCabAgendaPdf, buildCabResultsPdf } from "../lib/agenda-pdf";
@@ -120,6 +122,7 @@ async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
       track: changeRequestsTable.track,
       status: changeRequestsTable.status,
       risk: changeRequestsTable.risk,
+      potentialTemplateId: changeRequestsTable.potentialTemplateId,
       outcome: cabChangesTable.outcome,
       outcomeNote: cabChangesTable.outcomeNote,
       postponedToMeetingId: cabChangesTable.postponedToMeetingId,
@@ -127,6 +130,19 @@ async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
     .from(cabChangesTable)
     .innerJoin(changeRequestsTable, eq(changeRequestsTable.id, cabChangesTable.changeId))
     .where(eq(cabChangesTable.meetingId, m.id));
+  // "Potential Standard Change" flag for the meeting page: a docketed change
+  // whose linked disabled template has reached the promotion threshold gets a
+  // visible marker so the CAB can decide to enable the template.
+  const potIds = [...new Set(changeRows.map((c) => c.potentialTemplateId).filter((x): x is number => x != null))];
+  const promo = new Map<number, { name: string; completedCount: number; threshold: number; ready: boolean }>();
+  if (potIds.length > 0) {
+    const [counts, threshold] = await Promise.all([getCompletedCountsByTemplate(potIds), getPromotionThreshold()]);
+    const tpls = await db.select().from(standardTemplatesTable).where(inArray(standardTemplatesTable.id, potIds));
+    for (const t of tpls) {
+      const completedCount = counts.get(t.id) ?? 0;
+      promo.set(t.id, { name: t.name, completedCount, threshold, ready: completedCount >= threshold });
+    }
+  }
   return {
     ...m,
     members: memberRows.map((r) => ({
@@ -134,7 +150,10 @@ async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
       userName: r.userName ?? "Unknown",
       userEmail: r.userEmail ?? "",
     })),
-    changes: changeRows,
+    changes: changeRows.map((c) => ({
+      ...c,
+      standardPromotion: c.potentialTemplateId != null ? (promo.get(c.potentialTemplateId) ?? null) : null,
+    })),
   };
 }
 

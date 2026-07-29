@@ -372,6 +372,21 @@ function MeetingChangeRow({
         <Link href={`/changes/${changeId}`} className="text-sm font-medium hover:underline">
           {cq.data?.ref ?? `Change #${changeId}`} — {cq.data?.title ?? ""}
         </Link>
+        {docket?.standardPromotion && (
+          <span
+            className={
+              docket.standardPromotion.ready
+                ? "rounded-md border border-warning/40 bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning"
+                : "rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+            }
+            title={`Template "${docket.standardPromotion.name}": ${docket.standardPromotion.completedCount} of ${docket.standardPromotion.threshold} completed changes`}
+            data-testid={`badge-potential-standard-${changeId}`}
+          >
+            {docket.standardPromotion.ready
+              ? `Standard candidate ready — ${docket.standardPromotion.completedCount}/${docket.standardPromotion.threshold}`
+              : `Potential standard ${docket.standardPromotion.completedCount}/${docket.standardPromotion.threshold}`}
+          </span>
+        )}
         {postponed ? (
           <span className="rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs text-warning" data-testid={`badge-postponed-${changeId}`}>
             Postponed

@@ -34,6 +34,11 @@ export const changeRequestsTable = pgTable("change_requests", {
   ownerId: integer("owner_id").notNull(),
   assigneeId: integer("assignee_id"),
   templateId: integer("template_id"),
+  // "Potential Standard Change" marker on NORMAL changes: links the change to
+  // a DISABLED standard template that is being trialled. Once enough linked
+  // changes complete successfully (global promotion threshold), the CAB is
+  // flagged so it can decide to enable the template as a real standard change.
+  potentialTemplateId: integer("potential_template_id"),
   cabMeetingId: integer("cab_meeting_id"),
   plannedStart: timestamp("planned_start", { withTimezone: true }),
   plannedEnd: timestamp("planned_end", { withTimezone: true }),
