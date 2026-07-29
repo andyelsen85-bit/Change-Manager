@@ -397,10 +397,6 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   const access = await getChangeAccess(req.session!, before);
-  if (!access) {
-    res.status(403).json({ error: "Only the owner, assignee, change manager, or an admin can edit this change." });
-    return;
-  }
   const b = req.body ?? {};
   const updates: Partial<typeof changeRequestsTable.$inferInsert> = {};
   for (const k of ["title", "description", "risk", "impact", "priority", "category", "preprodEnvUrl"] as const) {
@@ -440,6 +436,37 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     if (before.templateId !== t.id) {
       updates.templateId = t.id;
       linkedTemplate = t;
+    }
+  }
+
+  // Write gate. The "Change Owner" field (assigneeId) may be changed by ANY
+  // authenticated user — explicit user requirement: anyone can hand a change
+  // over (e.g. take it over themselves) so the new owner can act on it; the
+  // audit log records who did it. All other fields keep the usual gate, so a
+  // role-less caller is rejected unless every non-assigneeId update is a
+  // no-op (the details form always PATCHes the full field set).
+  if (!access) {
+    const isNoop = (key: keyof typeof updates): boolean => {
+      const nv = updates[key];
+      const ov = (before as Record<string, unknown>)[key as string];
+      if (nv instanceof Date || ov instanceof Date) {
+        const nt = nv instanceof Date ? nv.getTime() : nv === null ? null : NaN;
+        const ot = ov instanceof Date ? ov.getTime() : ov === null ? null : NaN;
+        return nt === ot;
+      }
+      return nv === (ov ?? null) || (nv === "" && (ov === "" || ov === null));
+    };
+    const blocked = (Object.keys(updates) as (keyof typeof updates)[]).filter(
+      (k) => k !== "assigneeId" && !isNoop(k),
+    );
+    if (blocked.length > 0) {
+      res.status(403).json({
+        error: "You can only change the Change Owner on this change. Other fields require the owner, assignee, change manager, or an admin.",
+      });
+      return;
+    }
+    for (const k of Object.keys(updates)) {
+      if (k !== "assigneeId") delete (updates as Record<string, unknown>)[k];
     }
   }
 
