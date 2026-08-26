@@ -1047,6 +1047,7 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
 //     change cannot move forward again on stale votes.
 //   * Reverting back across in_progress clears actualStart.
 //   * Reverting back across implemented clears actualEnd.
+//   * Reverting to draft reopens signed-off planning so omissions can be fixed.
 // All side-effects are recorded in the audit row alongside the status flip.
 // ---------------------------------------------------------------------------
 router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> => {
@@ -1132,6 +1133,17 @@ router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> 
       .returning();
     approvalsResetCount = reset.length;
   }
+  // Draft means the RFC is editable again. A planning sign-off from the
+  // previous submission must not keep the planning form locked.
+  let planningUnlocked = false;
+  if (targetStatus === "draft") {
+    const reopened = await db
+      .update(planningRecordsTable)
+      .set({ signedOff: false, signedOffAt: null, signedOffBy: null })
+      .where(and(eq(planningRecordsTable.changeId, id), eq(planningRecordsTable.signedOff, true)))
+      .returning();
+    planningUnlocked = reopened.length > 0;
+  }
   const [updated] = await db
     .update(changeRequestsTable)
     .set(updates)
@@ -1147,6 +1159,7 @@ router.post("/changes/:id/revert", requireAuth, async (req, res): Promise<void> 
       status: targetStatus,
       reason: reason.trim(),
       approvalsReset: approvalsResetCount,
+      planningUnlocked,
       actualStartCleared: updates.actualStart === null && before.actualStart != null,
       actualEndCleared: updates.actualEnd === null && before.actualEnd != null,
     },
