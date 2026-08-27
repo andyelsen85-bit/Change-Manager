@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, ApiError } from "./api";
+import { api, ApiError, SESSION_EXPIRED_EVENT } from "./api";
 import type { SessionUser } from "./types";
 
 type AuthContextValue = {
@@ -50,6 +50,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     Promise.all([refresh(), refreshSetupStatus()]).finally(() => setLoading(false));
   }, [refresh, refreshSetupStatus]);
+
+  // Any authenticated API request can be the first one to discover that the
+  // server-side session expired. Clear auth immediately so ProtectedRoutes
+  // redirects to /login instead of leaving an empty page behind.
+  useEffect(() => {
+    const handleSessionExpired = () => setUser(null);
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+  }, []);
 
   const login = useCallback(
     async (username: string, password: string) => {

@@ -9,6 +9,15 @@ function buildUrl(path: string): string {
 
 const CSRF_COOKIE_NAME = "cm_csrf";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+export const SESSION_EXPIRED_EVENT = "change-it:session-expired";
+
+function notifySessionExpired(path: string): void {
+  // Invalid credentials on the login screen are not an expired session.
+  if (path === "/auth/login" || path === "/auth/setup") return;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  }
+}
 
 // Read the non-HttpOnly CSRF cookie set by the API on login. Used to echo
 // the token back as the X-CSRF-Token header on every mutating request
@@ -111,6 +120,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
   }
   if (!res.ok) {
+    if (res.status === 401) notifySessionExpired(path);
     const msg =
       (data && typeof data === "object" && "error" in data && typeof (data as { error: unknown }).error === "string"
         ? (data as { error: string }).error
@@ -132,7 +142,10 @@ export const api = {
   download: async (path: string, filename: string) => {
     const url = buildUrl(path);
     const res = await fetch(url, { credentials: "include" });
-    if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`, null);
+    if (!res.ok) {
+      if (res.status === 401) notifySessionExpired(path);
+      throw new ApiError(res.status, `HTTP ${res.status}`, null);
+    }
     const blob = await res.blob();
     const a = document.createElement("a");
     const objectUrl = URL.createObjectURL(blob);
