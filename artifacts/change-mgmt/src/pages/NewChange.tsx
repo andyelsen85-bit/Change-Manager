@@ -80,6 +80,7 @@ export function NewChangePage() {
   const [ticketLink, setTicketLink] = useState("");
   const [requesterType, setRequesterType] = useState<"internal" | "external">("internal");
   const [requesterName, setRequesterName] = useState("");
+  const [requesterUserId, setRequesterUserId] = useState<number | null>(null);
   const [emergencyConfirmOpen, setEmergencyConfirmOpen] = useState(false);
   // "Potential Standard Change" (normal track only): link this change to a
   // DISABLED template that is being trialled for promotion to standard.
@@ -169,7 +170,7 @@ export function NewChangePage() {
         category: selectedTemplate?.category ?? category,
         plannedStart: fromLocalDateTimeInput(plannedStart),
         plannedEnd: fromLocalDateTimeInput(plannedEnd),
-        assigneeId: assigneeId === "none" ? null : Number(assigneeId),
+        ownerId: assigneeId === "none" ? null : Number(assigneeId),
         templateId: templateId === "none" ? null : Number(templateId),
         potentialTemplateId:
           track === "normal" && isPotentialStandard && potentialTemplateId !== "none"
@@ -180,6 +181,7 @@ export function NewChangePage() {
         ticketLink: ticketLink.trim() || null,
         requesterType: requesterName.trim() ? requesterType : null,
         requesterName: requesterName.trim() || null,
+        requesterUserId: requesterType === "internal" && requesterName.trim() ? requesterUserId : null,
       });
     },
     onSuccess: (c) => {
@@ -462,8 +464,10 @@ export function NewChangePage() {
             onTypeChange={(t) => {
               setRequesterType(t);
               setRequesterName("");
+              setRequesterUserId(null);
             }}
             onNameChange={setRequesterName}
+            onUserIdChange={setRequesterUserId}
           />
 
           {track === "normal" && (

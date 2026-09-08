@@ -129,7 +129,16 @@ router.get("/users/ldap-search", requireAuth, async (req, res): Promise<void> =>
     res.json({ users: [], note: r.reason });
     return;
   }
-  res.json({ users: r.users });
+  // A directory result may correspond to a locally provisioned account. Add
+  // that stable ID without exposing the entire local user directory.
+  const localUsers = await db.select({ id: usersTable.id, username: usersTable.username }).from(usersTable);
+  const localIdByUsername = new Map(localUsers.map((u) => [u.username.toLowerCase(), u.id]));
+  res.json({
+    users: r.users.map((u) => ({
+      ...u,
+      userId: localIdByUsername.get(u.username.toLowerCase()) ?? null,
+    })),
+  });
 });
 
 router.post("/users", requireAdmin, async (req, res): Promise<void> => {

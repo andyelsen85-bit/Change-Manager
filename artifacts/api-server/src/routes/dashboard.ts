@@ -12,6 +12,7 @@ import {
   pirRecordsTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../lib/auth";
+import PDFDocument from "pdfkit";
 
 const router: IRouter = Router();
 
@@ -21,6 +22,7 @@ const OPEN_STATUSES = [
   "in_review",
   "awaiting_approval",
   "approved",
+  "in_preprod_testing",
   "scheduled",
   "in_progress",
   "implemented",
@@ -117,6 +119,62 @@ router.get("/dashboard/summary", requireAuth, async (req, res): Promise<void> =>
     byTrack: Object.entries(byTrack).map(([key, count]) => ({ key, count })),
     byRisk: Object.entries(byRisk).map(([key, count]) => ({ key, count })),
   });
+});
+
+router.get("/dashboard/statistics.pdf", requireAuth, async (req, res): Promise<void> => {
+  const rangeKey = typeof req.query.range === "string" ? req.query.range : undefined;
+  const range = resolveRange(rangeKey);
+  const allRaw = (await db.select().from(changeRequestsTable)).filter((c) => !c.deletedAt);
+  const rows = range ? allRaw.filter((c) => c.createdAt >= range.start && c.createdAt <= range.end) : allRaw;
+  const byStatus = new Map<string, number>();
+  const byTrack = new Map<string, number>();
+  const byRisk = new Map<string, number>();
+  for (const c of rows) {
+    byStatus.set(c.status, (byStatus.get(c.status) ?? 0) + 1);
+    byTrack.set(c.track, (byTrack.get(c.track) ?? 0) + 1);
+    byRisk.set(c.risk, (byRisk.get(c.risk) ?? 0) + 1);
+  }
+  const completed = rows.filter((c) => c.status === "completed").length;
+  const concluded = rows.filter((c) => ["completed", "rejected", "rolled_back"].includes(c.status)).length;
+  const stats = [
+    ["Total changes", rows.length],
+    ["Open changes", rows.filter((c) => OPEN_STATUSES.includes(c.status)).length],
+    ["Awaiting approval", rows.filter((c) => c.status === "awaiting_approval" || c.status === "in_review").length],
+    ["Emergency open", rows.filter((c) => c.track === "emergency" && OPEN_STATUSES.includes(c.status)).length],
+    ["Success rate", `${concluded ? Math.round((completed / concluded) * 100) : 0}%`],
+  ] as const;
+
+  const doc = new PDFDocument({ size: "A4", margins: { top: 48, bottom: 48, left: 48, right: 48 } });
+  const chunks: Buffer[] = [];
+  doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+  const done = new Promise<Buffer>((resolve) => doc.on("end", () => resolve(Buffer.concat(chunks))));
+  doc.font("Helvetica-Bold").fontSize(20).fillColor("#111827").text("Change-it — Dashboard statistics");
+  doc.moveDown(0.3).font("Helvetica").fontSize(9).fillColor("#6b7280").text(
+    range
+      ? `Created ${range.start.toLocaleDateString("en-GB")} – ${range.end.toLocaleDateString("en-GB")}`
+      : "All-time statistics",
+  );
+  doc.moveDown(1);
+  for (const [label, value] of stats) {
+    doc.font("Helvetica-Bold").fontSize(10).fillColor("#374151").text(label, { continued: true, width: 220 });
+    doc.font("Helvetica").fillColor("#111827").text(String(value));
+  }
+  const section = (title: string, values: Map<string, number>) => {
+    doc.moveDown(0.8).font("Helvetica-Bold").fontSize(13).fillColor("#111827").text(title);
+    doc.moveDown(0.25);
+    for (const [key, count] of [...values].sort((a, b) => b[1] - a[1])) {
+      doc.font("Helvetica").fontSize(9).fillColor("#374151").text(`${key.replace(/_/g, " ")}: ${count}`);
+    }
+  };
+  section("By status", byStatus);
+  section("By track", byTrack);
+  section("By risk", byRisk);
+  doc.moveDown(1).fontSize(8).fillColor("#9ca3af").text(`Generated ${new Date().toLocaleString("en-GB")}`);
+  doc.end();
+  const pdf = await done;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="dashboard-statistics-${new Date().toISOString().slice(0, 10)}.pdf"`);
+  res.send(pdf);
 });
 
 router.get("/dashboard/activity", requireAdmin, async (_req, res): Promise<void> => {

@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import {
   addDays,
   addMonths,
+  addWeeks,
   differenceInCalendarDays,
   endOfMonth,
   format,
@@ -27,6 +28,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { fmtDateShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // A calendar bar is either one of our change requests or an external change
 // (third-party maintenance window, visibility only).
@@ -87,7 +89,7 @@ function toDay(value: string | null | undefined): Date | null {
   }
 }
 
-// ISO string -> local date ("yyyy-MM-dd") and 24h time ("HH:mm") parts.
+// ISO string -> local date (dd/mm/yyyy) and 24h time ("HH:mm") parts.
 // Split date + explicit 24h time fields are used instead of a native
 // datetime-local input, whose time picker renders AM/PM in many browser
 // locales and cannot be forced to 24h.
@@ -97,25 +99,32 @@ function toLocalParts(iso: string | null | undefined): { date: string; time: str
   if (isNaN(d.getTime())) return { date: "", time: "" };
   const pad = (n: number) => String(n).padStart(2, "0");
   return {
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+    date: `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`,
     time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
   };
 }
 
 const TIME_24H = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-// Local date + 24h time -> ISO string ("" time defaults to 00:00).
+// Displayed dd/mm/yyyy + 24h time -> ISO payload ("" time defaults to 00:00).
 function partsToIso(date: string, time: string): string | null {
-  if (!date) return null;
-  const d = new Date(`${date}T${time || "00:00"}`);
-  return isNaN(d.getTime()) ? null : d.toISOString();
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date);
+  if (!match) return null;
+  const d = new Date(`${match[3]}-${match[2]}-${match[1]}T${time || "00:00"}`);
+  if (
+    isNaN(d.getTime()) ||
+    d.getFullYear() !== Number(match[3]) ||
+    d.getMonth() + 1 !== Number(match[2]) ||
+    d.getDate() !== Number(match[1])
+  ) return null;
+  return d.toISOString();
 }
 
 type ExternalForm = {
   title: string;
   provider: string;
   description: string;
-  startDate: string; // yyyy-MM-dd
+  startDate: string; // dd/mm/yyyy
   startTime: string; // HH:mm (24h)
   endDate: string;
   endTime: string;
@@ -134,6 +143,7 @@ const EMPTY_FORM: ExternalForm = {
 export function ChangePlanningsPage() {
   const [, setLocation] = useLocation();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
+  const [view, setView] = useState<"month" | "week" | "day">("month");
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -204,17 +214,23 @@ export function ChangePlanningsPage() {
     setEditing(ext);
   }
 
-  const gridStart = useMemo(() => startOfWeek(startOfMonth(cursor), { weekStartsOn: 1 }), [cursor]);
-  const days = useMemo(() => Array.from({ length: 42 }, (_, i) => addDays(gridStart, i)), [gridStart]);
+  const gridStart = useMemo(
+    () => view === "month" ? startOfWeek(startOfMonth(cursor), { weekStartsOn: 1 }) : startOfWeek(cursor, { weekStartsOn: 1 }),
+    [cursor, view],
+  );
+  const days = useMemo(
+    () => Array.from({ length: view === "month" ? 42 : 7 }, (_, i) => addDays(gridStart, i)),
+    [gridStart, view],
+  );
   const weeks = useMemo(() => {
     const out: Date[][] = [];
-    for (let i = 0; i < 6; i++) out.push(days.slice(i * 7, i * 7 + 7));
+    for (let i = 0; i < days.length / 7; i++) out.push(days.slice(i * 7, i * 7 + 7));
     return out;
   }, [days]);
 
   // Items that have a planned window and overlap the visible 6-week grid.
   const planned = useMemo(() => {
-    const gridEnd = addDays(gridStart, 41);
+    const gridEnd = addDays(gridStart, days.length - 1);
     const items: { item: CalItem; start: Date; end: Date }[] = [];
     for (const c of changesQ.data ?? []) {
       const start = toDay(c.plannedStart);
@@ -234,7 +250,7 @@ export function ChangePlanningsPage() {
       items.push({ item: { kind: "external", id: `x-${x.id}`, external: x }, start: lo, end: hi });
     }
     return items.filter((x) => x.end >= gridStart && x.start <= gridEnd);
-  }, [changesQ.data, externalsQ.data, gridStart]);
+  }, [changesQ.data, externalsQ.data, gridStart, days.length]);
 
   // Build per-week segments with lane assignment so overlapping bars stack.
   const segmentsByWeek = useMemo(() => {
@@ -281,10 +297,16 @@ export function ChangePlanningsPage() {
   }, [weeks, planned]);
 
   const totalPlanned = planned.length;
+  const dayItems = planned.filter(({ start, end }) => {
+    const day = new Date(cursor);
+    day.setHours(0, 0, 0, 0);
+    return start <= day && end >= day;
+  });
   const isLoading = changesQ.isLoading || externalsQ.isLoading;
   const startTimeOk = form.startTime === "" || TIME_24H.test(form.startTime);
   const endTimeOk = form.endTime === "" || TIME_24H.test(form.endTime);
-  const canSave = form.title.trim().length > 0 && form.startDate.length > 0 && startTimeOk && endTimeOk;
+  const dateOk = (value: string) => /^\d{2}\/\d{2}\/\d{4}$/.test(value) && partsToIso(value, "00:00") !== null;
+  const canSave = form.title.trim().length > 0 && dateOk(form.startDate) && startTimeOk && endTimeOk && (!form.endDate || dateOk(form.endDate));
 
   return (
     <div className="space-y-4" data-testid="page-change-plannings">
@@ -303,20 +325,35 @@ export function ChangePlanningsPage() {
 
       <Card>
         <CardHeader className="flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-base">{format(cursor, "MMMM yyyy")}</CardTitle>
+          <div className="space-y-2">
+            <CardTitle className="text-base">
+              {view === "month"
+                ? format(cursor, "MMMM yyyy")
+                : view === "week"
+                  ? `${format(gridStart, "d MMM")} – ${format(addDays(gridStart, 6), "d MMM yyyy")}`
+                  : format(cursor, "EEEE, d MMMM yyyy")}
+            </CardTitle>
+            <Tabs value={view} onValueChange={(v) => setView(v as "month" | "week" | "day")}>
+              <TabsList data-testid="tabs-calendar-view">
+                <TabsTrigger value="month">Month</TabsTrigger>
+                <TabsTrigger value="week">Week</TabsTrigger>
+                <TabsTrigger value="day">Day</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
           <div className="flex items-center gap-3">
             <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" data-testid="legend-external">
               <span className="inline-block h-3 w-6 rounded-sm" style={EXTERNAL_BAR_STYLE} />
               External change (provider / third party)
             </div>
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" onClick={() => setCursor((c) => addMonths(c, -1))} data-testid="button-prev-month">
+              <Button variant="ghost" size="icon" onClick={() => setCursor((c) => view === "month" ? addMonths(c, -1) : view === "week" ? addWeeks(c, -1) : addDays(c, -1))} data-testid="button-prev-month">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setCursor(startOfMonth(new Date()))} data-testid="button-today">
+              <Button variant="outline" size="sm" onClick={() => setCursor(new Date())} data-testid="button-today">
                 Today
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setCursor((c) => addMonths(c, 1))} data-testid="button-next-month">
+              <Button variant="ghost" size="icon" onClick={() => setCursor((c) => view === "month" ? addMonths(c, 1) : view === "week" ? addWeeks(c, 1) : addDays(c, 1))} data-testid="button-next-month">
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
@@ -325,12 +362,43 @@ export function ChangePlanningsPage() {
         <CardContent>
           {isLoading ? (
             <Skeleton className="h-[520px] w-full" />
+          ) : view === "day" ? (
+            <div className="min-h-[360px] rounded-md border border-border p-4" data-testid="calendar-day-view">
+              <div className="mb-4 text-sm font-medium text-muted-foreground">{format(cursor, "EEEE, d MMMM yyyy")}</div>
+              <div className="space-y-2">
+                {dayItems.map(({ item }) => item.kind === "external" ? (
+                  <button
+                    key={item.id}
+                    onClick={() => openEdit(item.external)}
+                    className="flex w-full items-center gap-2 rounded-md p-3 text-left text-sm text-white"
+                    style={EXTERNAL_BAR_STYLE}
+                    data-testid={`external-day-${item.external.id}`}
+                  >
+                    <Globe className="h-4 w-4" />
+                    <span><strong>EXT</strong> {item.external.title} — {toLocalParts(item.external.startAt).time}–{toLocalParts(item.external.endAt).time}</span>
+                  </button>
+                ) : (
+                  <button
+                    key={item.id}
+                    onClick={() => setLocation(`/changes/${item.change.id}`)}
+                    className={cn("flex w-full items-center gap-2 rounded-md p-3 text-left text-sm", item.change.status === "completed" ? "bg-emerald-600 text-white" : barColor(item.change.id))}
+                    data-testid={`planning-day-${item.change.id}`}
+                  >
+                    {item.change.status === "completed" && <CheckCircle2 className="h-4 w-4" />}
+                    <span><span className="font-mono">{item.change.ref}</span> {item.change.title} — {toLocalParts(item.change.plannedStart).time}–{toLocalParts(item.change.plannedEnd).time}</span>
+                  </button>
+                ))}
+                {dayItems.length === 0 && (
+                  <p className="py-16 text-center text-sm text-muted-foreground">No planned changes on this day.</p>
+                )}
+              </div>
+            </div>
           ) : (
             <div className="overflow-hidden rounded-md border border-border">
               <div className="grid grid-cols-7 bg-border text-xs">
                 {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-                  <div key={d} className="bg-card px-2 py-1.5 text-center font-medium text-muted-foreground">
-                    {d}
+                    <div key={d} className="bg-card px-2 py-1.5 text-center font-medium text-muted-foreground">
+                      {d}{view === "week" ? ` ${format(days[["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(d)]!, "d MMM")}` : ""}
                   </div>
                 ))}
               </div>
@@ -348,7 +416,7 @@ export function ChangePlanningsPage() {
                       {/* Day cells (background) */}
                       <div className="grid grid-cols-7">
                         {week.map((day) => {
-                          const inMonth = isSameMonth(day, cursor);
+                          const inMonth = view === "week" || isSameMonth(day, cursor);
                           const today = isSameDay(day, new Date());
                           return (
                             <div
@@ -441,7 +509,7 @@ export function ChangePlanningsPage() {
             </div>
           )}
 
-          {!isLoading && totalPlanned === 0 && (
+          {!isLoading && view !== "day" && totalPlanned === 0 && (
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-center text-muted-foreground">
               <CalendarRange className="h-8 w-8" />
               <p className="text-sm">No open changes have a planned window in view.</p>
@@ -485,9 +553,10 @@ export function ChangePlanningsPage() {
                 <Label>Start *</Label>
                 <div className="flex gap-2">
                   <Input
-                    type="date"
+                    inputMode="numeric"
                     value={form.startDate}
                     onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                    placeholder="dd/mm/yyyy"
                     data-testid="input-external-start-date"
                   />
                   <Input
@@ -504,9 +573,10 @@ export function ChangePlanningsPage() {
                 <Label>End</Label>
                 <div className="flex gap-2">
                   <Input
-                    type="date"
+                    inputMode="numeric"
                     value={form.endDate}
                     onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                    placeholder="dd/mm/yyyy"
                     data-testid="input-external-end-date"
                   />
                   <Input

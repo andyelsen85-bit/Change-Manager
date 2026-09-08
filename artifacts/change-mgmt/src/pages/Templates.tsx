@@ -28,6 +28,12 @@ const EMPTY: StandardTemplate = {
   bypassCab: true,
   prefilledPlanning: "",
   prefilledTestPlan: "",
+  prefilledScope: "",
+  prefilledRollbackPlan: "",
+  prefilledRiskAssessment: "",
+  prefilledImpactedServices: "",
+  prefilledCommunicationsPlan: "",
+  prefilledSuccessCriteria: "",
   isActive: true,
 };
 
@@ -68,6 +74,12 @@ export function TemplatesPage() {
       t.defaultPriority,
       t.prefilledPlanning,
       t.prefilledTestPlan,
+      t.prefilledScope,
+      t.prefilledRollbackPlan,
+      t.prefilledRiskAssessment,
+      t.prefilledImpactedServices,
+      t.prefilledCommunicationsPlan,
+      t.prefilledSuccessCriteria,
     ]
       .filter(Boolean)
       .join(" \n ")
@@ -217,6 +229,18 @@ export function TemplatesPage() {
                           <TableCell>
                             <div className="font-medium">{t.name}</div>
                             <div className="text-xs text-muted-foreground">{t.description}</div>
+                            <details className="mt-1 text-xs text-muted-foreground">
+                              <summary className="cursor-pointer">Planning defaults</summary>
+                              <div className="mt-2 grid gap-1 whitespace-pre-wrap">
+                                <div><strong>Scope:</strong> {t.prefilledScope || "—"}</div>
+                                <div><strong>Implementation:</strong> {t.prefilledPlanning || "—"}</div>
+                                <div><strong>Rollback:</strong> {t.prefilledRollbackPlan || "—"}</div>
+                                <div><strong>Risk assessment:</strong> {t.prefilledRiskAssessment || "—"}</div>
+                                <div><strong>Impacted services:</strong> {t.prefilledImpactedServices || "—"}</div>
+                                <div><strong>Communications:</strong> {t.prefilledCommunicationsPlan || "—"}</div>
+                                <div><strong>Success criteria:</strong> {t.prefilledSuccessCriteria || "—"}</div>
+                              </div>
+                            </details>
                           </TableCell>
                           <TableCell className="text-sm">{t.category ?? "—"}</TableCell>
                           <TableCell className="text-sm capitalize">{t.risk} / {t.impact}</TableCell>
@@ -283,7 +307,7 @@ export function TemplatesPage() {
       )}
 
       <Dialog open={editing != null} onOpenChange={(o) => !o && setEditing(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           {editing && (
             <>
               <DialogHeader>
@@ -359,8 +383,32 @@ export function TemplatesPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
+                  <Label>Pre-filled scope</Label>
+                  <Textarea rows={3} value={editing.prefilledScope ?? ""} onChange={(e) => setEditing({ ...editing, prefilledScope: e.target.value })} data-testid="textarea-template-scope" />
+                </div>
+                <div className="space-y-2">
                   <Label>Pre-filled implementation plan</Label>
-                  <Textarea rows={3} value={editing.prefilledPlanning ?? ""} onChange={(e) => setEditing({ ...editing, prefilledPlanning: e.target.value })} />
+                  <Textarea rows={3} value={editing.prefilledPlanning ?? ""} onChange={(e) => setEditing({ ...editing, prefilledPlanning: e.target.value })} data-testid="textarea-template-implementation-plan" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Pre-filled rollback plan</Label>
+                  <Textarea rows={3} value={editing.prefilledRollbackPlan ?? ""} onChange={(e) => setEditing({ ...editing, prefilledRollbackPlan: e.target.value })} data-testid="textarea-template-rollback-plan" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Pre-filled risk assessment</Label>
+                  <Textarea rows={3} value={editing.prefilledRiskAssessment ?? ""} onChange={(e) => setEditing({ ...editing, prefilledRiskAssessment: e.target.value })} data-testid="textarea-template-risk-assessment" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Pre-filled impacted services</Label>
+                  <Textarea rows={3} value={editing.prefilledImpactedServices ?? ""} onChange={(e) => setEditing({ ...editing, prefilledImpactedServices: e.target.value })} data-testid="textarea-template-impacted-services" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Pre-filled communications plan</Label>
+                  <Textarea rows={3} value={editing.prefilledCommunicationsPlan ?? ""} onChange={(e) => setEditing({ ...editing, prefilledCommunicationsPlan: e.target.value })} data-testid="textarea-template-communications-plan" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Pre-filled success criteria</Label>
+                  <Textarea rows={3} value={editing.prefilledSuccessCriteria ?? ""} onChange={(e) => setEditing({ ...editing, prefilledSuccessCriteria: e.target.value })} data-testid="textarea-template-success-criteria" />
                 </div>
                 <div className="space-y-2">
                   <Label>Pre-filled test plan</Label>

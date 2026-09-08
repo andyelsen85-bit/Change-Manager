@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import {
   LayoutDashboard,
   ClipboardList,
+  ListChecks,
   CalendarDays,
   CalendarRange,
   FileText,
@@ -48,6 +49,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { label: "Dashboard", path: "/", icon: LayoutDashboard },
   { label: "Changes", path: "/changes", icon: ClipboardList },
+  { label: "My requests", path: "/my-requests", icon: ListChecks },
   { label: "Change Plannings", path: "/plannings", icon: CalendarRange },
   { label: "CAB Calendar", path: "/cab", icon: CalendarDays },
   { label: "Templates", path: "/templates", icon: FileText },
@@ -152,7 +154,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="absolute inset-x-0 bottom-0 border-t border-sidebar-border p-3 text-xs text-sidebar-foreground/60">
-          <div>v2.2.8</div>
+          <div>v2.3.0</div>
           <div>{user?.source === "ldap" ? "LDAP-authenticated session" : "Local session"}</div>
         </div>
       </aside>
@@ -300,6 +302,7 @@ function titleFor(path: string): string {
   if (path === "/" || path === "") return "Dashboard";
   if (path.startsWith("/changes/new")) return "New Change Request";
   if (path.startsWith("/changes")) return "Change Requests";
+  if (path.startsWith("/my-requests")) return "My Requests";
   if (path.startsWith("/plannings")) return "Change Plannings";
   if (path.startsWith("/cab")) return "CAB Calendar";
   if (path.startsWith("/templates")) return "Standard Templates";

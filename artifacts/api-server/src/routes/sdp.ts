@@ -212,6 +212,16 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
       .where(and(eq(usersTable.isAdmin, true), eq(usersTable.isActive, true)));
     owner = admins[0];
   }
+  // The webhook has no browser session, so the resolved handling technician
+  // (or deterministic active-admin fallback) is the integration actor. Store
+  // it immediately rather than relying on a later schema backfill.
+  const requesterUser = requesterEmail
+    ? (await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(and(eq(usersTable.email, requesterEmail), eq(usersTable.isActive, true)))
+        .limit(1))[0]
+    : undefined;
   if (!owner) {
     await recordWebhook(requestId, "error: no owner available");
     res.status(500).json({ error: "No matching user or active admin found to own the change." });
@@ -267,14 +277,16 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
       priority: "medium",
       category,
       ownerId: owner.id,
+       createdById: owner.id,
       // The SD+ technician handling the request becomes both Creator and
       // Owner; if we only matched via requester email or the admin fallback,
       // the Owner stays unassigned so the handler picks one deliberately.
       assigneeId: matchedTechnician ? owner.id : null,
       sdpRequestId: requestId,
       ticketLink: sdpRequestUrl(cfg, requestId),
-      requesterType: requesterName ? "external" : null,
+       requesterType: requesterName ? (requesterUser ? "internal" : "external") : null,
       requesterName: requesterName || null,
+       requesterUserId: requesterUser?.id ?? null,
       })
       .returning()) as [typeof changeRequestsTable.$inferSelect];
   } catch (err) {
@@ -303,16 +315,19 @@ router.post("/integrations/sdp/create-change", async (req, res): Promise<void> =
     }
     throw err;
   }
-  await db.insert(planningRecordsTable).values({ changeId: created.id }).onConflictDoNothing();
-  if (templateId) {
-    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, templateId));
-    if (t?.prefilledPlanning) {
-      await db
-        .update(planningRecordsTable)
-        .set({ implementationPlan: t.prefilledPlanning })
-        .where(eq(planningRecordsTable.changeId, created.id));
-    }
-  }
+  const [template] = templateId
+    ? await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, templateId))
+    : [];
+  await db.insert(planningRecordsTable).values({
+    changeId: created.id,
+    scope: template?.prefilledScope ?? "",
+    implementationPlan: template?.prefilledPlanning ?? "",
+    rollbackPlan: template?.prefilledRollbackPlan ?? "",
+    riskAssessment: template?.prefilledRiskAssessment ?? "",
+    impactedServices: template?.prefilledImpactedServices ?? "",
+    communicationsPlan: template?.prefilledCommunicationsPlan ?? "",
+    successCriteria: template?.prefilledSuccessCriteria ?? "",
+  }).onConflictDoNothing();
   // Same approval scaffolding as changes created in the UI (standard: none).
   await createApprovalsForChange(created.id, track);
 

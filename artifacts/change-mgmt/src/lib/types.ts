@@ -53,6 +53,12 @@ export type StandardTemplate = {
   bypassCab: boolean;
   prefilledPlanning: string | null;
   prefilledTestPlan: string | null;
+  prefilledScope: string | null;
+  prefilledRollbackPlan: string | null;
+  prefilledRiskAssessment: string | null;
+  prefilledImpactedServices: string | null;
+  prefilledCommunicationsPlan: string | null;
+  prefilledSuccessCriteria: string | null;
   isActive: boolean;
   // Potential-standard promotion progress (server-computed): completed normal
   // changes linked via potentialTemplateId vs the global threshold.
@@ -96,12 +102,16 @@ export type ChangeRequest = {
   assigneeId: number | null;
   assigneeName?: string | null;
   templateId: number | null;
+  templateName?: string | null;
   // "Potential Standard Change": link to a DISABLED template being trialled.
   potentialTemplateId?: number | null;
   potentialTemplateName?: string | null;
+  parentChangeId?: number | null;
+  parentChangeRef?: string | null;
   standardPromotion?: { completedCount: number; threshold: number; ready: boolean } | null;
   cabMeetingId: number | null;
   cabMeetingDate?: string | null;
+  cabMeetingStatus?: "scheduled" | "in_progress" | "completed" | "cancelled" | null;
   hasPreprodEnv?: boolean;
   preprodEnvUrl?: string | null;
   ticketLink?: string | null;
@@ -109,6 +119,9 @@ export type ChangeRequest = {
   closureNote?: string | null;
   requesterType?: "internal" | "external" | null;
   requesterName?: string | null;
+  requesterUserId?: number | null;
+  createdById?: number | null;
+  createdByName?: string | null;
   plannedStart: string | null;
   plannedEnd: string | null;
   actualStart: string | null;
@@ -131,6 +144,7 @@ export type LdapSearchUser = {
   email: string;
   fullName: string;
   userDn: string;
+  userId?: number | null;
 };
 
 export type PlanningRecord = {
@@ -292,6 +306,13 @@ export type AuditEntry = {
   before: unknown;
   after: unknown;
 };
+
+// Deliberately limited representation returned by the change history endpoint.
+// Request/device metadata is audit-only and is never sent to the browser.
+export type ChangeHistoryEntry = Pick<
+  AuditEntry,
+  "id" | "timestamp" | "actorName" | "action" | "summary" | "before" | "after"
+>;
 
 export type NotificationPreference = {
   eventKey: string;

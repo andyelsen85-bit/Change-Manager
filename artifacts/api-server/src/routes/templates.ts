@@ -108,6 +108,12 @@ router.post("/templates", requireTemplateManager, async (req, res): Promise<void
       bypassCab: true,
       prefilledPlanning: b.prefilledPlanning ?? null,
       prefilledTestPlan: b.prefilledTestPlan ?? null,
+      prefilledScope: b.prefilledScope ?? null,
+      prefilledRollbackPlan: b.prefilledRollbackPlan ?? null,
+      prefilledRiskAssessment: b.prefilledRiskAssessment ?? null,
+      prefilledImpactedServices: b.prefilledImpactedServices ?? null,
+      prefilledCommunicationsPlan: b.prefilledCommunicationsPlan ?? null,
+      prefilledSuccessCriteria: b.prefilledSuccessCriteria ?? null,
       isActive: true,
     })
     .returning();
@@ -159,6 +165,12 @@ router.patch("/templates/:id", requireTemplateManager, async (req, res): Promise
     "bypassCab",
     "prefilledPlanning",
     "prefilledTestPlan",
+    "prefilledScope",
+    "prefilledRollbackPlan",
+    "prefilledRiskAssessment",
+    "prefilledImpactedServices",
+    "prefilledCommunicationsPlan",
+    "prefilledSuccessCriteria",
     "isActive",
   ] as const) {
     if (b[k] !== undefined) (updates as Record<string, unknown>)[k] = b[k];

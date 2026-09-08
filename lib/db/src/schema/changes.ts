@@ -31,6 +31,13 @@ export const changeRequestsTable = pgTable("change_requests", {
   // directory display name or the free-text value. Both nullable — optional.
   requesterType: text("requester_type"),
   requesterName: text("requester_name"),
+  // Stable local identity for an internal requester. The display name remains
+  // useful for external/LDAP-only requesters, while this supports reliable
+  // per-user request lists when the directory account exists locally.
+  requesterUserId: integer("requester_user_id"),
+  // Immutable author of the RFC. ownerId predates distinct creator/owner
+  // semantics and is retained for compatibility with existing records.
+  createdById: integer("created_by_id"),
   ownerId: integer("owner_id").notNull(),
   assigneeId: integer("assignee_id"),
   templateId: integer("template_id"),
@@ -39,6 +46,9 @@ export const changeRequestsTable = pgTable("change_requests", {
   // changes complete successfully (global promotion threshold), the CAB is
   // flagged so it can decide to enable the template as a real standard change.
   potentialTemplateId: integer("potential_template_id"),
+  // A re-change keeps a durable link to the failed/original change while
+  // intentionally retaining its own workflow records and evidence.
+  parentChangeId: integer("parent_change_id"),
   cabMeetingId: integer("cab_meeting_id"),
   plannedStart: timestamp("planned_start", { withTimezone: true }),
   plannedEnd: timestamp("planned_end", { withTimezone: true }),

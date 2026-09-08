@@ -16,14 +16,17 @@ export function RequesterField({
   name,
   onTypeChange,
   onNameChange,
+  onUserIdChange,
 }: {
   type: "internal" | "external";
   name: string;
   onTypeChange: (t: "internal" | "external") => void;
   onNameChange: (name: string) => void;
+  onUserIdChange?: (userId: number | null) => void;
 }) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
+  const [selectedValue, setSelectedValue] = useState<string | null>(null);
   useEffect(() => {
     const h = setTimeout(() => setDebounced(query), 250);
     return () => clearTimeout(h);
@@ -37,16 +40,23 @@ export function RequesterField({
 
   const options: ComboboxOption[] = useMemo(() => {
     const base = (searchQ.data?.users ?? []).map((u) => ({
-      value: u.fullName || u.username,
+      // Display names are not unique. A local ID is authoritative; LDAP-only
+      // entries use their unique directory username instead.
+      value: u.userId != null ? `user:${u.userId}` : `ldap:${u.username}`,
       label: u.fullName || u.username,
       hint: [u.username, u.email].filter(Boolean).join(" · "),
     }));
-    // Keep the current selection visible even after the result list changes.
-    if (name && !base.some((o) => o.value === name)) {
-      base.unshift({ value: name, label: name, hint: "" });
+    // Persisted legacy names have no reliable identity; show them but never
+    // use their display value to infer a local user ID.
+    if (name && !selectedValue) {
+      base.unshift({ value: `current:${name}`, label: name, hint: "" });
     }
     return base;
-  }, [searchQ.data, name]);
+  }, [searchQ.data, name, selectedValue]);
+  const usersByValue = useMemo(
+    () => new Map((searchQ.data?.users ?? []).map((u) => [u.userId != null ? `user:${u.userId}` : `ldap:${u.username}`, u])),
+    [searchQ.data],
+  );
 
   const note = searchQ.data?.note;
 
@@ -80,8 +90,15 @@ export function RequesterField({
           {type === "internal" ? (
             <Combobox
               options={options}
-              value={name}
-              onChange={onNameChange}
+              value={selectedValue ?? (name ? `current:${name}` : "")}
+              onChange={(value) => {
+                setSelectedValue(value);
+                const selected = usersByValue.get(value);
+                // A `current:` entry is only a legacy display placeholder.
+                // It cannot accidentally claim an identity with the same name.
+                onNameChange(selected ? (selected.fullName || selected.username) : name);
+                onUserIdChange?.(selected?.userId ?? null);
+              }}
               placeholder="Search the directory…"
               searchPlaceholder="Type a name (min 2 chars)…"
               emptyText={
@@ -97,7 +114,10 @@ export function RequesterField({
             <Input
               placeholder="Requester name (external)"
               value={name}
-              onChange={(e) => onNameChange(e.target.value)}
+              onChange={(e) => {
+                onNameChange(e.target.value);
+                onUserIdChange?.(null);
+              }}
               data-testid="input-requester-external"
             />
           )}

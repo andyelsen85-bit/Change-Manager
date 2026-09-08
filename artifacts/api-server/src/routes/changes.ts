@@ -58,6 +58,25 @@ const ACTIVE_STATUSES: ChangeStatus[] = [
 
 const router: IRouter = Router();
 
+// Audit payloads are application snapshots, not an API contract. Only return
+// fields that are meaningful on a change (and never request/device metadata).
+const AUDIT_DETAIL_FIELDS = new Set([
+  "id", "ref", "title", "description", "track", "status", "risk", "impact", "priority", "category",
+  "ownerId", "assigneeId", "templateId", "potentialTemplateId", "parentChangeId", "cabMeetingId",
+  "plannedStart", "plannedEnd", "actualStart", "actualEnd", "hasPreprodEnv", "preprodEnvUrl",
+  "ticketLink", "requesterType", "requesterName", "closureNote", "changeId", "filename", "mimeType",
+  "size", "scope", "implementationPlan", "rollbackPlan", "riskAssessment", "impactedServices",
+  "communicationsPlan", "successCriteria", "signedOff", "testPlan", "environment", "overallResult",
+  "notes", "outcome", "objectivesMet", "issuesEncountered", "lessonsLearned", "followupActions",
+  "note", "reason",
+]);
+function safeAuditDetail(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(([key]) => AUDIT_DETAIL_FIELDS.has(key)),
+  );
+}
+
 // Approver roles required per track. Per policy, Normal changes are signed off by the
 // Change Manager only after the CAB meeting; their deputy can vote in their absence
 // (handled at vote time via roleAssignmentsTable.isDeputy). Technical and business sign-off
@@ -74,6 +93,9 @@ export const APPROVER_ROLES_BY_TRACK: Record<string, string[]> = {
 
 async function expandChangeRow(c: typeof changeRequestsTable.$inferSelect) {
   const [owner] = await db.select().from(usersTable).where(eq(usersTable.id, c.ownerId));
+  const [creator] = c.createdById != null
+    ? await db.select().from(usersTable).where(eq(usersTable.id, c.createdById))
+    : [];
   let assigneeName: string | null = null;
   if (c.assigneeId != null) {
     const [a] = await db.select().from(usersTable).where(eq(usersTable.id, c.assigneeId));
@@ -93,17 +115,30 @@ async function expandChangeRow(c: typeof changeRequestsTable.$inferSelect) {
     potentialTemplateName = t?.name ?? null;
   }
   let cabMeetingDate: Date | null = null;
+  let cabMeetingStatus: string | null = null;
   if (c.cabMeetingId != null) {
     const [m] = await db.select().from(cabMeetingsTable).where(eq(cabMeetingsTable.id, c.cabMeetingId));
     cabMeetingDate = m?.scheduledStart ?? null;
+    cabMeetingStatus = m?.status ?? null;
+  }
+  let parentChangeRef: string | null = null;
+  if (c.parentChangeId != null) {
+    const [parent] = await db
+      .select({ ref: changeRequestsTable.ref })
+      .from(changeRequestsTable)
+      .where(eq(changeRequestsTable.id, c.parentChangeId));
+    parentChangeRef = parent?.ref ?? null;
   }
   return {
     ...c,
     ownerName: owner?.fullName ?? "Unknown",
+    createdByName: creator?.fullName ?? owner?.fullName ?? "Unknown",
     assigneeName,
     templateName,
     potentialTemplateName,
     cabMeetingDate,
+    cabMeetingStatus,
+    parentChangeRef,
   };
 }
 
@@ -196,6 +231,45 @@ router.get("/changes", requireAuth, async (req, res): Promise<void> => {
   res.json(dtos);
 });
 
+// User-centric work queues. Keep this separate from the general list: a row
+// can legitimately occur in several queues (for example creator and tester).
+// Soft-deleted rows are excluded and every candidate still passes the normal
+// view gate before being returned.
+router.get("/changes/my-requests", requireAuth, async (req, res): Promise<void> => {
+  const uid = req.session!.uid;
+  const rows = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(isNull(changeRequestsTable.deletedAt))
+    .orderBy(desc(changeRequestsTable.updatedAt));
+  const visible: typeof rows = [];
+  for (const row of rows) {
+    if (await getChangeViewAccess(req.session!, row)) visible.push(row);
+  }
+  const ids = visible.map((r) => r.id);
+  const assignments = ids.length
+    ? await db
+        .select({ changeId: changeAssigneesTable.changeId, roleKey: changeAssigneesTable.roleKey })
+        .from(changeAssigneesTable)
+        .where(and(inArray(changeAssigneesTable.changeId, ids), eq(changeAssigneesTable.userId, uid)))
+    : [];
+  const assignmentIds = (role: "implementer" | "tester") =>
+    new Set(assignments.filter((a) => a.roleKey === role).map((a) => a.changeId));
+  const implementerIds = assignmentIds("implementer");
+  const testerIds = assignmentIds("tester");
+  const creator = visible.filter((r) => (r.createdById ?? r.ownerId) === uid);
+  const owner = visible.filter((r) => r.ownerId === uid);
+  const requester = visible.filter((r) => r.requesterUserId === uid);
+  const expand = async (list: typeof visible) => Promise.all(list.map(expandChangeRow));
+  res.json({
+    creator: await expand(creator),
+    owner: await expand(owner),
+    implementer: await expand(visible.filter((r) => implementerIds.has(r.id))),
+    tester: await expand(visible.filter((r) => testerIds.has(r.id))),
+    requester: await expand(requester),
+  });
+});
+
 router.post("/changes", requireAuth, async (req, res): Promise<void> => {
   const session = req.session!;
   const b = req.body ?? {};
@@ -261,6 +335,15 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
     potentialTemplateId = pt.id;
   }
   const ref = await nextRef(track);
+  let requesterUserId: number | null = null;
+  if (b.requesterType === "internal" && typeof b.requesterUserId === "number" && Number.isFinite(b.requesterUserId)) {
+    const [requester] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, b.requesterUserId));
+    if (!requester) {
+      res.status(400).json({ error: "Unknown internal requester." });
+      return;
+    }
+    requesterUserId = requester.id;
+  }
   const [created] = await db
     .insert(changeRequestsTable)
     .values({
@@ -273,7 +356,7 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
       impact: b.impact,
       priority: b.priority,
       category: b.category,
-      ownerId: session.uid,
+      ownerId: typeof b.ownerId === "number" && Number.isFinite(b.ownerId) ? b.ownerId : session.uid,
       assigneeId: b.assigneeId ?? null,
       templateId,
       potentialTemplateId,
@@ -282,26 +365,39 @@ router.post("/changes", requireAuth, async (req, res): Promise<void> => {
       ticketLink: typeof b.ticketLink === "string" && b.ticketLink.trim() ? b.ticketLink.trim() : null,
       requesterType: b.requesterType === "internal" || b.requesterType === "external" ? b.requesterType : null,
       requesterName: typeof b.requesterName === "string" && b.requesterName.trim() ? b.requesterName.trim() : null,
+      requesterUserId,
+      createdById: session.uid,
       plannedStart: b.plannedStart ? new Date(b.plannedStart) : null,
       plannedEnd: b.plannedEnd ? new Date(b.plannedEnd) : null,
     })
     .returning();
-  // Always create an empty planning record
-  await db.insert(planningRecordsTable).values({ changeId: created.id }).onConflictDoNothing();
+  // Always create a planning record, pre-filled from either the active
+  // standard template or the disabled potential-standard template.
+  const planningTemplateId = templateId ?? potentialTemplateId;
+  const [planningTemplate] = planningTemplateId
+    ? await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, planningTemplateId))
+    : [];
+  await db
+    .insert(planningRecordsTable)
+    .values({
+      changeId: created.id,
+      scope: planningTemplate?.prefilledScope ?? "",
+      implementationPlan: planningTemplate?.prefilledPlanning ?? "",
+      rollbackPlan: planningTemplate?.prefilledRollbackPlan ?? "",
+      riskAssessment: planningTemplate?.prefilledRiskAssessment ?? "",
+      impactedServices: planningTemplate?.prefilledImpactedServices ?? "",
+      communicationsPlan: planningTemplate?.prefilledCommunicationsPlan ?? "",
+      successCriteria: planningTemplate?.prefilledSuccessCriteria ?? "",
+    })
+    .onConflictDoNothing();
   // Pre-fill planning from template + bump the template's usage counter so admins can
   // see which templates are most relied on.
   if (templateId) {
-    const [t] = await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, templateId));
+    const t = planningTemplate;
     await db
       .update(standardTemplatesTable)
       .set({ usageCount: sql`${standardTemplatesTable.usageCount} + 1` })
       .where(eq(standardTemplatesTable.id, templateId));
-    if (t?.prefilledPlanning) {
-      await db
-        .update(planningRecordsTable)
-        .set({ implementationPlan: t.prefilledPlanning })
-        .where(eq(planningRecordsTable.changeId, created.id));
-    }
     if (t?.prefilledTestPlan) {
       await db
         .insert(testRecordsTable)
@@ -423,6 +519,177 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   });
 });
 
+// Change-scoped audit history. Audit rows for other entities are deliberately
+// not inferred from IDs: IDs overlap across tables and could leak unrelated
+// activity. Change-related child operations include the change as entity ID.
+router.get("/changes/:id/history", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [change] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!change || change.deletedAt) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!(await getChangeViewAccess(req.session!, change))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const rows = await db
+    .select()
+    .from(auditLogTable)
+    .where(or(
+      and(eq(auditLogTable.entityType, "change"), eq(auditLogTable.entityId, id)),
+      sql`${auditLogTable.before} @> ${JSON.stringify({ changeId: id })}::jsonb`,
+      sql`${auditLogTable.after} @> ${JSON.stringify({ changeId: id })}::jsonb`,
+    ))
+    .orderBy(desc(auditLogTable.timestamp));
+  res.json(rows.map((row) => ({
+    id: row.id,
+    timestamp: row.timestamp,
+    actorName: row.actorName,
+    action: row.action,
+    summary: row.summary,
+    before: safeAuditDetail(row.before),
+    after: safeAuditDetail(row.after),
+  })));
+});
+
+// Create a new independent RFC from a failed one. Evidence and governance
+// records (attachments, approvals and audit) never cross the boundary.
+router.post("/changes/:id/rechange", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [original] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!original || original.deletedAt) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!(await getChangeViewAccess(req.session!, original))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  if (!(await getChangeAccess(req.session!, original))) {
+    res.status(403).json({ error: "Only the owner, assignee, change manager, or an admin can create a re-change." });
+    return;
+  }
+  const [pir] = await db.select().from(pirRecordsTable).where(eq(pirRecordsTable.changeId, id));
+  const failedStatus = ["rejected", "cancelled", "rolled_back"].includes(original.status);
+  const failedPir = original.status === "completed" && !!pir && ["failed", "rolled_back"].includes(pir.outcome);
+  if (!failedStatus && !failedPir) {
+    res.status(400).json({ error: "A re-change can only be created from a rejected, cancelled, rolled back, or unsuccessfully completed change." });
+    return;
+  }
+  // Match normal creation semantics: a Standard re-change may not retain a
+  // template that has since been withdrawn or deleted.
+  if (original.track === "standard") {
+    const [template] = original.templateId == null
+      ? []
+      : await db.select().from(standardTemplatesTable).where(eq(standardTemplatesTable.id, original.templateId));
+    if (!template || !template.isActive) {
+      res.status(409).json({
+        error: "The original standard template is missing or inactive. A re-change cannot be created as Standard until an active template is selected.",
+      });
+      return;
+    }
+  }
+  const ref = await nextRef(original.track);
+  const [created] = await db.insert(changeRequestsTable).values({
+    ref,
+    title: original.title,
+    description: original.description,
+    track: original.track,
+    status: "draft",
+    risk: original.risk,
+    impact: original.impact,
+    priority: original.priority,
+    category: original.category,
+    ownerId: req.session!.uid,
+    assigneeId: original.assigneeId,
+    templateId: original.templateId,
+    potentialTemplateId: original.potentialTemplateId,
+    parentChangeId: original.id,
+    hasPreprodEnv: original.hasPreprodEnv,
+    preprodEnvUrl: original.preprodEnvUrl,
+    ticketLink: original.ticketLink,
+    requesterType: original.requesterType,
+    requesterName: original.requesterName,
+    requesterUserId: original.requesterUserId,
+    createdById: req.session!.uid,
+    plannedStart: original.plannedStart,
+    plannedEnd: original.plannedEnd,
+  }).returning();
+  const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
+  await db.insert(planningRecordsTable).values({
+    changeId: created.id,
+    scope: planning?.scope ?? "",
+    implementationPlan: planning?.implementationPlan ?? "",
+    rollbackPlan: planning?.rollbackPlan ?? "",
+    riskAssessment: planning?.riskAssessment ?? "",
+    impactedServices: planning?.impactedServices ?? "",
+    communicationsPlan: planning?.communicationsPlan ?? "",
+    successCriteria: planning?.successCriteria ?? "",
+    signedOff: false,
+    signedOffAt: null,
+    signedOffBy: null,
+  }).onConflictDoNothing();
+  if (created.track !== "standard") await createApprovalsForChange(created.id, created.track);
+  await audit(req, {
+    action: "change.recreated",
+    entityType: "change",
+    entityId: created.id,
+    summary: `Created re-change ${created.ref} from ${original.ref}`,
+    after: { id: created.id, parentChangeId: original.id },
+  });
+  res.status(201).json(await expandChangeRow(created));
+});
+
+// Changes whose planned windows intersect this change's planned window.
+// Open-ended windows are treated as a point at plannedStart.
+router.get("/changes/:id/overlaps", requireAuth, async (req, res): Promise<void> => {
+  const id = Number(req.params["id"]);
+  if (!Number.isFinite(id)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+  const [current] = await db.select().from(changeRequestsTable).where(eq(changeRequestsTable.id, id));
+  if (!current || current.deletedAt) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+  if (!(await getChangeViewAccess(req.session!, current))) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  if (!current.plannedStart) {
+    res.json([]);
+    return;
+  }
+  const start = current.plannedStart <= (current.plannedEnd ?? current.plannedStart)
+    ? current.plannedStart
+    : current.plannedEnd!;
+  const end = current.plannedStart <= (current.plannedEnd ?? current.plannedStart)
+    ? (current.plannedEnd ?? current.plannedStart)
+    : current.plannedStart;
+  const rows = await db
+    .select()
+    .from(changeRequestsTable)
+    .where(and(
+      isNull(changeRequestsTable.deletedAt),
+      sql`${changeRequestsTable.id} <> ${id}`,
+      isNotNull(changeRequestsTable.plannedStart),
+      sql`LEAST(${changeRequestsTable.plannedStart}, COALESCE(${changeRequestsTable.plannedEnd}, ${changeRequestsTable.plannedStart})) <= ${end}`,
+      sql`GREATEST(${changeRequestsTable.plannedStart}, COALESCE(${changeRequestsTable.plannedEnd}, ${changeRequestsTable.plannedStart})) >= ${start}`,
+    ))
+    .orderBy(changeRequestsTable.plannedStart);
+  res.json(await Promise.all(rows.map(expandChangeRow)));
+});
+
 router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Number(req.params["id"]);
   if (!Number.isFinite(id)) {
@@ -443,13 +710,34 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
   if (b.ticketLink === null) updates.ticketLink = null;
   else if (typeof b.ticketLink === "string") updates.ticketLink = b.ticketLink.trim() || null;
   if (b.requesterType === null) updates.requesterType = null;
-  else if (b.requesterType === "internal" || b.requesterType === "external") updates.requesterType = b.requesterType;
+  else if (b.requesterType === "internal" || b.requesterType === "external") {
+    updates.requesterType = b.requesterType;
+    if (b.requesterType === "external") updates.requesterUserId = null;
+  }
   if (b.requesterName === null) updates.requesterName = null;
   else if (typeof b.requesterName === "string") updates.requesterName = b.requesterName.trim() || null;
+  if (b.requesterUserId === null) updates.requesterUserId = null;
+  else if (typeof b.requesterUserId === "number" && Number.isFinite(b.requesterUserId)) {
+    const [requester] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, b.requesterUserId));
+    if (!requester) {
+      res.status(400).json({ error: "Unknown internal requester." });
+      return;
+    }
+    updates.requesterUserId = requester.id;
+  }
   if (typeof b.hasPreprodEnv === "boolean") updates.hasPreprodEnv = b.hasPreprodEnv;
   if (b.assigneeId === null) updates.assigneeId = null;
   else if (typeof b.assigneeId === "number") updates.assigneeId = b.assigneeId;
+  if (typeof b.ownerId === "number" && Number.isFinite(b.ownerId)) {
+    const [owner] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, b.ownerId));
+    if (!owner) {
+      res.status(400).json({ error: "Unknown change owner." });
+      return;
+    }
+    updates.ownerId = owner.id;
+  }
   // "Potential Standard Change" link — editable after creation as well.
+  let potentialLinkedTemplate: typeof standardTemplatesTable.$inferSelect | undefined;
   if (b.potentialTemplateId === null) updates.potentialTemplateId = null;
   else if (typeof b.potentialTemplateId === "number") {
     if (before.track !== "normal") {
@@ -465,6 +753,7 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
       return;
     }
     updates.potentialTemplateId = pt.id;
+    if (before.potentialTemplateId !== pt.id) potentialLinkedTemplate = pt;
   }
   if (b.cabMeetingId === null) updates.cabMeetingId = null;
   else if (typeof b.cabMeetingId === "number") updates.cabMeetingId = b.cabMeetingId;
@@ -494,11 +783,11 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
-  // Write gate. The "Change Owner" field (assigneeId) may be changed by ANY
+  // Write gate. The "Change Owner" field (ownerId) may be changed by ANY
   // authenticated user — explicit user requirement: anyone can hand a change
   // over (e.g. take it over themselves) so the new owner can act on it; the
   // audit log records who did it. All other fields keep the usual gate, so a
-  // role-less caller is rejected unless every non-assigneeId update is a
+  // role-less caller is rejected unless every non-ownerId update is a
   // no-op (the details form always PATCHes the full field set).
   if (!access) {
     const isNoop = (key: keyof typeof updates): boolean => {
@@ -512,7 +801,7 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
       return nv === (ov ?? null) || (nv === "" && (ov === "" || ov === null));
     };
     const blocked = (Object.keys(updates) as (keyof typeof updates)[]).filter(
-      (k) => k !== "assigneeId" && !isNoop(k),
+       (k) => k !== "ownerId" && !isNoop(k),
     );
     if (blocked.length > 0) {
       res.status(403).json({
@@ -535,23 +824,29 @@ router.patch("/changes/:id", requireAuth, async (req, res): Promise<void> => {
       .update(standardTemplatesTable)
       .set({ usageCount: sql`${standardTemplatesTable.usageCount} + 1` })
       .where(eq(standardTemplatesTable.id, linkedTemplate.id));
-    // Prefill planning/test plan only when still empty so a template picked
-    // later never overwrites work the owner already did.
-    if (linkedTemplate.prefilledPlanning) {
-      const [p] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
-      if (p && !p.implementationPlan) {
-        await db
-          .update(planningRecordsTable)
-          .set({ implementationPlan: linkedTemplate.prefilledPlanning })
-          .where(eq(planningRecordsTable.changeId, id));
-      }
-    }
     if (linkedTemplate.prefilledTestPlan) {
       await db
         .insert(testRecordsTable)
         .values({ changeId: id, testPlan: linkedTemplate.prefilledTestPlan })
         .onConflictDoNothing();
     }
+  }
+  const prefillTemplate = linkedTemplate ?? potentialLinkedTemplate;
+  if (prefillTemplate) {
+    const [p] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, id));
+    const planningPrefill = {
+      scope: p?.scope ? p.scope : (prefillTemplate.prefilledScope ?? ""),
+      implementationPlan: p?.implementationPlan ? p.implementationPlan : (prefillTemplate.prefilledPlanning ?? ""),
+      rollbackPlan: p?.rollbackPlan ? p.rollbackPlan : (prefillTemplate.prefilledRollbackPlan ?? ""),
+      riskAssessment: p?.riskAssessment ? p.riskAssessment : (prefillTemplate.prefilledRiskAssessment ?? ""),
+      impactedServices: p?.impactedServices ? p.impactedServices : (prefillTemplate.prefilledImpactedServices ?? ""),
+      communicationsPlan: p?.communicationsPlan ? p.communicationsPlan : (prefillTemplate.prefilledCommunicationsPlan ?? ""),
+      successCriteria: p?.successCriteria ? p.successCriteria : (prefillTemplate.prefilledSuccessCriteria ?? ""),
+    };
+    await db
+      .insert(planningRecordsTable)
+      .values({ changeId: id, ...planningPrefill })
+      .onConflictDoUpdate({ target: planningRecordsTable.changeId, set: planningPrefill });
   }
   await audit(req, {
     action: "change.updated",
@@ -864,6 +1159,23 @@ router.post("/changes/:id/transition", requireAuth, async (req, res): Promise<vo
   if (!access) {
     res.status(403).json({ error: "Only the owner, assignee, change manager, or an admin can transition this change." });
     return;
+  }
+  // A docketed change is governed by its CAB until that meeting is cancelled.
+  // Check cab_changes rather than only the denormalized change column so
+  // legacy and multi-meeting docket rows receive the same protection.
+  if (toStatus === "cancelled" || toStatus === "rejected") {
+    const [activeDocket] = await db
+      .select({ meetingId: cabMeetingsTable.id })
+      .from(cabChangesTable)
+      .innerJoin(cabMeetingsTable, eq(cabMeetingsTable.id, cabChangesTable.meetingId))
+      .where(and(eq(cabChangesTable.changeId, id), sql`${cabMeetingsTable.status} <> 'cancelled'`))
+      .limit(1);
+    if (activeDocket) {
+      res.status(400).json({
+        error: "This change is planned on a non-cancelled CAB meeting and cannot be rejected or cancelled from the change view. Remove it from the CAB agenda or cancel the CAB first.",
+      });
+      return;
+    }
   }
   // Per-track state machine
   const track = before.track as ChangeTrack;

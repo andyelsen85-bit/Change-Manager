@@ -105,8 +105,8 @@ router.post("/changes/:id/attachments", requireAuth, async (req, res): Promise<v
     });
   await audit(req, {
     action: "attachment.uploaded",
-    entityType: "attachment",
-    entityId: row!.id,
+    entityType: "change",
+    entityId: id,
     summary: `Uploaded ${row!.filename} to ${c.ref}`,
     after: { changeId: id, filename: row!.filename, size: row!.size, mimeType: row!.mimeType },
   });
@@ -131,8 +131,8 @@ router.get("/attachments/:id/download", requireAuth, async (req, res): Promise<v
   }
   await audit(req, {
     action: "attachment.downloaded",
-    entityType: "attachment",
-    entityId: row.id,
+    entityType: "change",
+    entityId: c.id,
     summary: `Downloaded ${row.filename} from ${c.ref}`,
   });
   const safeName = row.filename.replace(/[^\w.\-]+/g, "_");
@@ -181,8 +181,8 @@ router.delete("/attachments/:id", requireAuth, async (req, res): Promise<void> =
   await db.delete(attachmentsTable).where(eq(attachmentsTable.id, id));
   await audit(req, {
     action: "attachment.deleted",
-    entityType: "attachment",
-    entityId: id,
+    entityType: "change",
+    entityId: row.changeId,
     summary: `Deleted ${row.filename} from ${c.ref}`,
     before: { changeId: row.changeId, filename: row.filename },
   });

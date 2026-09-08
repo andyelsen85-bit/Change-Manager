@@ -28,6 +28,7 @@ import {
   type Attachment,
   type ChangeAssignee,
   type ChangeDetail as ChangeDetailT,
+  type ChangeRequest,
   type ChangeStatus,
   type ChangeTrack,
   type Comment,
@@ -425,6 +426,11 @@ export function ChangeDetailPage() {
     queryFn: () => api.get<{ url: string; attendeeCount: number }>(`/changes/${id}/ecab-teams-url`),
     enabled: Number.isFinite(id) && changeQ.data?.track === "emergency",
   });
+  const pirQ = useQuery({
+    queryKey: ["change.pir", id],
+    queryFn: () => api.get<PirRecord>(`/changes/${id}/pir`),
+    enabled: Number.isFinite(id) && changeQ.data?.status === "completed",
+  });
 
   const transition = useMutation({
     mutationFn: (payload: { toStatus: ChangeStatus; note?: string }) =>
@@ -437,6 +443,15 @@ export function ChangeDetailPage() {
       qc.invalidateQueries({ queryKey: ["change.approvals", id] });
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Transition failed"),
+  });
+  const rechange = useMutation({
+    mutationFn: () => api.post<ChangeRequest>(`/changes/${id}/rechange`, {}),
+    onSuccess: (created) => {
+      toast.success(`Created re-change ${created.ref}`);
+      qc.invalidateQueries({ queryKey: ["changes"] });
+      setLocation(`/changes/${created.id}`);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to create re-change"),
   });
 
   // Cancelling or rejecting requires a mandatory reason: it is stored on the
@@ -507,7 +522,7 @@ export function ChangeDetailPage() {
   const tabFromUrl = (() => {
     const t = new URLSearchParams(searchString).get("tab");
     return t &&
-      ["details", "planning", "approvals", "assignees", "preprod-testing", "testing", "pir", "attachments", "comments"].includes(t)
+      ["details", "planning", "approvals", "assignees", "preprod-testing", "testing", "pir", "attachments", "history", "comments"].includes(t)
       ? t
       : null;
   })();
@@ -562,8 +577,8 @@ export function ChangeDetailPage() {
                 <CardTitle className="text-xl">{c.title}</CardTitle>
               </div>
               <div className="flex flex-col items-end gap-2">
-                <div className="text-xs text-muted-foreground">Creator: {c.ownerName ?? "—"}</div>
-                <div className="text-xs text-muted-foreground">Owner: {c.assigneeName ?? "Unassigned"}</div>
+                <div className="text-xs text-muted-foreground">Creator: {c.createdByName ?? "—"}</div>
+                <div className="text-xs text-muted-foreground">Owner: {c.ownerName ?? "Unassigned"}</div>
                 {c.requesterName && (
                   <div className="text-xs text-muted-foreground">
                     Requester: {c.requesterName}
@@ -620,6 +635,15 @@ export function ChangeDetailPage() {
                 <span className="font-mono">{c.ref}</span> keeps its original prefix.
               </div>
             )}
+            {c.parentChangeId != null && c.parentChangeRef && (
+              <div className="mt-4 rounded-md border border-info/40 bg-info/10 p-3 text-sm" data-testid="notice-rechange">
+                <Repeat className="mr-1.5 inline h-3.5 w-3.5 align-[-2px]" />
+                This is a re-change created from{" "}
+                <Link href={`/changes/${c.parentChangeId}`} className="font-mono text-primary hover:underline">
+                  {c.parentChangeRef}
+                </Link>.
+              </div>
+            )}
             {(c.status === "cancelled" || c.status === "rejected") && c.closureNote && (
               <div
                 className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm"
@@ -632,6 +656,19 @@ export function ChangeDetailPage() {
               </div>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
+              {(["cancelled", "rejected", "rolled_back"].includes(c.status) ||
+                (c.status === "completed" && ["failed", "rolled_back"].includes(pirQ.data?.outcome ?? ""))) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => rechange.mutate()}
+                  disabled={rechange.isPending}
+                  data-testid="button-create-rechange"
+                >
+                  {rechange.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  <Repeat className="mr-2 h-4 w-4" /> Create new change from this change
+                </Button>
+              )}
               {(TRANSITIONS_BY_TRACK[c.track]?.[c.status] ?? []).map((next) => (
                 <Button
                   key={next}
@@ -884,27 +921,29 @@ export function ChangeDetailPage() {
           <TabsList className="flex flex-wrap">
             <TabsTrigger value="details" data-testid="tab-details">Details</TabsTrigger>
             <TabsTrigger value="planning" data-testid="tab-planning">Planning</TabsTrigger>
-            <TabsTrigger value="approvals" data-testid="tab-approvals">Approvals</TabsTrigger>
             <TabsTrigger value="assignees" data-testid="tab-assignees">Assignees</TabsTrigger>
+            <TabsTrigger value="approvals" data-testid="tab-approvals">Approvals</TabsTrigger>
             {c.hasPreprodEnv && (
               <TabsTrigger value="preprod-testing" data-testid="tab-preprod-testing">PreProdTesting</TabsTrigger>
             )}
             <TabsTrigger value="testing" data-testid="tab-testing">Post Prod Testing</TabsTrigger>
             <TabsTrigger value="pir" data-testid="tab-pir">PIR</TabsTrigger>
             <TabsTrigger value="attachments" data-testid="tab-attachments">Attachments</TabsTrigger>
+            <TabsTrigger value="history" data-testid="tab-history">History</TabsTrigger>
             <TabsTrigger value="comments" data-testid="tab-comments">Discussion</TabsTrigger>
           </TabsList>
 
           <TabsContent value="details"><DetailsTab id={id} change={c} /></TabsContent>
           <TabsContent value="planning"><PlanningTab id={id} change={c} /></TabsContent>
-          <TabsContent value="approvals"><ApprovalsTab id={id} currentUserId={user?.id ?? 0} /></TabsContent>
           <TabsContent value="assignees"><AssigneesTab id={id} /></TabsContent>
+          <TabsContent value="approvals"><ApprovalsTab id={id} currentUserId={user?.id ?? 0} /></TabsContent>
           {c.hasPreprodEnv && (
             <TabsContent value="preprod-testing"><TestingTab id={id} kind="preprod" /></TabsContent>
           )}
           <TabsContent value="testing"><TestingTab id={id} kind="production" /></TabsContent>
           <TabsContent value="pir"><PirTab id={id} /></TabsContent>
           <TabsContent value="attachments"><AttachmentsTab id={id} /></TabsContent>
+          <TabsContent value="history"><HistoryTab id={id} /></TabsContent>
           <TabsContent value="comments"><CommentsTab id={id} /></TabsContent>
         </Tabs>
       )}
@@ -1027,12 +1066,13 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
   const [risk, setRisk] = useState<"low" | "medium" | "high">(change.risk);
   const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">(change.priority);
   const [category, setCategory] = useState<string>(change.category ?? "");
-  const [assigneeId, setAssigneeId] = useState<string>(change.assigneeId ? String(change.assigneeId) : "none");
+  const [assigneeId, setAssigneeId] = useState<string>(change.ownerId ? String(change.ownerId) : "none");
   const [hasPreprodEnv, setHasPreprodEnv] = useState<boolean>(change.hasPreprodEnv ?? false);
   const [preprodEnvUrl, setPreprodEnvUrl] = useState<string>(change.preprodEnvUrl ?? "");
   const [ticketLink, setTicketLink] = useState<string>(change.ticketLink ?? "");
   const [requesterType, setRequesterType] = useState<"internal" | "external">(change.requesterType ?? "internal");
   const [requesterName, setRequesterName] = useState<string>(change.requesterName ?? "");
+  const [requesterUserId, setRequesterUserId] = useState<number | null>(change.requesterUserId ?? null);
 
   const [templateId, setTemplateId] = useState<string>(change.templateId ? String(change.templateId) : "");
   // "Potential Standard Change" (normal track): link to a DISABLED template.
@@ -1065,12 +1105,13 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
         risk,
         priority,
         category: category || null,
-        assigneeId: assigneeId === "none" ? null : Number(assigneeId),
+        ownerId: assigneeId === "none" ? null : Number(assigneeId),
         hasPreprodEnv,
         preprodEnvUrl: hasPreprodEnv ? preprodEnvUrl.trim() : "",
         ticketLink: ticketLink.trim() || null,
         requesterType: requesterName.trim() ? requesterType : null,
         requesterName: requesterName.trim() || null,
+        requesterUserId: requesterType === "internal" && requesterName.trim() ? requesterUserId : null,
       }),
     onSuccess: () => {
       toast.success("Details updated");
@@ -1086,12 +1127,13 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
     risk !== change.risk ||
     priority !== change.priority ||
     (category ?? "") !== (change.category ?? "") ||
-    assigneeId !== (change.assigneeId ? String(change.assigneeId) : "none") ||
+    assigneeId !== String(change.ownerId) ||
     hasPreprodEnv !== (change.hasPreprodEnv ?? false) ||
     preprodEnvUrl !== (change.preprodEnvUrl ?? "") ||
     (ticketLink.trim() || null) !== (change.ticketLink ?? null) ||
     (requesterName.trim() || null) !== (change.requesterName ?? null) ||
     (requesterName.trim() ? requesterType : null) !== (change.requesterType ?? null) ||
+    (requesterUserId ?? null) !== (change.requesterUserId ?? null) ||
     (canPickTemplate && !!templateId && Number(templateId) !== (change.templateId ?? -1)) ||
     potentialValue !== (change.potentialTemplateId ?? null);
 
@@ -1125,18 +1167,23 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
             />
           </div>
 
-          {canPickTemplate && (
+          {change.track === "standard" && (
             <div
               className={`space-y-2 rounded-md border p-3 ${change.templateId ? "border-border" : "border-amber-500/60 bg-amber-500/10"}`}
               data-testid="details-template-panel"
             >
               <Label className="flex items-center gap-1.5">Standard template</Label>
+              {change.templateId && !canPickTemplate && (
+                <p className="text-sm font-medium" data-testid="text-details-template">
+                  {change.templateName ?? `Template #${change.templateId}`}
+                </p>
+              )}
               {!change.templateId && (
                 <p className="text-xs text-muted-foreground">
                   This standard change has no template yet. Select one and save — the change cannot leave draft without it.
                 </p>
               )}
-              <Combobox
+              {canPickTemplate && <Combobox
                 options={(templatesQ.data ?? [])
                   .filter((t) => t.isActive)
                   .map((t) => ({ value: String(t.id), label: t.name }))}
@@ -1146,7 +1193,7 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
                 searchPlaceholder="Search templates…"
                 emptyText="No active templates found."
                 data-testid="select-details-template"
-              />
+              />}
             </div>
           )}
 
@@ -1242,8 +1289,10 @@ function DetailsTab({ id, change }: { id: number; change: ChangeDetailT }) {
             onTypeChange={(t) => {
               setRequesterType(t);
               setRequesterName("");
+              setRequesterUserId(null);
             }}
             onNameChange={setRequesterName}
+            onUserIdChange={setRequesterUserId}
           />
 
           <div className="space-y-2">
@@ -1380,6 +1429,12 @@ function PlanningTab({ id, change }: { id: number; change: ChangeDetailT }) {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ["change.planning", id], queryFn: () => api.get<PlanningRecord>(`/changes/${id}/planning`) });
   const [form, setForm] = useState<PlanningRecord | null>(null);
+  const [showOverlaps, setShowOverlaps] = useState(false);
+  const overlapsQ = useQuery({
+    queryKey: ["change.overlaps", id],
+    queryFn: () => api.get<ChangeRequest[]>(`/changes/${id}/overlaps`),
+    enabled: showOverlaps,
+  });
   if (q.data && !form) setForm(q.data);
   const save = useMutation({
     mutationFn: (signOff: boolean) => api.put<PlanningRecord>(`/changes/${id}/planning`, { ...form, signedOff: signOff }),
@@ -1465,6 +1520,40 @@ function PlanningTab({ id, change }: { id: number; change: ChangeDetailT }) {
               {saveSchedule.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save schedule
             </Button>
+          </div>
+          <div className="border-t border-border pt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowOverlaps((v) => !v)}
+              disabled={!change.plannedStart}
+              data-testid="button-show-overlapping-changes"
+            >
+              {showOverlaps ? "Hide overlapping changes" : "Show overlapping changes"}
+            </Button>
+            {showOverlaps && (
+              <div className="mt-3 space-y-2" data-testid="list-overlapping-changes">
+                {overlapsQ.isLoading ? (
+                  <Skeleton className="h-16 w-full" />
+                ) : (overlapsQ.data ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No other planned changes overlap this window.</p>
+                ) : (
+                  overlapsQ.data!.map((overlap) => (
+                    <Link
+                      key={overlap.id}
+                      href={`/changes/${overlap.id}?tab=planning`}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-background p-3 text-sm hover:bg-muted/50"
+                      data-testid={`link-overlap-${overlap.id}`}
+                    >
+                      <span><span className="font-mono">{overlap.ref}</span> — {overlap.title}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {fmtDateTime(overlap.plannedStart)} – {fmtDateTime(overlap.plannedEnd ?? overlap.plannedStart)}
+                      </span>
+                    </Link>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         </div>
         {field("scope", "Scope")}
@@ -1853,6 +1942,47 @@ async function fileToBase64(file: File): Promise<string> {
     binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
   }
   return btoa(binary);
+}
+
+function HistoryTab({ id }: { id: number }) {
+  const historyQ = useQuery({
+    queryKey: ["change.history", id],
+    queryFn: () => api.get<import("@/lib/types").ChangeHistoryEntry[]>(`/changes/${id}/history`),
+  });
+  const details = (value: unknown) =>
+    value == null ? null : JSON.stringify(value, null, 2);
+  return (
+    <Card className="mt-4">
+      <CardHeader><CardTitle className="text-base">History</CardTitle></CardHeader>
+      <CardContent>
+        {historyQ.isLoading ? <Skeleton className="h-24 w-full" /> :
+          (historyQ.data ?? []).length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No history recorded for this change.</p>
+          ) : (
+            <div className="space-y-3">
+              {(historyQ.data ?? []).map((entry) => (
+                <article key={entry.id} className="rounded-md border border-border p-3" data-testid={`history-entry-${entry.id}`}>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium">{entry.actorName} · {entry.action}</span>
+                    <span className="text-xs text-muted-foreground">{fmtDateTime(entry.timestamp)}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">{entry.summary}</p>
+                  {(entry.before != null || entry.after != null) && (
+                    <details className="mt-2 text-xs">
+                      <summary className="cursor-pointer text-primary">Before / after details</summary>
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        <pre className="overflow-auto rounded bg-muted p-2 whitespace-pre-wrap">{details(entry.before) ?? "—"}</pre>
+                        <pre className="overflow-auto rounded bg-muted p-2 whitespace-pre-wrap">{details(entry.after) ?? "—"}</pre>
+                      </div>
+                    </details>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function AttachmentsTab({ id }: { id: number }) {

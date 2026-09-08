@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock,
+  Download,
   Plus,
   ShieldAlert,
 } from "lucide-react";
@@ -134,6 +135,19 @@ export function DashboardPage() {
               New Change
             </Button>
           </Link>
+          <Button
+            variant="outline"
+            onClick={() =>
+              api.download(
+                range === "all" ? "/dashboard/statistics.pdf" : `/dashboard/statistics.pdf?range=${range}`,
+                `dashboard-statistics-${new Date().toISOString().slice(0, 10)}.pdf`,
+              )
+            }
+            data-testid="button-export-dashboard-pdf"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export PDF
+          </Button>
         </div>
       </div>
 

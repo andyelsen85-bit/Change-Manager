@@ -34,10 +34,20 @@ CREATE TRIGGER audit_log_no_truncate
 // drizzle-kit migration. Safe to run on every boot.
 const SCHEMA_UPGRADE_SQL = `
 ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS usage_count integer NOT NULL DEFAULT 0;
+ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_scope text;
+ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_rollback_plan text;
+ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_risk_assessment text;
+ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_impacted_services text;
+ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_communications_plan text;
+ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_success_criteria text;
 
 -- Potential Standard Change: link a normal change to a disabled template being
 -- trialled, plus the single-row promotion-threshold configuration.
 ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS potential_template_id integer;
+-- Re-changes are independent requests with a pointer to their original.
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS parent_change_id integer;
+CREATE INDEX IF NOT EXISTS change_requests_parent_change_id_idx
+  ON change_requests (parent_change_id);
 CREATE TABLE IF NOT EXISTS template_settings (
   key                  text PRIMARY KEY DEFAULT 'global',
   promotion_threshold  integer NOT NULL DEFAULT 5
@@ -78,6 +88,15 @@ ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS pir_reminder_sent_at timest
 -- deleted_at stamp; deleted_by_id records the admin who removed it.
 ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
 ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS deleted_by_id integer;
+
+-- Separate the immutable RFC creator from the mutable operational owner.
+-- Existing installations used owner_id for both, so preserve its historical
+-- value as the creator before any future reassignment can occur.
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS created_by_id integer;
+ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS requester_user_id integer;
+UPDATE change_requests SET created_by_id = owner_id WHERE created_by_id IS NULL;
+CREATE INDEX IF NOT EXISTS change_requests_created_by_id_idx ON change_requests (created_by_id);
+CREATE INDEX IF NOT EXISTS change_requests_requester_user_id_idx ON change_requests (requester_user_id);
 
 -- Per-user discussion read state. One row per (user, change); last_read_at is
 -- compared against the newest comment timestamp to decide "unread".
