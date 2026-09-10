@@ -8,6 +8,8 @@ export const planningRecordsTable = pgTable("planning_records", {
   riskAssessment: text("risk_assessment").notNull().default(""),
   impactedServices: text("impacted_services").notNull().default(""),
   communicationsPlan: text("communications_plan").notNull().default(""),
+  toInformSpoc: boolean("to_inform_spoc").notNull().default(false),
+  procedure: text("procedure").notNull().default(""),
   successCriteria: text("success_criteria").notNull().default(""),
   signedOff: boolean("signed_off").notNull().default(false),
   signedOffAt: timestamp("signed_off_at", { withTimezone: true }),

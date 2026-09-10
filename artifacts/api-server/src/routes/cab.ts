@@ -17,7 +17,7 @@ import { getCompletedCountsByTemplate, getPromotionThreshold } from "../lib/temp
 import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
 import { buildCabAgendaPdf, buildCabResultsPdf } from "../lib/agenda-pdf";
-import { notify, getUserEmail, getUserEmails } from "../lib/email";
+import { notify, getSmtp, getUserEmail, getUserEmails } from "../lib/email";
 
 // Format a date for emails as dd/MM/yyyy HH:mm in 24-hour time. We do
 // the formatting manually rather than via toLocaleString("en-GB") because
@@ -547,9 +547,29 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     .from(cabMembersTable)
     .leftJoin(usersTable, eq(usersTable.id, cabMembersTable.userId))
     .where(eq(cabMembersTable.meetingId, id));
-  const targets = (
-    await Promise.all(memberRows.map((r) => getUserEmail(r.userId)))
-  ).filter((t): t is { userId: number; email: string; name: string } => !!t);
+  const targets = memberRows.flatMap((r) => {
+    const email = r.email?.trim();
+    if (!email || !r.fullName) return [];
+    return [{ userId: r.userId, email, name: r.fullName }];
+  });
+  if (targets.length === 0) {
+    await audit(req, {
+      action: "cab.agenda_send_failed",
+      entityType: "cab",
+      entityId: id,
+      summary: "CAB agenda not sent: no meeting members have a usable email address",
+      after: { memberCount: memberRows.length, recipientCount: 0 },
+    });
+    res.status(409).json({
+      error: "No CAB meeting members have a usable email address. Update the meeting roster or the members' email addresses.",
+    });
+    return;
+  }
+  const smtp = await getSmtp();
+  if (!smtp?.enabled || !smtp.host || !smtp.fromAddress) {
+    res.status(503).json({ error: "SMTP is not configured or enabled. Check Email Settings before sending the agenda." });
+    return;
+  }
 
   // Pull the full change record for every change attached to this meeting.
   const changeRows = await db
@@ -665,7 +685,7 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     summary: `Sent CAB agenda: ${result.sent} sent, ${result.skipped} skipped, ${result.errors} errors (${changeRows.length} changes)`,
     after: { ...result, changeCount: changeRows.length },
   });
-  res.json(result);
+  res.json({ ...result, unavailable: memberRows.length - targets.length });
 });
 
 // ---------------------------------------------------------------------------

@@ -48,6 +48,7 @@ import { PirCountdownBadge } from "@/components/PirCountdownBadge";
 import { fmtAgo, fmtDateTime, toLocalDateTimeInput, fromLocalDateTimeInput } from "@/lib/format";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { DateTimePicker } from "@/components/ui/datetime-picker";
 import { Textarea } from "@/components/ui/textarea";
@@ -1562,6 +1563,18 @@ function PlanningTab({ id, change }: { id: number; change: ChangeDetailT }) {
         {field("riskAssessment", "Risk assessment", 3)}
         {field("impactedServices", "Impacted services", 2)}
         {field("communicationsPlan", "Communications plan", 2)}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="to-inform-spoc"
+              checked={form.toInformSpoc}
+              onCheckedChange={(checked) => setForm({ ...form, toInformSpoc: checked === true })}
+              data-testid="checkbox-to-inform-spoc"
+            />
+            <Label htmlFor="to-inform-spoc">To Inform: SPOC</Label>
+          </div>
+          {form.toInformSpoc && field("procedure", "Procedure", 2)}
+        </div>
         {field("successCriteria", "Success criteria", 2)}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
           <div className="text-xs text-muted-foreground">

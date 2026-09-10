@@ -49,23 +49,16 @@ type WeekSegment = {
   lane: number;
 };
 
-// Deterministic colour per change so the same change keeps its colour as the
-// user pages between months. Tailwind-safe static classes (no dynamic strings).
-const BAR_PALETTE = [
-  "bg-sky-500/85 hover:bg-sky-500 text-white",
-  "bg-violet-500/85 hover:bg-violet-500 text-white",
-  "bg-emerald-500/85 hover:bg-emerald-500 text-white",
-  "bg-amber-500/90 hover:bg-amber-500 text-white",
-  "bg-rose-500/85 hover:bg-rose-500 text-white",
-  "bg-teal-500/85 hover:bg-teal-500 text-white",
-  "bg-fuchsia-500/85 hover:bg-fuchsia-500 text-white",
-  "bg-indigo-500/85 hover:bg-indigo-500 text-white",
-  "bg-cyan-500/85 hover:bg-cyan-500 text-white",
-  "bg-orange-500/90 hover:bg-orange-500 text-white",
-];
+// Every internal change uses the colour assigned to its track. Static classes
+// keep the legend and all calendar views consistent.
+const TRACK_BAR_COLORS = {
+  standard: "bg-sky-600/85 hover:bg-sky-600 text-white",
+  normal: "bg-violet-600/85 hover:bg-violet-600 text-white",
+  emergency: "bg-rose-600/85 hover:bg-rose-600 text-white",
+} as const;
 
-function barColor(id: number): string {
-  return BAR_PALETTE[id % BAR_PALETTE.length];
+function barColor(track: keyof typeof TRACK_BAR_COLORS): string {
+  return TRACK_BAR_COLORS[track];
 }
 
 // External changes render as red hazard stripes — a deliberate "barrier tape"
@@ -314,7 +307,7 @@ export function ChangePlanningsPage() {
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Change Plannings</h2>
           <p className="text-sm text-muted-foreground">
-            Planned windows for all open changes. Each bar spans a change's scheduled start to end — click it to open the change.
+            Planned windows for all open changes. Colors identify the change track; click a bar to open the change.
           </p>
         </div>
         <Button onClick={openNew} data-testid="button-add-external">
@@ -342,9 +335,14 @@ export function ChangePlanningsPage() {
             </Tabs>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex" data-testid="legend-external">
-              <span className="inline-block h-3 w-6 rounded-sm" style={EXTERNAL_BAR_STYLE} />
-              External change (provider / third party)
+            <div className="hidden items-center gap-3 text-xs text-muted-foreground lg:flex">
+              <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded-sm bg-sky-600" />Standard</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded-sm bg-violet-600" />Normal</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded-sm bg-rose-600" />Emergency</span>
+              <span className="flex items-center gap-1.5" data-testid="legend-external">
+                <span className="inline-block h-3 w-5 rounded-sm" style={EXTERNAL_BAR_STYLE} />
+                External
+              </span>
             </div>
             <div className="flex items-center gap-1">
               <Button variant="ghost" size="icon" onClick={() => setCursor((c) => view === "month" ? addMonths(c, -1) : view === "week" ? addWeeks(c, -1) : addDays(c, -1))} data-testid="button-prev-month">
@@ -381,7 +379,7 @@ export function ChangePlanningsPage() {
                   <button
                     key={item.id}
                     onClick={() => setLocation(`/changes/${item.change.id}`)}
-                    className={cn("flex w-full items-center gap-2 rounded-md p-3 text-left text-sm", item.change.status === "completed" ? "bg-emerald-600 text-white" : barColor(item.change.id))}
+                    className={cn("flex w-full items-center gap-2 rounded-md p-3 text-left text-sm", barColor(item.change.track))}
                     data-testid={`planning-day-${item.change.id}`}
                   >
                     {item.change.status === "completed" && <CheckCircle2 className="h-4 w-4" />}
@@ -485,9 +483,7 @@ export function ChangePlanningsPage() {
                               data-testid={`planning-bar-${c.id}`}
                               className={cn(
                                 common.className,
-                                c.status === "completed"
-                                  ? "bg-emerald-600/80 hover:bg-emerald-600 text-white"
-                                  : barColor(c.id),
+                                barColor(c.track),
                               )}
                               style={common.style}
                             >

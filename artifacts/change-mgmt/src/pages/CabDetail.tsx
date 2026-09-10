@@ -94,8 +94,12 @@ export function CabDetailPage() {
   });
 
   const sendAgenda = useMutation({
-    mutationFn: () => api.post<{ sent: number; skipped: number; errors: number }>(`/cab-meetings/${id}/send-agenda`),
-    onSuccess: (r) => toast.success(`Agenda: ${r.sent} sent, ${r.skipped} skipped, ${r.errors} errors`),
+    mutationFn: () => api.post<{ sent: number; skipped: number; errors: number; unavailable: number }>(`/cab-meetings/${id}/send-agenda`),
+    onSuccess: (r) => {
+      const summary = `Agenda: ${r.sent} sent, ${r.skipped} skipped, ${r.errors} errors, ${r.unavailable} unavailable`;
+      if (r.sent === 0 || r.errors > 0) toast.error(summary);
+      else toast.success(summary);
+    },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to send agenda"),
   });
 

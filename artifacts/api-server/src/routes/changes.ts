@@ -507,7 +507,7 @@ router.get("/changes/:id", requireAuth, async (req, res): Promise<void> => {
     ...dto,
     standardPromotion,
     trackChange,
-    planning: planning ?? { changeId: id, scope: "", implementationPlan: "", rollbackPlan: "", riskAssessment: "", impactedServices: "", communicationsPlan: "", successCriteria: "", signedOff: false },
+    planning: planning ?? { changeId: id, scope: "", implementationPlan: "", rollbackPlan: "", riskAssessment: "", impactedServices: "", communicationsPlan: "", toInformSpoc: false, procedure: "", successCriteria: "", signedOff: false },
     testing: testing ?? { changeId: id, testPlan: "", environment: "", overallResult: "pending", notes: "", cases: [] },
     pir: pir ?? { changeId: id, outcome: "successful", objectivesMet: "", issuesEncountered: "", lessonsLearned: "", followupActions: "" },
     approvals: approvals.map((a) => ({
@@ -633,6 +633,8 @@ router.post("/changes/:id/rechange", requireAuth, async (req, res): Promise<void
     riskAssessment: planning?.riskAssessment ?? "",
     impactedServices: planning?.impactedServices ?? "",
     communicationsPlan: planning?.communicationsPlan ?? "",
+    toInformSpoc: planning?.toInformSpoc ?? false,
+    procedure: planning?.procedure ?? "",
     successCriteria: planning?.successCriteria ?? "",
     signedOff: false,
     signedOffAt: null,

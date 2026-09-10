@@ -34,9 +34,11 @@ vi.mock("../lib/audit", () => ({ audit: vi.fn().mockResolvedValue(undefined) }))
 
 const notifyMock = vi.fn().mockResolvedValue({ sent: 0, skipped: 0, errors: 0 });
 const getUserEmailMock = vi.fn();
+const getSmtpMock = vi.fn();
 vi.mock("../lib/email", () => ({
   notify: (opts: unknown) => notifyMock(opts),
   getUserEmail: (uid: number) => getUserEmailMock(uid),
+  getSmtp: () => getSmtpMock(),
 }));
 
 const { default: cabRouter } = await import("./cab");
@@ -48,6 +50,8 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
     notifyMock.mockClear();
     notifyMock.mockResolvedValue({ sent: 2, skipped: 0, errors: 0 });
     getUserEmailMock.mockReset();
+    getSmtpMock.mockReset();
+    getSmtpMock.mockResolvedValue({ enabled: true, host: "smtp.example.com", fromAddress: "change@example.com" });
     (auditMock as ReturnType<typeof vi.fn>).mockClear();
   });
 
@@ -112,17 +116,11 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
     dbMock.enqueue("select", [meeting]);   // meeting lookup
     dbMock.enqueue("select", members);     // member rows
     dbMock.enqueue("select", changes);     // change rows
-    getUserEmailMock.mockImplementation((uid: number) =>
-      uid === 100
-        ? Promise.resolve({ userId: 100, email: "alice@example.com", name: "Alice" })
-        : Promise.resolve({ userId: 101, email: "bob@example.com", name: "Bob" }),
-    );
-
     const app = buildTestApp(cabRouter, ADMIN_SESSION);
     const res = await request(app).post("/api/cab-meetings/77/send-agenda");
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ sent: 2, skipped: 0, errors: 0 });
+    expect(res.body).toEqual({ sent: 2, skipped: 0, errors: 0, unavailable: 0 });
 
     expect(notifyMock).toHaveBeenCalledTimes(1);
     const call = notifyMock.mock.calls[0]?.[0] as {
@@ -186,9 +184,10 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
       createdAt: new Date(),
     };
     dbMock.enqueue("select", [meeting]);
+    dbMock.enqueue("select", [
+      { id: 1, meetingId: 88, userId: 100, roleKey: "ecab_member", isDeputy: false, email: "alice@example.com", fullName: "Alice" },
+    ]);
     dbMock.enqueue("select", []);
-    dbMock.enqueue("select", []);
-    getUserEmailMock.mockResolvedValue(null);
     notifyMock.mockResolvedValue({ sent: 0, skipped: 0, errors: 0 });
 
     const app = buildTestApp(cabRouter, ADMIN_SESSION);
@@ -200,5 +199,31 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
     expect(call.text).toContain("Changes for review (0):");
     expect(call.text).toContain("(no changes on the agenda)");
     expect(call.text).toContain("(none)"); // empty meeting notes
+  });
+
+  it("returns an actionable error when the meeting has no usable recipient email", async () => {
+    dbMock.enqueue("select", [{
+      id: 89,
+      title: "Weekly CAB",
+      kind: "cab",
+      scheduledStart: new Date("2026-09-08T10:00:00Z"),
+      scheduledEnd: new Date("2026-09-08T11:00:00Z"),
+      location: "Boardroom",
+      agenda: "",
+      chairUserId: null,
+      status: "scheduled",
+      minutes: "",
+      createdAt: new Date(),
+    }]);
+    dbMock.enqueue("select", [
+      { id: 1, meetingId: 89, userId: 999, roleKey: "cab_member", isDeputy: false, email: null, fullName: null },
+    ]);
+
+    const app = buildTestApp(cabRouter, ADMIN_SESSION);
+    const res = await request(app).post("/api/cab-meetings/89/send-agenda");
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/usable email address/i);
+    expect(notifyMock).not.toHaveBeenCalled();
   });
 });

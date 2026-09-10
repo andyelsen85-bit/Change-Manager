@@ -155,6 +155,8 @@ export type PlanningRecord = {
   riskAssessment: string;
   impactedServices: string;
   communicationsPlan: string;
+  toInformSpoc: boolean;
+  procedure: string;
   successCriteria: string;
   signedOff: boolean;
   signedOffAt: string | null;

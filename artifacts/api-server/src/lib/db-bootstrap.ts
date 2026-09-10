@@ -40,6 +40,8 @@ ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_risk_assessmen
 ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_impacted_services text;
 ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_communications_plan text;
 ALTER TABLE standard_templates ADD COLUMN IF NOT EXISTS prefilled_success_criteria text;
+ALTER TABLE planning_records ADD COLUMN IF NOT EXISTS to_inform_spoc boolean NOT NULL DEFAULT false;
+ALTER TABLE planning_records ADD COLUMN IF NOT EXISTS procedure text NOT NULL DEFAULT '';
 
 -- Potential Standard Change: link a normal change to a disabled template being
 -- trialled, plus the single-row promotion-threshold configuration.
