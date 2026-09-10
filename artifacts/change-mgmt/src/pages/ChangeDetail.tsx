@@ -938,9 +938,9 @@ export function ChangeDetailPage() {
           <TabsContent value="assignees"><AssigneesTab id={id} /></TabsContent>
           <TabsContent value="approvals"><ApprovalsTab id={id} currentUserId={user?.id ?? 0} /></TabsContent>
           {c.hasPreprodEnv && (
-            <TabsContent value="preprod-testing"><TestingTab id={id} kind="preprod" /></TabsContent>
+            <TabsContent value="preprod-testing"><TestingTab id={id} status={c.status} kind="preprod" /></TabsContent>
           )}
-          <TabsContent value="testing"><TestingTab id={id} kind="production" /></TabsContent>
+          <TabsContent value="testing"><TestingTab id={id} status={c.status} kind="production" /></TabsContent>
           <TabsContent value="pir"><PirTab id={id} /></TabsContent>
           <TabsContent value="attachments"><AttachmentsTab id={id} /></TabsContent>
           <TabsContent value="history"><HistoryTab id={id} /></TabsContent>
@@ -1670,7 +1670,7 @@ function ApprovalCard({ approval, canVote, onVote, busy }: { approval: Approval;
   );
 }
 
-function TestingTab({ id, kind = "production" }: { id: number; kind?: "production" | "preprod" }) {
+function TestingTab({ id, status, kind = "production" }: { id: number; status: ChangeStatus; kind?: "production" | "preprod" }) {
   const qc = useQueryClient();
   // Same backing component drives both the production Testing tab and the
   // optional pre-prod Testing tab. The `kind` prop selects the API path and
@@ -1678,6 +1678,9 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
   const path = kind === "preprod" ? `/changes/${id}/preprod-testing` : `/changes/${id}/testing`;
   const cacheKey = kind === "preprod" ? "change.preprod-testing" : "change.testing";
   const label = kind === "preprod" ? "Pre-prod testing" : "Testing";
+  const testingLocked =
+    kind === "production" &&
+    ["awaiting_pir", "completed", "rolled_back", "cancelled", "rejected"].includes(status);
   const q = useQuery({ queryKey: [cacheKey, id], queryFn: () => api.get<TestRecord>(path) });
   const [form, setForm] = useState<TestRecord | null>(null);
   if (q.data && !form) setForm(q.data);
@@ -1695,9 +1698,14 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
   return (
     <Card className="mt-4">
       <CardContent className="space-y-4 p-6">
+        {testingLocked && (
+          <div className="rounded-md border border-muted bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+            Testing is locked after proceeding to PIR. Revert the change to In Testing to make changes.
+          </div>
+        )}
         <div className="space-y-2">
           <Label>Test plan</Label>
-          <Textarea rows={4} value={form.testPlan} onChange={(e) => setForm({ ...form, testPlan: e.target.value })} data-testid="textarea-test-plan" />
+          <Textarea rows={4} value={form.testPlan} onChange={(e) => setForm({ ...form, testPlan: e.target.value })} disabled={testingLocked} data-testid="textarea-test-plan" />
         </div>
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
@@ -1710,6 +1718,7 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
               ]}
               value={form.overallResult}
               onChange={(v) => setForm({ ...form, overallResult: v as TestRecord["overallResult"] })}
+              disabled={testingLocked}
               data-testid="select-overall"
             />
           </div>
@@ -1721,6 +1730,7 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
               type="button"
               variant="outline"
               size="sm"
+              disabled={testingLocked}
               onClick={() =>
                 setForm({
                   ...form,
@@ -1736,7 +1746,7 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
             {form.cases.map((tc, i) => (
               <div key={i} className="rounded-md border border-border p-3 space-y-2" data-testid={`testcase-${i}`}>
                 <div className="grid gap-2 md:grid-cols-2">
-                  <Input placeholder="Case name" value={tc.name} onChange={(e) => updateCase(form, setForm, i, { name: e.target.value })} />
+                  <Input placeholder="Case name" value={tc.name} onChange={(e) => updateCase(form, setForm, i, { name: e.target.value })} disabled={testingLocked} />
                   <Combobox
                     options={[
                       { value: "pending", label: "Pending" },
@@ -1746,15 +1756,16 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
                     ]}
                     value={tc.status}
                     onChange={(v) => updateCase(form, setForm, i, { status: v as typeof tc.status })}
+                    disabled={testingLocked}
                   />
                 </div>
-                <Textarea placeholder="Steps" rows={2} value={tc.steps} onChange={(e) => updateCase(form, setForm, i, { steps: e.target.value })} />
+                <Textarea placeholder="Steps" rows={2} value={tc.steps} onChange={(e) => updateCase(form, setForm, i, { steps: e.target.value })} disabled={testingLocked} />
                 <div className="grid gap-2 md:grid-cols-2">
-                  <Textarea placeholder="Expected result" rows={2} value={tc.expectedResult} onChange={(e) => updateCase(form, setForm, i, { expectedResult: e.target.value })} />
-                  <Textarea placeholder="Actual result" rows={2} value={tc.actualResult} onChange={(e) => updateCase(form, setForm, i, { actualResult: e.target.value })} />
+                  <Textarea placeholder="Expected result" rows={2} value={tc.expectedResult} onChange={(e) => updateCase(form, setForm, i, { expectedResult: e.target.value })} disabled={testingLocked} />
+                  <Textarea placeholder="Actual result" rows={2} value={tc.actualResult} onChange={(e) => updateCase(form, setForm, i, { actualResult: e.target.value })} disabled={testingLocked} />
                 </div>
                 <div className="text-right">
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setForm({ ...form, cases: form.cases.filter((_, j) => j !== i) })}>
+                  <Button type="button" size="sm" variant="ghost" disabled={testingLocked} onClick={() => setForm({ ...form, cases: form.cases.filter((_, j) => j !== i) })}>
                     Remove
                   </Button>
                 </div>
@@ -1765,19 +1776,19 @@ function TestingTab({ id, kind = "production" }: { id: number; kind?: "productio
         </div>
         <div className="space-y-2">
           <Label>Notes</Label>
-          <Textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} data-testid="textarea-test-notes" />
+          <Textarea rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} disabled={testingLocked} data-testid="textarea-test-notes" />
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
           <div className="text-xs text-muted-foreground">
             {form.testedBy ? `Signed off by ${form.testedBy} ${fmtAgo(form.testedAt)}` : "Not yet signed off"}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => save.mutate(form.overallResult)} disabled={save.isPending} data-testid="button-save-testing">
+            <Button variant="outline" onClick={() => save.mutate(form.overallResult)} disabled={testingLocked || save.isPending} data-testid="button-save-testing">
               {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save draft
             </Button>
-            <Button onClick={() => save.mutate("passed")} disabled={save.isPending} data-testid="button-signoff-pass">Sign off PASS</Button>
-            <Button variant="destructive" onClick={() => save.mutate("failed")} disabled={save.isPending} data-testid="button-signoff-fail">Sign off FAIL</Button>
+            <Button onClick={() => save.mutate("passed")} disabled={testingLocked || save.isPending} data-testid="button-signoff-pass">Sign off PASS</Button>
+            <Button variant="destructive" onClick={() => save.mutate("failed")} disabled={testingLocked || save.isPending} data-testid="button-signoff-fail">Sign off FAIL</Button>
           </div>
         </div>
       </CardContent>

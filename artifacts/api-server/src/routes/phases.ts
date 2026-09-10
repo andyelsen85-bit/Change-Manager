@@ -142,6 +142,18 @@ async function putTesting(req: Request, res: Response, kind: "production" | "pre
   const c = await loadChangeForCaller(req, res);
   if (!c) return;
   const id = c.id;
+  // Production testing becomes immutable once the workflow leaves Testing for
+  // PIR (or reaches another terminal state). A governance revert to in_testing
+  // naturally reopens it because the current status no longer matches.
+  const productionTestingLocked =
+    kind === "production" &&
+    ["awaiting_pir", "completed", "rolled_back", "cancelled", "rejected"].includes(c.status);
+  if (productionTestingLocked) {
+    res.status(409).json({
+      error: "Testing is locked after proceeding to PIR. Revert the change to In Testing to edit it.",
+    });
+    return;
+  }
   const b = req.body ?? {};
   const cases: TestCase[] = Array.isArray(b.cases)
     ? b.cases.map((c: TestCase) => ({

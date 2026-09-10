@@ -274,25 +274,20 @@ export function checkPhaseGates(p: PhaseGateInputs): string | null {
       return "Standard change requires the planning record to be signed off.";
     }
   }
-  // Normal track: if a Testing record exists, it must be marked PASSED before
-  // PIR can begin (the Tester explicitly takes responsibility for that flag —
-  // we don't require every individual case row to be marked passed). If no
-  // Testing record was opened the team has chosen to skip the testing phase
-  // entirely, and we let the change go straight to PIR — the PIR step itself
-  // is the closing review for whether the change worked.
+  // Normal track: once the team enters Testing, the record must be signed off
+  // before PIR can begin. Both PASS and FAIL are valid completed outcomes: a
+  // failed test is precisely something the PIR must be able to review.
   if (p.track === "normal" && p.toStatus === "awaiting_pir") {
-    // Sign-off semantics: a Testing record only counts as "signed off" once
-    // overallResult is PASSED *and* testedAt is populated (which the PUT route
-    // sets the moment a non-pending result is recorded). When the change has
-    // entered the in_testing phase the team has explicitly opted into a
-    // testing pass and we require a signed-off PASS before PIR — a missing
-    // record does not qualify.
+    const testingSignedOff =
+      p.testing != null &&
+      p.testing.overallResult !== "pending" &&
+      p.testing.testedAt != null;
     if (p.fromStatus === "in_testing") {
-      if (!p.testing || p.testing.overallResult !== "passed" || !p.testing.testedAt) {
-        return "Testing must be signed off as PASSED before requesting PIR.";
+      if (!testingSignedOff) {
+        return "Testing must be signed off as PASS or FAIL before requesting PIR.";
       }
-    } else if (p.testing && (p.testing.overallResult !== "passed" || !p.testing.testedAt)) {
-      return "Testing must be signed off as PASSED before requesting PIR.";
+    } else if (p.testing && !testingSignedOff) {
+      return "Testing must be signed off as PASS or FAIL before requesting PIR.";
     }
   }
   // Pre-prod testing must be signed off as PASSED before the change can be
