@@ -28,6 +28,7 @@ import { ProfilePage } from "@/pages/Profile";
 import { ForbiddenPage } from "@/pages/Forbidden";
 import NotFound from "@/pages/not-found";
 import { Loader2 } from "lucide-react";
+import { currentLocalLocation } from "@/lib/adfs";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,7 +63,13 @@ function ProtectedRoutes() {
   }
   if (!user) {
     if (location === "/setup") return <Redirect to="/login" />;
-    if (location !== "/login") return <Redirect to="/login" />;
+    if (location !== "/login") {
+      // wouter's location hook intentionally exposes only the pathname. Read
+      // the browser URL directly so query strings and fragments survive local,
+      // LDAP, and AD FS authentication.
+      const returnTo = currentLocalLocation();
+      return <Redirect to={`/login?returnTo=${encodeURIComponent(returnTo)}`} />;
+    }
     return <LoginPage />;
   }
   // /setup is meaningless once the user is authenticated.

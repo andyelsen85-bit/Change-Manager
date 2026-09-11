@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, SESSION_EXPIRED_EVENT } from "./api";
+import { clearAdfsAutoLoginAttempt, clearAdfsLoginPreference } from "./adfs";
 import type { SessionUser } from "./types";
 
 type AuthContextValue = {
@@ -26,6 +27,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await api.get<SessionUser>("/auth/me");
       setUser(me);
+      // A successful callback (or any successful session refresh) completes
+      // the tab-scoped auto-login attempt and allows a later expiry to retry.
+      clearAdfsAutoLoginAttempt();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setUser(null);
@@ -64,6 +68,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (username: string, password: string) => {
       const me = await api.post<SessionUser>("/auth/login", { username, password });
       setUser(me);
+      // Local/LDAP login is an explicit choice. Do not let a stale preference
+      // immediately trigger AD FS after this session expires.
+      clearAdfsLoginPreference();
     },
     [],
   );
@@ -88,6 +95,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    // Clear this before awaiting the network request so an explicit logout can
+    // never race with the login page's automatic AD FS effect.
+    clearAdfsLoginPreference();
     try {
       await api.post("/auth/logout");
     } catch {

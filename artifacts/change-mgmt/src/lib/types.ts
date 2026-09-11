@@ -390,6 +390,21 @@ export type LdapSettings = {
   issuerCertInstalled: boolean;
 };
 
+export type AdfsSettings = {
+  enabled: boolean;
+  displayName: string;
+  issuer: string;
+  discoveryUrl: string;
+  clientId: string;
+  redirectUri: string;
+  scopes: string;
+  usernameClaim: string;
+  emailClaim: string;
+  displayNameClaim: string;
+  secretConfigured: boolean;
+  caConfigured: boolean;
+};
+
 export type LdapTestResult = {
   success: boolean;
   stage: "config" | "connect" | "service-bind" | "search" | "user-bind" | "ok";

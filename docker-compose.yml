@@ -50,6 +50,21 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       JWT_SECRET: ${JWT_SECRET:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-change_mgmt}:${POSTGRES_PASSWORD:-change_mgmt_internal_only}@db:5432/${POSTGRES_DB:-change_mgmt}
+      # Optional AD FS/OIDC deployment fallbacks. Keep these on the API
+      # container only: the web image and browser must never receive the
+      # client secret or internal CA material.
+      ADFS_ENABLED: ${ADFS_ENABLED:-false}
+      ADFS_DISPLAY_NAME: ${ADFS_DISPLAY_NAME:-Sign in with AD FS}
+      ADFS_ISSUER: ${ADFS_ISSUER:-}
+      ADFS_DISCOVERY_URL: ${ADFS_DISCOVERY_URL:-}
+      ADFS_CLIENT_ID: ${ADFS_CLIENT_ID:-}
+      ADFS_CLIENT_SECRET: ${ADFS_CLIENT_SECRET:-}
+      ADFS_REDIRECT_URI: ${ADFS_REDIRECT_URI:-}
+      ADFS_SCOPES: ${ADFS_SCOPES:-openid profile email}
+      ADFS_USERNAME_CLAIM: ${ADFS_USERNAME_CLAIM:-upn}
+      ADFS_EMAIL_CLAIM: ${ADFS_EMAIL_CLAIM:-email}
+      ADFS_DISPLAY_NAME_CLAIM: ${ADFS_DISPLAY_NAME_CLAIM:-name}
+      ADFS_CA_CERT_PEM: ${ADFS_CA_CERT_PEM:-}
     volumes:
       - api_secrets:/var/secrets
     expose:

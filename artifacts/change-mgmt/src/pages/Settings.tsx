@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import type { CategoryItem, LdapSettings, LdapTestResult, PentestTestType, SdpSettings, SmtpSettings, SslSettings } from "@/lib/types";
+import { AdfsSettingsPanel } from "@/components/AdfsSettingsPanel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -58,6 +59,7 @@ export function SettingsPage() {
         <TabsList>
           <TabsTrigger value="smtp" data-testid="tab-smtp">SMTP</TabsTrigger>
           <TabsTrigger value="ldap" data-testid="tab-ldap">LDAP</TabsTrigger>
+          <TabsTrigger value="adfs" data-testid="tab-adfs">AD FS</TabsTrigger>
           <TabsTrigger value="ssl" data-testid="tab-ssl">SSL/TLS</TabsTrigger>
           <TabsTrigger value="notifications" data-testid="tab-notifications">Notifications</TabsTrigger>
           <TabsTrigger value="categories" data-testid="tab-categories">Categories</TabsTrigger>
@@ -67,6 +69,7 @@ export function SettingsPage() {
         </TabsList>
         <TabsContent value="smtp"><SmtpPanel /></TabsContent>
         <TabsContent value="ldap"><LdapPanel /></TabsContent>
+        <TabsContent value="adfs"><AdfsSettingsPanel /></TabsContent>
         <TabsContent value="ssl"><SslPanel /></TabsContent>
         <TabsContent value="notifications"><NotificationsBatchPanel /></TabsContent>
         <TabsContent value="categories"><CategoriesPanel /></TabsContent>

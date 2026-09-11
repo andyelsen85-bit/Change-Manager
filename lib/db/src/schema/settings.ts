@@ -45,6 +45,33 @@ export const ldapSettingsTable = pgTable("ldap_settings", {
   issuerCertPem: text("issuer_cert_pem"),
 });
 
+// OpenID Connect settings for Microsoft AD FS. The client secret is encrypted
+// by the API before it is written; the CA is certificate material only.
+export const adfsSettingsTable = pgTable("adfs_settings", {
+  key: text("key").primaryKey().default("global"),
+  enabled: boolean("enabled").notNull().default(false),
+  displayName: text("display_name").notNull().default("Sign in with AD FS"),
+  issuer: text("issuer").notNull().default(""),
+  discoveryUrl: text("discovery_url").notNull().default(""),
+  clientId: text("client_id").notNull().default(""),
+  clientSecretEnc: text("client_secret_enc"),
+  redirectUri: text("redirect_uri").notNull().default(""),
+  scopes: text("scopes").notNull().default("openid profile email"),
+  usernameClaim: text("username_claim").notNull().default("upn"),
+  emailClaim: text("email_claim").notNull().default("email"),
+  displayNameClaim: text("display_name_claim").notNull().default("name"),
+  caCertPem: text("ca_cert_pem"),
+});
+
+// One short-lived, hashed row per OIDC authorization attempt. Consuming this
+// row with a guarded update gives replay protection across API instances.
+export const adfsAuthTransactionsTable = pgTable("adfs_auth_transactions", {
+  stateHash: text("state_hash").primaryKey(),
+  configFingerprint: text("config_fingerprint").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+});
+
 export const sslSettingsTable = pgTable("ssl_settings", {
   key: text("key").primaryKey().default("global"),
   certificatePem: text("certificate_pem"),

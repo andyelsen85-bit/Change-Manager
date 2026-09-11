@@ -17,8 +17,158 @@ import {
 import { audit } from "../lib/audit";
 import { authenticateLdap, getLdap } from "../lib/ldap";
 import { userCanAccessPentest } from "./pentest";
+import {
+  adfsStateCookieName,
+  adfsStateTtlMs,
+  AdfsError,
+  authorizationUrl,
+  completeAdfsLogin,
+  consumeAdfsState,
+  createAdfsState,
+  createAdfsStateTransaction,
+  getAdfsConfig,
+  getAdfsPublicConfig,
+  isAdfsConfigured,
+  readAdfsState,
+  sanitizeReturnTo,
+  stateMatches,
+} from "../lib/adfs";
 
 const router: IRouter = Router();
+const ADFS_START_WINDOW_MS = 60_000;
+const ADFS_START_MAX_PER_WINDOW = 20;
+const ADFS_START_MAX_KEYS = 2_048;
+const adfsStartAttempts = new Map<string, { count: number; resetAt: number }>();
+
+// Deliberately use the peer socket address, not an arbitrary forwarded/header
+// value. This bounded limiter protects discovery from unauthenticated request
+// floods without trusting attacker-provided identity headers.
+function allowAdfsStart(req: import("express").Request): boolean {
+  const now = Date.now();
+  for (const [key, value] of adfsStartAttempts) {
+    if (value.resetAt <= now) adfsStartAttempts.delete(key);
+  }
+  const key = req.socket.remoteAddress ?? "unknown-peer";
+  const current = adfsStartAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    if (adfsStartAttempts.size >= ADFS_START_MAX_KEYS) {
+      const oldest = adfsStartAttempts.keys().next().value;
+      if (oldest) adfsStartAttempts.delete(oldest);
+    }
+    adfsStartAttempts.set(key, { count: 1, resetAt: now + ADFS_START_WINDOW_MS });
+    return true;
+  }
+  if (current.count >= ADFS_START_MAX_PER_WINDOW) return false;
+  current.count += 1;
+  return true;
+}
+
+function clearLoginMethodCookie(res: import("express").Response): void {
+  res.clearCookie("cm_login_method", { path: "/" });
+}
+
+function adfsCookieOptions(req: import("express").Request) {
+  const secure = req.secure || req.protocol === "https" || process.env["NODE_ENV"] === "production";
+  return { httpOnly: true, sameSite: "lax" as const, secure, maxAge: adfsStateTtlMs, path: "/" };
+}
+
+function adfsFailureRedirect(res: import("express").Response, code: string, returnTo: unknown): void {
+  // Only stable, application-defined error identifiers are sent to the
+  // browser; never surface provider error descriptions, codes, or token data.
+  const safeCode = new Set([
+    "configuration", "state", "provider_error", "token_exchange",
+    "token_validation", "account_not_found", "account_disabled", "identity_conflict",
+  ]).has(code) ? code : "authentication_failed";
+  const safeReturnTo = sanitizeReturnTo(returnTo);
+  res.redirect(302, `/login?adfsError=${encodeURIComponent(safeCode)}&returnTo=${encodeURIComponent(safeReturnTo)}`);
+}
+
+router.get("/auth/adfs/config", async (_req, res): Promise<void> => {
+  res.json(await getAdfsPublicConfig());
+});
+
+router.get("/auth/adfs/start", async (req, res): Promise<void> => {
+  const returnTo = sanitizeReturnTo(req.query["returnTo"]);
+  if (!allowAdfsStart(req)) {
+    adfsFailureRedirect(res, "authentication_failed", returnTo);
+    return;
+  }
+  try {
+    const config = await getAdfsConfig();
+    if (!isAdfsConfigured(config)) throw new AdfsError("configuration");
+    const { state, signedCookie } = createAdfsState(returnTo);
+    const redirectUrl = await authorizationUrl(config, state);
+    await createAdfsStateTransaction(state.state, config);
+    res.cookie(adfsStateCookieName, signedCookie, adfsCookieOptions(req));
+    res.redirect(302, redirectUrl);
+  } catch (err) {
+    // Do not log authorization URLs or provider error payloads: those can
+    // contain one-time data. The stable category is enough for diagnostics.
+    req.log?.warn({ adfsError: err instanceof AdfsError ? err.code : "configuration" }, "AD FS start failed");
+    adfsFailureRedirect(res, err instanceof AdfsError ? err.code : "configuration", returnTo);
+  }
+});
+
+router.get("/auth/adfs/callback", async (req, res): Promise<void> => {
+  const signedState = (req as typeof req & { cookies?: Record<string, string> }).cookies?.[adfsStateCookieName];
+  const savedState = readAdfsState(signedState);
+  // Delete prior to network calls. This deliberately makes an interrupted
+  // callback fail closed rather than leave a reusable login transaction.
+  res.clearCookie(adfsStateCookieName, { path: "/" });
+  const returnTo = savedState?.returnTo ?? "/";
+  if (!savedState || !stateMatches(savedState.state, req.query["state"])) {
+    adfsFailureRedirect(res, "state", returnTo);
+    return;
+  }
+  let config: Awaited<ReturnType<typeof getAdfsConfig>>;
+  try {
+    config = await getAdfsConfig();
+    if (!isAdfsConfigured(config)) throw new AdfsError("configuration");
+    if (!(await consumeAdfsState(savedState.state, config))) {
+      adfsFailureRedirect(res, "state", returnTo);
+      return;
+    }
+  } catch (err) {
+    const errorCode = err instanceof AdfsError ? err.code : "configuration";
+    adfsFailureRedirect(res, errorCode, returnTo);
+    return;
+  }
+  if (typeof req.query["error"] === "string") {
+    req.log?.warn({ adfsError: "provider_error" }, "AD FS callback failed");
+    adfsFailureRedirect(res, "provider_error", returnTo);
+    return;
+  }
+  const code = req.query["code"];
+  if (typeof code !== "string" || !code) {
+    adfsFailureRedirect(res, "token_exchange", returnTo);
+    return;
+  }
+  try {
+    const user = await completeAdfsLogin(code, savedState, config);
+    const token = signSession({ uid: user.id, username: user.username, isAdmin: user.isAdmin });
+    setSessionCookie(req, res, token);
+    setCsrfCookie(req, res, generateCsrfToken());
+    res.cookie("cm_login_method", "adfs", {
+      httpOnly: false,
+      sameSite: "lax",
+      secure: req.secure || req.protocol === "https" || process.env["NODE_ENV"] === "production",
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+      path: "/",
+    });
+    await audit(req, {
+      action: "auth.login",
+      entityType: "user",
+      entityId: user.id,
+      summary: `User ${user.username} logged in (adfs)`,
+      after: { authMethod: "adfs", username: user.username },
+    }, { id: user.id, name: user.username });
+    res.redirect(302, sanitizeReturnTo(savedState.returnTo));
+  } catch (err) {
+    const errorCode = err instanceof AdfsError ? err.code : "authentication_failed";
+    req.log?.warn({ adfsError: errorCode }, "AD FS callback failed");
+    adfsFailureRedirect(res, errorCode, returnTo);
+  }
+});
 
 router.post("/auth/login", async (req, res): Promise<void> => {
   const { username, password } = req.body ?? {};
@@ -65,6 +215,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     const token = signSession({ uid: existing.id, username: existing.username, isAdmin: existing.isAdmin });
     setSessionCookie(req, res, token);
     setCsrfCookie(req, res, generateCsrfToken());
+    clearLoginMethodCookie(res);
     await audit(
       req,
       {
@@ -132,6 +283,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       const token = signSession({ uid: userRow.id, username: userRow.username, isAdmin: userRow.isAdmin });
       setSessionCookie(req, res, token);
       setCsrfCookie(req, res, generateCsrfToken());
+      clearLoginMethodCookie(res);
       await audit(
         req,
         {
@@ -180,6 +332,7 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
   const session = readSessionCookie(req);
   clearSessionCookie(res);
   clearCsrfCookie(res);
+  clearLoginMethodCookie(res);
   if (session) {
     await audit(req, {
       action: "auth.logout",

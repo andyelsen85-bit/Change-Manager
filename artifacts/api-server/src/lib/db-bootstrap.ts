@@ -127,6 +127,32 @@ CREATE TABLE IF NOT EXISTS sdp_settings (
 ALTER TABLE sdp_settings ADD COLUMN IF NOT EXISTS on_create_status_name text NOT NULL DEFAULT 'Waiting for Change-it';
 ALTER TABLE change_requests ADD COLUMN IF NOT EXISTS sdp_request_id text;
 
+-- Microsoft AD FS / OpenID Connect. This is deliberately a separate
+-- single-row table so existing local and LDAP users are untouched.
+CREATE TABLE IF NOT EXISTS adfs_settings (
+  key                 text PRIMARY KEY DEFAULT 'global',
+  enabled             boolean NOT NULL DEFAULT false,
+  display_name        text NOT NULL DEFAULT 'Sign in with AD FS',
+  issuer              text NOT NULL DEFAULT '',
+  discovery_url       text NOT NULL DEFAULT '',
+  client_id           text NOT NULL DEFAULT '',
+  client_secret_enc   text,
+  redirect_uri        text NOT NULL DEFAULT '',
+  scopes              text NOT NULL DEFAULT 'openid profile email',
+  username_claim      text NOT NULL DEFAULT 'upn',
+  email_claim         text NOT NULL DEFAULT 'email',
+  display_name_claim  text NOT NULL DEFAULT 'name',
+  ca_cert_pem         text
+);
+CREATE TABLE IF NOT EXISTS adfs_auth_transactions (
+  state_hash          text PRIMARY KEY,
+  config_fingerprint  text NOT NULL,
+  expires_at          timestamptz NOT NULL,
+  consumed_at         timestamptz
+);
+CREATE INDEX IF NOT EXISTS adfs_auth_transactions_expiry_idx
+  ON adfs_auth_transactions (expires_at);
+
 -- External changes: third-party maintenance windows shown on the Change
 -- Plannings calendar for visibility only (no workflow/approvals).
 CREATE TABLE IF NOT EXISTS external_changes (

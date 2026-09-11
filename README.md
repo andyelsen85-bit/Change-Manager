@@ -28,6 +28,7 @@ auto-provisions a self-signed TLS certificate on first boot.
 - [Change-request state machine](#change-request-state-machine)
 - [Roles &amp; permissions](#roles--permissions)
 - [Authentication, sessions &amp; CSRF](#authentication-sessions--csrf)
+- [AD FS / OIDC authentication](docs/adfs.md)
 - [LDAP integration](#ldap-integration)
 - [Email &amp; ICS notifications](#email--ics-notifications)
 - [TLS / SSL](#tls--ssl)
@@ -93,8 +94,9 @@ but not required to reach the Post-Implementation Review phase.
   clears `actualStart`/`actualEnd`. `rolled_back` is the only truly terminal
   status.
 - **Notifications** — per-user, per-event email preferences with an admin master-switch on each user account; in-app notifications were removed in v2 of the backup format.
-- **Auth** — local users (bcrypt) + LDAP. JWT cookie session with CSRF
-  double-submit token. One-time `/setup` wizard for the first admin password.
+- **Auth** — local users (bcrypt) + LDAP, with optional AD FS OIDC sign-in.
+  JWT cookie session with CSRF double-submit token. One-time `/setup` wizard
+  for the first admin password. See the [AD FS setup guide](docs/adfs.md).
 - **Admin Settings** — SMTP, LDAP (with diagnostics + presets for OpenLDAP /
   AD sAMAccountName / AD UPN), SSL/TLS upload + in-app CSR generation, session
   & lockout timeouts, Backup & Restore.
@@ -320,6 +322,10 @@ The Vite dev server proxies `/api/*` to the API automatically, so visiting
 | `INITIAL_ADMIN_PASSWORD`  |          | If set on first boot, skips the setup wizard      |
 | `RESET_ADMIN_PASSWORD`    |          | `1` clears admin password & re-enables `/setup`   |
 | `APP_ENCRYPTION_KEY`      |          | Optional dedicated key for SMTP/LDAP secret encryption (falls back to `JWT_SECRET`) |
+
+Optional AD FS/OIDC variables are documented in the
+[AD FS setup guide](docs/adfs.md#environment-fallbacks). They are deployment
+fallbacks; administrator-saved AD FS settings take precedence.
 
 ### Frontend (Vite)
 
@@ -674,6 +680,7 @@ All endpoints live under `/api`. Auth is cookie-based; mutations require the
 ### Auth
 
 - `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/me`
+- `GET /api/auth/adfs/callback` — AD FS OIDC authorization-code callback.
 - `GET /api/auth/setup-status` · `POST /api/auth/setup`
 - `POST /api/auth/change-password`
 
@@ -746,6 +753,7 @@ All endpoints live under `/api`. Auth is cookie-based; mutations require the
 
 - `GET/PUT /api/settings/smtp` · `POST /api/settings/smtp/test`
 - `GET/PUT /api/settings/ldap` · `POST /api/settings/ldap/test`
+- `GET/PUT /api/settings/adfs` — administrator-managed AD FS/OIDC settings.
 - `GET/PUT /api/settings/ssl` · `POST /api/settings/ssl/csr`
 
 ### Audit (admin-only)

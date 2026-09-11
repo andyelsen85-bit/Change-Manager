@@ -7,6 +7,13 @@ function buildUrl(path: string): string {
   return path.startsWith("/api") ? path : `/api${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
+// Used for browser navigations to endpoints (such as OIDC start) that answer
+// with an HTTP redirect rather than JSON. Keep URL construction identical to
+// the authenticated API helper.
+export function apiUrl(path: string): string {
+  return buildUrl(path);
+}
+
 const CSRF_COOKIE_NAME = "cm_csrf";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export const SESSION_EXPIRED_EVENT = "change-it:session-expired";

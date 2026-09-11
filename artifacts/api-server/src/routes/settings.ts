@@ -5,6 +5,7 @@ import {
   db,
   smtpSettingsTable,
   ldapSettingsTable,
+  adfsSettingsTable,
   sslSettingsTable,
   sdpSettingsTable,
   notificationQueueTable,
@@ -15,7 +16,12 @@ import { audit } from "../lib/audit";
 import { sendTestEmail } from "../lib/email";
 import { testLdapConnection } from "../lib/ldap";
 import { generateCsr } from "../lib/csr";
-import { encryptSecret } from "../lib/secret-crypto";
+import { decryptSecret, encryptSecret } from "../lib/secret-crypto";
+import {
+  getAdfsConfig,
+  normalizeScopes,
+  validateAdfsSettingsInput,
+} from "../lib/adfs";
 import {
   flushNotificationQueue,
   getNotificationSettings,
@@ -232,6 +238,107 @@ router.post("/settings/ldap/test", requireAdmin, async (req, res): Promise<void>
     },
   });
   res.json(r);
+});
+
+function maskAdfs(row: typeof adfsSettingsTable.$inferSelect | undefined) {
+  if (!row) {
+    // There is no persisted row yet, so expose non-sensitive deployment
+    // fallback values to administrators while still withholding secret/PEM.
+    return getAdfsConfig(null).then((config) => ({
+      enabled: config.enabled,
+      displayName: config.displayName,
+      issuer: config.issuer,
+      discoveryUrl: config.discoveryUrl,
+      clientId: config.clientId,
+      redirectUri: config.redirectUri,
+      scopes: config.scopes,
+      usernameClaim: config.usernameClaim,
+      emailClaim: config.emailClaim,
+      displayNameClaim: config.displayNameClaim,
+      secretConfigured: !!config.clientSecretEnc,
+      caConfigured: !!config.caCertPem,
+    }));
+  }
+  return {
+    enabled: row.enabled,
+    displayName: row.displayName,
+    issuer: row.issuer,
+    discoveryUrl: row.discoveryUrl,
+    clientId: row.clientId,
+    redirectUri: row.redirectUri,
+    scopes: normalizeScopes(row.scopes),
+    usernameClaim: row.usernameClaim,
+    emailClaim: row.emailClaim,
+    displayNameClaim: row.displayNameClaim,
+    secretConfigured: !!row.clientSecretEnc,
+    caConfigured: !!row.caCertPem,
+  };
+}
+
+router.get("/settings/adfs", requireAdmin, async (_req, res): Promise<void> => {
+  const [row] = await db.select().from(adfsSettingsTable).where(eq(adfsSettingsTable.key, KEY));
+  res.json(await maskAdfs(row));
+});
+
+router.put("/settings/adfs", requireAdmin, async (req, res): Promise<void> => {
+  const b = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+  const validationError = validateAdfsSettingsInput(b);
+  if (validationError) {
+    res.status(400).json({ error: validationError });
+    return;
+  }
+  const [before] = await db.select().from(adfsSettingsTable).where(eq(adfsSettingsTable.key, KEY));
+  // On the very first GUI save, preserve an effective deployment secret/CA
+  // when the corresponding field was intentionally omitted. Persist the
+  // secret encrypted so the environment fallback never becomes plaintext DB
+  // data merely because another setting was edited.
+  const effectiveBefore = await getAdfsConfig(before ?? null);
+  const preservedSecret = before?.clientSecretEnc
+    ?? (effectiveBefore.clientSecretEnc ? encryptSecret(decryptSecret(effectiveBefore.clientSecretEnc)) : null);
+  const preservedCa = before?.caCertPem ?? effectiveBefore.caCertPem;
+  const textValue = (field: string, fallback: string) => {
+    if (typeof b[field] === "string") return b[field].trim();
+    const existing = before ? (before as unknown as Record<string, unknown>)[field] : undefined;
+    return typeof existing === "string" ? existing : fallback;
+  };
+  const values = {
+    key: KEY,
+    enabled: typeof b.enabled === "boolean" ? b.enabled : before?.enabled ?? false,
+    displayName: textValue("displayName", "Sign in with AD FS") || "Sign in with AD FS",
+    issuer: textValue("issuer", ""),
+    discoveryUrl: textValue("discoveryUrl", ""),
+    clientId: textValue("clientId", ""),
+    // Only null clears. An accidental empty form field remains a no-op, so
+    // optional confidential-client secrets survive normal settings edits.
+    clientSecretEnc: b.clientSecret === null
+      ? null
+      : (typeof b.clientSecret === "string" && b.clientSecret.trim()
+        ? encryptSecret(b.clientSecret)
+        : preservedSecret),
+    redirectUri: textValue("redirectUri", ""),
+    scopes: normalizeScopes(textValue("scopes", "openid profile email")),
+    usernameClaim: textValue("usernameClaim", "upn") || "upn",
+    emailClaim: textValue("emailClaim", "email") || "email",
+    displayNameClaim: textValue("displayNameClaim", "name") || "name",
+    caCertPem: b.caCertPem === null
+      ? null
+      : (typeof b.caCertPem === "string" && b.caCertPem.trim() ? b.caCertPem.trim() : preservedCa),
+  };
+  const [row] = await db
+    .insert(adfsSettingsTable)
+    .values(values)
+    .onConflictDoUpdate({ target: adfsSettingsTable.key, set: values })
+    .returning();
+  // Neither the encrypted secret nor the PEM are ever copied to the audit log.
+  await audit(req, {
+    action: "settings.adfs_updated",
+    entityType: "settings",
+    entityId: null,
+    summary: `Updated AD FS settings (issuer=${row.issuer}, enabled=${row.enabled})`,
+    before: before ? await maskAdfs(before) : null,
+    after: await maskAdfs(row),
+  });
+  res.json(await maskAdfs(row));
 });
 
 function maskSsl(row: typeof sslSettingsTable.$inferSelect | undefined) {
