@@ -9,7 +9,9 @@ vi.mock("@workspace/db", () => ({
   cabMeetingsTable: { _t: "cab_meetings", id: "id" },
   cabMembersTable: { _t: "cab_members" },
   cabChangesTable: { _t: "cab_changes" },
+  cabAttendeesTable: { _t: "cab_attendees", meetingId: "meeting_id" },
   changeRequestsTable: { _t: "change_requests", plannedStart: "planned_start", ref: "ref" },
+  roleAssignmentsTable: { _t: "role_assignments", userId: "user_id", roleKey: "role_key" },
   usersTable: { _t: "users" },
 }));
 
@@ -18,6 +20,7 @@ vi.mock("drizzle-orm", () => ({
   asc: () => ({}),
   eq: () => ({}),
   gte: () => ({}),
+  inArray: () => ({}),
   lte: () => ({}),
 }));
 
@@ -115,6 +118,8 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
 
     dbMock.enqueue("select", [meeting]);   // meeting lookup
     dbMock.enqueue("select", members);     // member rows
+    dbMock.enqueue("select", []);           // active role holders
+    dbMock.enqueue("select", []);           // stored attendance rows
     dbMock.enqueue("select", changes);     // change rows
     const app = buildTestApp(cabRouter, ADMIN_SESSION);
     const res = await request(app).post("/api/cab-meetings/77/send-agenda");
@@ -187,6 +192,8 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
     dbMock.enqueue("select", [
       { id: 1, meetingId: 88, userId: 100, roleKey: "ecab_member", isDeputy: false, email: "alice@example.com", fullName: "Alice" },
     ]);
+    dbMock.enqueue("select", []); // active role holders
+    dbMock.enqueue("select", []); // stored attendance rows
     dbMock.enqueue("select", []);
     notifyMock.mockResolvedValue({ sent: 0, skipped: 0, errors: 0 });
 
@@ -218,6 +225,8 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
     dbMock.enqueue("select", [
       { id: 1, meetingId: 89, userId: 999, roleKey: "cab_member", isDeputy: false, email: null, fullName: null },
     ]);
+    dbMock.enqueue("select", []); // active role holders
+    dbMock.enqueue("select", []); // stored attendance rows
 
     const app = buildTestApp(cabRouter, ADMIN_SESSION);
     const res = await request(app).post("/api/cab-meetings/89/send-agenda");
@@ -225,5 +234,64 @@ describe("POST /cab-meetings/:id/send-agenda", () => {
     expect(res.status).toBe(409);
     expect(res.body.error).toMatch(/usable email address/i);
     expect(notifyMock).not.toHaveBeenCalled();
+  });
+
+  it("uses active role holders and stored attendees, resolves linked current emails, and deduplicates recipients", async () => {
+    const meeting = {
+      id: 90,
+      title: "Role-pool CAB",
+      kind: "cab" as const,
+      scheduledStart: new Date("2026-09-15T10:00:00Z"),
+      scheduledEnd: new Date("2026-09-15T11:00:00Z"),
+      location: "Boardroom",
+      agenda: "",
+      chairUserId: null,
+      status: "scheduled",
+      minutes: "",
+      createdAt: new Date(),
+    };
+    dbMock.enqueue("select", [meeting]);
+    dbMock.enqueue("select", [
+      // A blank fullName must not make an otherwise valid member unavailable.
+      { id: 1, meetingId: 90, userId: 100, roleKey: "cab_member", isDeputy: false, email: " Alice@Example.com ", fullName: "" },
+      { id: 2, meetingId: 90, userId: 101, roleKey: "cab_member", isDeputy: false, email: "member@example.com", fullName: "Member" },
+    ]);
+    dbMock.enqueue("select", [
+      { userId: 100, name: "Alice", email: "alice@example.com", isActive: true }, // duplicate real user
+      { userId: 200, name: "Role Holder", email: "role@example.com", isActive: true }, // not a meeting member
+      { userId: 201, name: "Inactive", email: "inactive@example.com", isActive: false },
+      { userId: 202, name: "Duplicate Email", email: " MEMBER@EXAMPLE.COM ", isActive: true },
+    ]);
+    dbMock.enqueue("select", [
+      { userId: 200, name: "Old Role Name", email: "old-role@example.com", userName: "Role Holder", userEmail: "role@example.com" },
+      { userId: 300, name: "Directory Link", email: "stale@example.com", userName: "", userEmail: "linked-current@example.com" },
+      { userId: null, name: "Directory External", email: " external@example.com " },
+      { userId: null, name: "Missing Email", email: "" },
+      { userId: null, name: "Duplicate Alice", email: " ALICE@EXAMPLE.COM " },
+    ]);
+    dbMock.enqueue("select", []); // change rows
+    notifyMock.mockResolvedValue({ sent: 5, skipped: 0, errors: 0 });
+
+    const app = buildTestApp(cabRouter, ADMIN_SESSION);
+    const res = await request(app).post("/api/cab-meetings/90/send-agenda");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: 5, skipped: 0, errors: 0, unavailable: 1 });
+    const call = notifyMock.mock.calls[0]?.[0] as {
+      to: Array<{ userId: number; email: string; name: string }>;
+    };
+    expect(call.to).toHaveLength(5);
+    expect(call.to.map((target) => target.email.toLowerCase())).toEqual([
+      "alice@example.com",
+      "member@example.com",
+      "role@example.com",
+      "linked-current@example.com",
+      "external@example.com",
+    ]);
+    expect(call.to.find((target) => target.userId === 100)?.name).toBe("Alice@Example.com");
+    expect(call.to.find((target) => target.userId === 200)?.email).toBe("role@example.com");
+    expect(call.to.find((target) => target.userId === 300)?.email).toBe("linked-current@example.com");
+    expect(call.to.find((target) => target.email === "external@example.com")?.userId).toBe(-1);
+    expect(new Set(call.to.map((target) => target.email.trim().toLowerCase())).size).toBe(call.to.length);
   });
 });

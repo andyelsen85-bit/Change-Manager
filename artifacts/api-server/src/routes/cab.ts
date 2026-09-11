@@ -17,7 +17,7 @@ import { getCompletedCountsByTemplate, getPromotionThreshold } from "../lib/temp
 import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
 import { buildCabAgendaPdf, buildCabResultsPdf } from "../lib/agenda-pdf";
-import { notify, getSmtp, getUserEmail, getUserEmails } from "../lib/email";
+import { notify, getSmtp, getUserEmails } from "../lib/email";
 
 // Format a date for emails as dd/MM/yyyy HH:mm in 24-hour time. We do
 // the formatting manually rather than via toLocaleString("en-GB") because
@@ -547,18 +547,114 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     .from(cabMembersTable)
     .leftJoin(usersTable, eq(usersTable.id, cabMembersTable.userId))
     .where(eq(cabMembersTable.meetingId, id));
-  const targets = memberRows.flatMap((r) => {
-    const email = r.email?.trim();
-    if (!email || !r.fullName) return [];
-    return [{ userId: r.userId, email, name: r.fullName }];
-  });
+
+  // Attendance is seeded from the active CAB role pool, then augmented with
+  // the meeting's stored rows (which may include directory-search externals).
+  // Agenda recipients must use that same source set rather than only the
+  // explicitly selected meeting members.
+  const roleRows = await db
+    .select({
+      userId: roleAssignmentsTable.userId,
+      name: usersTable.fullName,
+      email: usersTable.email,
+      isActive: usersTable.isActive,
+    })
+    .from(roleAssignmentsTable)
+    .innerJoin(usersTable, eq(usersTable.id, roleAssignmentsTable.userId))
+    .where(inArray(roleAssignmentsTable.roleKey, cabRolesForKind(m.kind)));
+  const attendeeRows = await db
+    .select({
+      userId: cabAttendeesTable.userId,
+      name: cabAttendeesTable.name,
+      email: cabAttendeesTable.email,
+      userName: usersTable.fullName,
+      userEmail: usersTable.email,
+    })
+    .from(cabAttendeesTable)
+    .leftJoin(usersTable, eq(usersTable.id, cabAttendeesTable.userId))
+    .where(eq(cabAttendeesTable.meetingId, id));
+
+  type AgendaCandidate = {
+    userId: number | null;
+    email: string;
+    name: string;
+  };
+  const trimString = (value: unknown): string =>
+    typeof value === "string" ? value.trim() : "";
+  const candidateFor = (userId: number | null, name: unknown, email: unknown): AgendaCandidate => {
+    const trimmedEmail = trimString(email);
+    return {
+      userId,
+      email: trimmedEmail,
+      // A full name is useful for the mail envelope, but it is not required
+      // for delivery. Keep the address visible when directory/user data has
+      // no name.
+      name: trimString(name) || trimmedEmail,
+    };
+  };
+  const activeRoleRows = roleRows.filter((r) => r.isActive);
+
+  const candidates: AgendaCandidate[] = [
+    ...memberRows.map((r) => candidateFor(r.userId, r.fullName, r.email)),
+    ...activeRoleRows.map((r) => candidateFor(r.userId, r.name, r.email)),
+    ...attendeeRows.map((r) =>
+      // A linked attendee may have an email that changed since attendance
+      // was recorded. Prefer the current user record, with the stored
+      // directory-search snapshot as a fallback.
+      candidateFor(
+        r.userId,
+        trimString(r.userName) || trimString(r.name),
+        trimString(r.userEmail) || trimString(r.email),
+      ),
+    ),
+  ];
+
+  // Collapse real users before email de-duplication so a user represented by
+  // both a meeting member and an attendance row is never mailed twice. If an
+  // earlier representation lacks an email and a later one has a usable
+  // address, retain the usable representation for that user.
+  const byUserId = new Map<number, AgendaCandidate>();
+  const externalCandidates: AgendaCandidate[] = [];
+  for (const candidate of candidates) {
+    if (candidate.userId == null) {
+      externalCandidates.push(candidate);
+      continue;
+    }
+    const existing = byUserId.get(candidate.userId);
+    if (!existing || (!existing.email && candidate.email)) {
+      byUserId.set(candidate.userId, candidate);
+    }
+  }
+
+  const uniqueCandidates = [...byUserId.values(), ...externalCandidates];
+  const seenEmails = new Set<string>();
+  const targets: Array<{ userId: number; email: string; name: string }> = [];
+  let unavailable = 0;
+  let externalId = 0;
+  for (const candidate of uniqueCandidates) {
+    if (!candidate.email) {
+      unavailable++;
+      continue;
+    }
+    const normalizedEmail = candidate.email.toLowerCase();
+    if (seenEmails.has(normalizedEmail)) continue;
+    seenEmails.add(normalizedEmail);
+    const userId = candidate.userId ?? -(++externalId);
+    targets.push({ userId, email: candidate.email, name: candidate.name || candidate.email });
+  }
   if (targets.length === 0) {
     await audit(req, {
       action: "cab.agenda_send_failed",
       entityType: "cab",
       entityId: id,
       summary: "CAB agenda not sent: no meeting members have a usable email address",
-      after: { memberCount: memberRows.length, recipientCount: 0 },
+      after: {
+        memberCount: memberRows.length,
+        roleCount: activeRoleRows.length,
+        attendeeCount: attendeeRows.length,
+        recipientCount: 0,
+        unavailable,
+      },
     });
     res.status(409).json({
       error: "No CAB meeting members have a usable email address. Update the meeting roster or the members' email addresses.",
@@ -685,7 +781,7 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
     summary: `Sent CAB agenda: ${result.sent} sent, ${result.skipped} skipped, ${result.errors} errors (${changeRows.length} changes)`,
     after: { ...result, changeCount: changeRows.length },
   });
-  res.json({ ...result, unavailable: memberRows.length - targets.length });
+  res.json({ ...result, unavailable });
 });
 
 // ---------------------------------------------------------------------------
