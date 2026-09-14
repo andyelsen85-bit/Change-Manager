@@ -122,6 +122,7 @@ async function expandMeeting(m: typeof cabMeetingsTable.$inferSelect) {
       track: changeRequestsTable.track,
       status: changeRequestsTable.status,
       risk: changeRequestsTable.risk,
+      category: changeRequestsTable.category,
       potentialTemplateId: changeRequestsTable.potentialTemplateId,
       outcome: cabChangesTable.outcome,
       outcomeNote: cabChangesTable.outcomeNote,

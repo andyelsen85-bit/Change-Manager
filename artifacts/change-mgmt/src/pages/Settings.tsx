@@ -1741,8 +1741,12 @@ function CategoriesPanel() {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Change categories</CardTitle>
-            <CardDescription>Buckets used to classify each change request — surfaced in the New change form and in dashboards.</CardDescription>
+            <CardTitle>Change categories &amp; CAB ordering</CardTitle>
+            <CardDescription>
+              Categories classify change requests and appear in the New change form and dashboards. The numeric sort
+              order is the canonical category order for the CAB agenda PDF on all pages and for the CAB meeting page.
+              Inactive categories remain in that order for historical changes.
+            </CardDescription>
           </div>
           <Button onClick={() => setEditing({ name: "", sortOrder: 100, isActive: true })} data-testid="button-new-category">
             New category
@@ -1803,9 +1807,15 @@ function CategoriesPanel() {
                     onChange={(e) => setEditing({ ...editing, sortOrder: Number(e.target.value) })}
                     data-testid="input-category-sort"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Controls this category&apos;s position in the CAB agenda PDF (all pages) and on the CAB meeting page.
+                  </p>
                 </div>
                 <div className="flex items-center justify-between rounded-md border border-border p-3">
-                  <Label>Active</Label>
+                  <div>
+                    <Label>Active</Label>
+                    <p className="text-xs text-muted-foreground">Inactive categories stay available for historical changes.</p>
+                  </div>
                   <Switch
                     checked={editing.isActive ?? true}
                     onCheckedChange={(v) => setEditing({ ...editing, isActive: v })}

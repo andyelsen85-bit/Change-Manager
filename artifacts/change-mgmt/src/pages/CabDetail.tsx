@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CalendarClock, CalendarDays, CheckCircle2, FileDown, Loader2, Mail, Play, Sparkles, Trash2, UserPlus, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { Approval, CabAttendee, CabMeeting, CabMeetingDetail, ChangeRequest, LdapSearchUser, User } from "@/lib/types";
+import type { Approval, CabAttendee, CabMeeting, CabMeetingDetail, CategoryItem, ChangeRequest, LdapSearchUser, User } from "@/lib/types";
+import { groupCabChanges } from "@/lib/cab-order";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,10 @@ export function CabDetailPage() {
   const changesQ = useQuery({
     queryKey: ["changes", "awaiting_approval"],
     queryFn: () => api.get<ChangeRequest[]>("/changes?status=awaiting_approval"),
+  });
+  const categoriesQ = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => api.get<CategoryItem[]>("/categories"),
   });
 
   const [form, setForm] = useState<{
@@ -133,9 +138,19 @@ export function CabDetailPage() {
   if (!Number.isFinite(id)) return <div className="p-8">Invalid meeting id.</div>;
   if (meetingQ.isLoading || !form || !meetingQ.data) return <Skeleton className="h-72 w-full" />;
   const m = meetingQ.data;
+  const categories = categoriesQ.data ?? [];
 
   const toggle = (key: "changeIds", value: number) =>
     setForm({ ...form, [key]: form[key].includes(value) ? form[key].filter((x) => x !== value) : [...form[key], value] });
+
+  // Merge eligible changes with already-docketed changes so existing
+  // selections remain visible after their status moves on. The map also
+  // prevents a change returned by both queries from appearing twice.
+  const mergedChanges = new Map<number, ChangeRequest | CabMeetingDetail["changes"][number]>();
+  for (const change of [...(changesQ.data ?? []), ...(m.changes ?? [])]) {
+    if (!mergedChanges.has(change.id)) mergedChanges.set(change.id, change);
+  }
+  const selectionGroups = groupCabChanges([...mergedChanges.values()], categories);
 
   return (
     <div className="space-y-4" data-testid="page-cab-detail">
@@ -263,33 +278,40 @@ export function CabDetailPage() {
           <CardHeader><CardTitle className="text-base">Changes on agenda ({form.changeIds.length})</CardTitle></CardHeader>
           <CardContent>
             <div className="max-h-72 overflow-y-auto rounded-md border border-border p-2 text-sm">
-              {(() => {
-                // Merge eligible (awaiting_approval) changes with any
-                // already-docketed changes on this meeting so existing
-                // selections remain visible even after they leave the
-                // awaiting_approval state.
-                const eligible = changesQ.data ?? [];
-                const docketed = m.changes ?? [];
-                const seen = new Set<number>();
-                const merged: ChangeRequest[] = [];
-                for (const c of [...eligible, ...docketed]) {
-                  if (seen.has(c.id)) continue;
-                  seen.add(c.id);
-                  merged.push(c as ChangeRequest);
-                }
-                return merged;
-              })().map((c) => (
-                <label key={c.id} className="flex items-center gap-2 py-1">
-                  <input
-                    type="checkbox"
-                    checked={form.changeIds.includes(c.id)}
-                    onChange={() => toggle("changeIds", c.id)}
-                    data-testid={`checkbox-change-${c.id}`}
-                  />
-                  <Link href={`/changes/${c.id}`} className="font-mono text-xs hover:underline">{c.ref}</Link>
-                  <span className="truncate">{c.title}</span>
-                </label>
-              ))}
+              {selectionGroups.length === 0 ? (
+                <p className="p-2 text-xs text-muted-foreground">No changes awaiting CAB selection.</p>
+              ) : (
+                <div className="space-y-3">
+                  {selectionGroups.map((group) => (
+                    <section key={group.key} data-testid={`selection-category-${group.key}`}>
+                      <h3 className="border-b border-border px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {group.label}
+                      </h3>
+                      <div className="pt-1">
+                        {group.changes.map((c) => (
+                          <label key={c.id} className="flex items-center gap-2 py-1">
+                            <input
+                              type="checkbox"
+                              checked={form.changeIds.includes(c.id)}
+                              onChange={() => toggle("changeIds", c.id)}
+                              data-testid={`checkbox-change-${c.id}`}
+                            />
+                            <Link
+                              href={`/changes/${c.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-mono text-xs hover:underline"
+                            >
+                              {c.ref}
+                            </Link>
+                            <span className="truncate">{c.title}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -298,7 +320,7 @@ export function CabDetailPage() {
       <AttendancePanel meetingId={id} />
 
       {m.status === "in_progress" && form.changeIds.length > 0 && (
-        <MeetingApprovalsPanel meetingId={id} changeIds={form.changeIds} meeting={m} />
+        <MeetingApprovalsPanel meetingId={id} changeIds={form.changeIds} meeting={m} categories={categories} />
       )}
 
       {form.changeIds.length === 0 && (
@@ -323,18 +345,50 @@ export function CabDetailPage() {
 // Lets CAB members vote on each docketed change without leaving the meeting
 // page. Reuses the existing /approvals/:id/vote endpoint so audit + email
 // flows stay identical to the change-detail page.
-function MeetingApprovalsPanel({ meetingId, changeIds, meeting }: { meetingId: number; changeIds: number[]; meeting: CabMeetingDetail }) {
+function MeetingApprovalsPanel({
+  meetingId,
+  changeIds,
+  meeting,
+  categories,
+}: {
+  meetingId: number;
+  changeIds: number[];
+  meeting: CabMeetingDetail;
+  categories: CategoryItem[];
+}) {
+  const approvalItems = changeIds.map((changeId) => {
+    const docket = meeting.changes.find((change) => change.id === changeId);
+    return {
+      id: changeId,
+      ref: docket?.ref ?? `Change #${changeId}`,
+      category: docket?.category ?? null,
+      risk: docket?.risk ?? "low",
+      plannedStart: docket?.plannedStart ?? null,
+      docket,
+    };
+  });
+  const approvalGroups = groupCabChanges(approvalItems, categories);
+
   return (
     <Card>
       <CardHeader><CardTitle className="text-base">Process docketed changes</CardTitle></CardHeader>
       <CardContent className="space-y-4">
-        {changeIds.map((cid) => (
-          <MeetingChangeRow
-            key={cid}
-            meetingId={meetingId}
-            changeId={cid}
-            docket={meeting.changes.find((c) => c.id === cid)}
-          />
+        {approvalGroups.map((group) => (
+          <section key={group.key} data-testid={`approval-category-${group.key}`}>
+            <h3 className="border-b border-border pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {group.label}
+            </h3>
+            <div className="space-y-4 pt-2">
+              {group.changes.map((change) => (
+                <MeetingChangeRow
+                  key={change.id}
+                  meetingId={meetingId}
+                  changeId={change.id}
+                  docket={change.docket}
+                />
+              ))}
+            </div>
+          </section>
         ))}
       </CardContent>
     </Card>
@@ -379,7 +433,12 @@ function MeetingChangeRow({
   return (
     <div className="rounded-md border border-border p-3">
       <div className="flex items-center justify-between gap-2">
-        <Link href={`/changes/${changeId}`} className="text-sm font-medium hover:underline">
+        <Link
+          href={`/changes/${changeId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium hover:underline"
+        >
           {cq.data?.ref ?? `Change #${changeId}`} — {cq.data?.title ?? ""}
         </Link>
         {docket?.standardPromotion && (

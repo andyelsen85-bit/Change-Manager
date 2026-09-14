@@ -8,6 +8,7 @@ import {
   approvalsTable,
   rolesTable,
   changeRequestsTable,
+  changeCategoriesTable,
   planningRecordsTable,
   usersTable,
 } from "@workspace/db";
@@ -70,6 +71,99 @@ function riskColor(level: string): string {
 }
 
 type Doc = InstanceType<typeof PDFDocument>;
+
+type AgendaCategory = {
+  key: string;
+  name: string;
+  sortOrder: number;
+};
+
+type AgendaChangeRow = {
+  change: {
+    category: string | null;
+    risk: string;
+    plannedStart: Date | null;
+    ref: string;
+    title: string;
+  };
+};
+
+export type AgendaChangeGroup<T extends AgendaChangeRow = AgendaChangeRow> = {
+  key: string;
+  label: string;
+  changes: T[];
+};
+
+const UNCATEGORIZED_KEY = "__uncategorized__";
+
+function configuredCategoryOrder(a: AgendaCategory, b: AgendaCategory): number {
+  return a.sortOrder - b.sortOrder || a.name.localeCompare(b.name) || a.key.localeCompare(b.key);
+}
+
+function riskRank(risk: string): number {
+  if (risk === "high") return 0;
+  if (risk === "medium") return 1;
+  if (risk === "low") return 2;
+  return 3;
+}
+
+function plannedStartValue(plannedStart: Date | null | undefined): number {
+  return plannedStart ? plannedStart.getTime() : Number.NEGATIVE_INFINITY;
+}
+
+/**
+ * Return the agenda's canonical grouping and order. Configured categories are
+ * ordered by the settings catalogue (including inactive entries, which remain
+ * relevant for historical changes). Categories not found in that catalogue
+ * are grouped alphabetically after configured categories. Changes in a group
+ * retain the established risk, planned-start, and reference ordering.
+ */
+export function groupAgendaChanges<T extends AgendaChangeRow>(
+  changes: readonly T[],
+  categories: readonly AgendaCategory[],
+): AgendaChangeGroup<T>[] {
+  const configured = [...categories].sort(configuredCategoryOrder);
+  const categoryByKey = new Map(configured.map((category) => [category.key, category]));
+  const groups = new Map<string, { label: string; configuredIndex: number; changes: T[] }>();
+
+  for (const row of changes) {
+    const key = typeof row.change.category === "string" ? row.change.category.trim() : "";
+    const category = key ? categoryByKey.get(key) : undefined;
+    const groupKey = key || UNCATEGORIZED_KEY;
+    const existing = groups.get(groupKey);
+    if (existing) {
+      existing.changes.push(row);
+      continue;
+    }
+    groups.set(groupKey, {
+      label: category?.name ?? (key || "Uncategorized"),
+      configuredIndex: category ? configured.indexOf(category) : configured.length,
+      changes: [row],
+    });
+  }
+
+  return [...groups.entries()]
+    .sort(([keyA, groupA], [keyB, groupB]) => {
+      if (groupA.configuredIndex !== groupB.configuredIndex) {
+        return groupA.configuredIndex - groupB.configuredIndex;
+      }
+      if (groupA.configuredIndex < configured.length) return 0;
+      if (keyA === UNCATEGORIZED_KEY && keyB !== UNCATEGORIZED_KEY) return 1;
+      if (keyB === UNCATEGORIZED_KEY && keyA !== UNCATEGORIZED_KEY) return -1;
+      return groupA.label.localeCompare(groupB.label) || keyA.localeCompare(keyB);
+    })
+    .map(([key, group]) => ({
+      key,
+      label: group.label,
+      changes: [...group.changes].sort((a, b) => {
+        return (
+          riskRank(a.change.risk) - riskRank(b.change.risk) ||
+          plannedStartValue(a.change.plannedStart) - plannedStartValue(b.change.plannedStart) ||
+          a.change.ref.localeCompare(b.change.ref)
+        );
+      }),
+    }));
+}
 
 function pageHeader(doc: Doc, meetingTitle: string, right: string): void {
   doc.save();
@@ -161,10 +255,19 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
     .where(eq(cabChangesTable.meetingId, meetingId))
     .orderBy(asc(changeRequestsTable.plannedStart), asc(changeRequestsTable.ref));
 
-  // Docket order: high risk first, then medium, then low; within the same
-  // risk level keep the planned-start/ref ordering from the query above.
-  const riskRank = (r: string): number => (r === "high" ? 0 : r === "medium" ? 1 : 2);
-  changes.sort((a, b) => riskRank(a.change.risk) - riskRank(b.change.risk));
+  // The settings catalogue is the source of truth for category order. Read
+  // inactive categories as well: existing changes can still carry one after
+  // an administrator deactivates it.
+  const categories = await db
+    .select({
+      key: changeCategoriesTable.key,
+      name: changeCategoriesTable.name,
+      sortOrder: changeCategoriesTable.sortOrder,
+    })
+    .from(changeCategoriesTable)
+    .orderBy(asc(changeCategoriesTable.sortOrder), asc(changeCategoriesTable.name));
+  const changeGroups = groupAgendaChanges(changes, categories);
+  const orderedChanges = changeGroups.flatMap((group) => group.changes);
 
   // "Potential Standard Change" promotion flags: for docketed changes linked
   // to a disabled template, show trial progress — and call it out when the
@@ -225,7 +328,8 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
   const overviewBottom = 800 - MARGIN - 14; // keep clear of the footer line
   const ROW_H = 15;
   const docketHeaderH = 30; // sectionTitle for the docket list
-  const rowsWanted = Math.max(changes.length, 1);
+  const overviewRowCount = changeGroups.reduce((count, group) => count + 1 + group.changes.length, 0);
+  const rowsWanted = Math.max(overviewRowCount, 1);
 
   sectionTitle(doc, "Agenda");
   {
@@ -245,20 +349,41 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
   if (changes.length === 0) {
     doc.font("Helvetica-Oblique").fontSize(9.5).fillColor(COLORS.muted).text("No changes on the agenda.", MARGIN, doc.y);
   } else {
-    // Rows that fit on the remaining space, keeping one row for "+ N more".
+    // Category headings consume docket rows too. Keep one row for "+ N more"
+    // when the one-page overview cannot display the complete docket.
     const fit = Math.max(1, Math.floor((overviewBottom - doc.y) / ROW_H));
-    const shown = changes.length <= fit ? changes.length : fit - 1;
-    for (let i = 0; i < shown; i++) {
-      const c = changes[i]!.change;
-      const y = doc.y;
-      doc.font("Helvetica-Bold").fontSize(9.5).fillColor(COLORS.ink).text(`${i + 1}.`, MARGIN, y, { width: 18 });
-      doc.text(c.ref, MARGIN + 18, y, { width: 78 });
-      doc.font("Helvetica").text(c.title, MARGIN + 100, y, { width: CONTENT_W - 250, height: ROW_H, ellipsis: true });
-      doc.fillColor(riskColor(c.risk)).text(`Risk: ${titleCase(c.risk)}`, MARGIN + CONTENT_W - 145, y, { width: 75 });
-      // Page number filled in later (see pageRefSlots) — a change can now
-      // span multiple pages, so the target page is only known after render.
-      pageRefSlots.push({ index: i, y });
-      doc.y = y + ROW_H;
+    const totalRows = overviewRowCount;
+    const rowBudget = totalRows <= fit ? fit : Math.max(0, fit - 1);
+    let rowsUsed = 0;
+    let shown = 0;
+    let changeIndex = 0;
+    for (const group of changeGroups) {
+      if (rowsUsed >= rowBudget || rowsUsed + 2 > rowBudget) break;
+      const headingY = doc.y;
+      doc.font("Helvetica-Bold").fontSize(9).fillColor(COLORS.muted).text(group.label, MARGIN, headingY, {
+        width: CONTENT_W,
+        height: ROW_H,
+        ellipsis: true,
+      });
+      doc.y = headingY + ROW_H;
+      rowsUsed++;
+
+      for (const row of group.changes) {
+        if (rowsUsed >= rowBudget) break;
+        const c = row.change;
+        const y = doc.y;
+        doc.font("Helvetica-Bold").fontSize(9.5).fillColor(COLORS.ink).text(`${changeIndex + 1}.`, MARGIN, y, { width: 18 });
+        doc.text(c.ref, MARGIN + 18, y, { width: 78 });
+        doc.font("Helvetica").text(c.title, MARGIN + 100, y, { width: CONTENT_W - 250, height: ROW_H, ellipsis: true });
+        doc.fillColor(riskColor(c.risk)).text(`Risk: ${titleCase(c.risk)}`, MARGIN + CONTENT_W - 145, y, { width: 75 });
+        // Page number filled in later (see pageRefSlots) — a change can now
+        // span multiple pages, so the target page is only known after render.
+        pageRefSlots.push({ index: changeIndex, y });
+        doc.y = y + ROW_H;
+        rowsUsed++;
+        shown++;
+        changeIndex++;
+      }
     }
     if (shown < changes.length) {
       doc
@@ -275,8 +400,8 @@ export async function buildCabAgendaPdf(meetingId: number): Promise<{ filename: 
     .text(`Generated by Change-it on ${fmt(new Date())}`, MARGIN, 800 - MARGIN, { width: CONTENT_W });
 
   // ---- One A4 page per change ---------------------------------------------
-  for (let i = 0; i < changes.length; i++) {
-    const { change: c, ownerName } = changes[i]!;
+  for (let i = 0; i < orderedChanges.length; i++) {
+    const { change: c, ownerName } = orderedChanges[i]!;
     const [planning] = await db.select().from(planningRecordsTable).where(eq(planningRecordsTable.changeId, c.id));
 
     headerState.title = `${m.title} — change ${i + 1} of ${changes.length}`;

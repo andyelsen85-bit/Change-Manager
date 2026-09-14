@@ -247,7 +247,9 @@ export type CabMeetingDetail = CabMeeting & {
     title: string;
     track: ChangeTrack;
     status: ChangeStatus;
-    risk: string;
+    risk: "low" | "medium" | "high";
+    category: string | null;
+    plannedStart: string | null;
     outcome: string | null;
     outcomeNote: string | null;
     postponedToMeetingId: number | null;
