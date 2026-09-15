@@ -10,7 +10,9 @@
 **/*.key
 .agents
 .local
-attached_assets
+# Exclude uploads except the versioned logo imported by the production app.
+attached_assets/*
+!attached_assets/CHdN_Logo_Transp_WhiteStroke_1778142112460.png
 artifacts/attached_assets
 artifacts/mockup-sandbox
 screenshots
