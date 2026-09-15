@@ -1,0 +1,134 @@
+# Security remediation assessment and compliance matrix
+
+This document records the remediation assessment for the Change-it baseline.
+It is not a declaration of full production compliance. A source change,
+documentation statement, or workflow definition is not evidence that CI,
+production configuration, a database migration, or an owner decision has
+actually been exercised.
+
+## Assessment
+
+The repository now contains a pinned GitHub Actions workflow for publishing
+the three Dockerfile targets (`builder`, `api`, and `web`) to the verified
+Nexus destination used by `update.sh`. It validates canonical SemVer release
+tags (including Docker-compatible prereleases, while rejecting `+` build
+metadata) against the API and web package versions, requires Nexus
+credentials, and refuses to continue when the runner cannot validate the
+registry TLS certificate.
+The runner label and registry path are configurable repository settings with
+an explicit `self-hosted` and verified-registry default.
+
+The workflow has not been reported as executed here. A private runner, Nexus
+reachability, CA installation, credentials, repository tag policy, and pushed
+digests therefore remain deployment evidence to collect. No sibling Nemesys
+workflow was available for comparison, and no claim is made that this
+workflow matches unknown CI behavior.
+
+The implementation now includes:
+
+- authentication through PostgreSQL-backed
+  `express-session` rows with a 12-hour lifetime, session-ID regeneration on
+  authentication, logout row deletion, fresh account checks and generation-based
+  central revocation across replicas;
+- encryption no longer has a silent `APP_ENCRYPTION_KEY` to `JWT_SECRET`
+  fallback and production secret handling requires at least 32 random bytes;
+- bounded authentication throttling/lockout and generic external error
+  responses, with production error logs limited to safe diagnostic fields.
+  Every pre-authentication attempt atomically reserves both a normalized,
+  SHA-256 identity bucket (a five-attempt cycle with progressive
+  1/5/15/30-minute locks for strike levels 1–4) and a separate per-source-IP
+  aggregate window (approximately 60 attempts per minute). Active locks
+  never extend from blocked traffic; an expired identity lock permits one
+  retry and retains its strike level for the next five-attempt cycle, while a
+  quiet 24-hour period resets that level. Successful authentication clears
+  only its identity bucket, not the shared IP aggregate.
+- backup protection follows the mandatory external age-encryption procedure
+  in [Backup security](backup-security.md); and
+- broad authenticated visibility of standard change/CAB data remains the
+  current product policy, but it requires explicit business-owner
+  re-confirmation. No confirmation date or owner identity is fabricated.
+
+MFA and Kerberos are outside this remediation scope. AD FS/OIDC is documented
+separately and is not evidence that MFA is provided by this application.
+
+## Required actions before marking green
+
+1. Run the workflow on the approved private runner and retain successful run
+   URLs and image digests for all three targets.
+2. Confirm the runner trusts the authentic Nexus CA and that Nexus enforces
+   immutable version/SHA tags while allowing the intentional `main` pointer.
+3. Apply and verify the PostgreSQL session schema against the externally
+   managed production database; test expiration, ID regeneration, logout
+   deletion, and revocation from every replica.
+4. Before deploy, preserve the exact existing encryption material. Never
+   silently replace it. Test decrypting existing SMTP/LDAP values after
+   setting the explicit key.
+5. Verify all generated/provided production secrets are at least 32 random
+   bytes and that startup rejects missing or short values.
+6. Run authentication rate-limit, error-hygiene, backup age-encryption,
+   restore, and rollback tests. Keep backup keys and application encryption
+   keys separate and recoverable.
+7. Ask the business owner to confirm that any authenticated user may continue
+   to view organization-wide standard change-management and CAB data. Record
+   the owner's name/role, decision, scope, and date in this document and the
+   threat model. Until then, status is pending; do not broaden access or
+   claim confirmation.
+
+## Verification performed
+
+API and frontend typechecks and builds passed. Focused tests cover session
+generation, missing session middleware, proxy-header handling, AD FS session
+integration, secret validation and encryption independence, safe errors, and
+transactional restore invalidation. Shell generation checks verify explicit
+fresh-install acknowledgement and no silent replacement of existing keys.
+
+One browser pass against the development app verified local UI login, exact
+deep-link return, PostgreSQL session persistence across reloads, CSRF rejection
+without logout, successful logout and old-cookie replay rejection, account
+generation revocation and subsequent login, and the backup warning. Only a
+disposable account was changed and it was removed afterward. No real
+LDAP/AD FS/SMTP calls or existing-data restore were performed.
+
+The failing existing business-test suites were compared against the
+pre-remediation code using the same installed dependencies. Twelve failures
+already existed in change creation/transition, comment permissions, and
+notification-preference tests. Obsolete JWT test fixtures and the intentional
+structured-logging expectation changes are updated separately.
+
+See [Additional scan findings](security-scan-findings.md) for the dependency,
+static-analysis and privacy scan results. The dependency advisories require
+separate remediation and preclude a repository-wide vulnerability-free claim.
+
+## Compliance matrix
+
+**Passed** means implemented and checked within the stated development/source
+scope. **Partially Passed** means implementation or documentation exists but
+operational evidence or owner approval is still needed. These statuses do not
+assert that the changes have been deployed.
+
+| Baseline control | Status | Evidence / remaining action |
+| --- | --- | --- |
+| Container images built by GitHub Actions | Partially Passed | Pinned workflow and static checks complete. Execute on approved private runner; retain image digests. Sibling workflow unavailable for comparison. |
+| Nexus runner reachability and trusted private CA | Partially Passed | TLS preflight and configuration documented; verify on the real runner. |
+| Version tag matches API and web package versions | Passed | Strict canonical SemVer and package match validation implemented; actual release execution still part of CI verification. |
+| Immutable release and full-SHA image tags | Partially Passed | Tags emitted by workflow; Nexus overwrite policy and resulting digests need operational verification. |
+| Session architecture | Passed | PostgreSQL sessions, fixed 12h TTL, regeneration, logout deletion, fresh identity/generation checks. Browser persistence/replay/revocation checks passed. Production rollout still required. |
+| Encryption-key fallback | Passed | Removed, with independence and failure tests. Preserve and verify existing production ciphertext key before rollout. |
+| Secret minimum length | Passed | Startup validation and explicit fresh-install generation tests passed; operators must supply genuinely random production material. |
+| Rate limiting / brute-force protection | Passed | Pre-auth shared PostgreSQL admission controls cover local/LDAP; bounded inputs and proxy trust prevent trivial bypass. No live LDAP bind test performed. |
+| Error message hygiene | Passed | Generic client errors and production allowlisted error logging; provider/backup and credential-redaction regression tests. |
+| Backup encryption in transit/at rest | Partially Passed | Mandatory external encryption alternative implemented in UI/docs. Actual operator encryption, HTTPS configuration, retention and recovery drills remain operational controls. |
+| Ready acceptance of broad authenticated visibility | Partially Passed | Existing scope unchanged; business-owner re-confirmation still pending. Pentest restrictions remain separate. |
+| Local password hashing (bcrypt) | Passed | Preserved; local browser login and unit tests passed. |
+| AD FS/OpenID Connect security controls | Partially Passed | Protocol code preserved and automated tests pass; real IdP authentication after migration not verified here. |
+| CSRF protection | Passed | Existing scheme preserved; browser rejected logout without CSRF and accepted normal UI logout. |
+| Immutable audit log | Passed | Existing database trigger enforcement preserved; development schema bootstrap completed. Production migration must retain it. |
+| Written threat model | Passed | Updated for new session, secret, backup and CI boundaries; owner confirmation explicitly pending. |
+| No default admin password | Passed | Existing setup requirement preserved and setup tests pass. |
+| Production external PostgreSQL | Passed | Documented per supplied deployment baseline; bundled Compose database explicitly local/test only. No production connection was inspected or changed. |
+| MFA | Not Applicable | Explicitly out of scope; not inferred from AD FS/OIDC. |
+| Kerberos | Not Applicable | Explicitly out of scope. |
+
+If a second image source or mirror is later confirmed, add an equivalent
+digest-preserving mirror verification step to the evidence; do not claim that
+an unknown sibling workflow or CI system has been matched.

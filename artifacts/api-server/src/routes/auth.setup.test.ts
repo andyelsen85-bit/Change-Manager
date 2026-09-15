@@ -2,14 +2,20 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import express, { type Express } from "express";
 import cookieParser from "cookie-parser";
-import { DbMock } from "./test-helpers";
+import { DbMock, installTestSession } from "./test-helpers";
 
 const dbMock = new DbMock();
 const auditMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@workspace/db", () => ({
   db: dbMock,
-  usersTable: { _t: "users", id: "id", username: "username", passwordHash: "password_hash" },
+  usersTable: {
+    _t: "users",
+    id: "id",
+    username: "username",
+    passwordHash: "password_hash",
+    sessionGeneration: "session_generation",
+  },
   roleAssignmentsTable: { _t: "role_assignments" },
 }));
 
@@ -17,12 +23,16 @@ vi.mock("drizzle-orm", () => ({
   eq: () => ({}),
   and: () => ({}),
   isNull: () => ({}),
+  sql: (...parts: unknown[]) => parts,
 }));
 
 vi.mock("../lib/audit", () => ({ audit: auditMock }));
 vi.mock("../lib/ldap", () => ({
   authenticateLdap: vi.fn().mockResolvedValue({ ok: false }),
   getLdap: vi.fn().mockResolvedValue(null),
+}));
+vi.mock("./pentest", () => ({
+  userCanAccessPentest: vi.fn().mockResolvedValue(false),
 }));
 
 const { default: authRouter } = await import("./auth");
@@ -31,6 +41,7 @@ function buildApp(): Express {
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
+  installTestSession(app);
   app.use("/api", authRouter);
   return app;
 }

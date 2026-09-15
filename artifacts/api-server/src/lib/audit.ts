@@ -46,6 +46,17 @@ export async function audit(
       after: input.after ?? null,
     });
   } catch (err) {
-    logger.error({ err, input }, "Failed to write audit entry");
+    // The audit payload can legitimately contain user-entered change text.
+    // Do not duplicate that payload in application logs when the audit insert
+    // itself fails; retain only the event identity and redacted exception.
+    logger.error(
+      {
+        err,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId ?? null,
+      },
+      "Failed to write audit entry",
+    );
   }
 }

@@ -1,13 +1,14 @@
 import { Router, type IRouter } from "express";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, usersTable } from "@workspace/db";
 import {
   hashPassword,
   verifyPassword,
-  signSession,
-  setSessionCookie,
+  createAuthenticatedSession,
   clearSessionCookie,
   readSessionCookie,
+  loadFreshSession,
+  destroySession,
   loadUserRoles,
   generateCsrfToken,
   setCsrfCookie,
@@ -16,6 +17,12 @@ import {
 } from "../lib/auth";
 import { audit } from "../lib/audit";
 import { authenticateLdap, getLdap } from "../lib/ldap";
+import {
+  clearLoginFailures,
+  reserveLoginAttempt,
+  requestIp,
+} from "../lib/login-throttle";
+import { revokeUserSessions } from "../lib/session";
 import { userCanAccessPentest } from "./pentest";
 import {
   adfsStateCookieName,
@@ -38,17 +45,19 @@ const router: IRouter = Router();
 const ADFS_START_WINDOW_MS = 60_000;
 const ADFS_START_MAX_PER_WINDOW = 20;
 const ADFS_START_MAX_KEYS = 2_048;
+const MAX_USERNAME_LENGTH = 254;
+const MAX_PASSWORD_LENGTH = 1_024;
 const adfsStartAttempts = new Map<string, { count: number; resetAt: number }>();
 
-// Deliberately use the peer socket address, not an arbitrary forwarded/header
-// value. This bounded limiter protects discovery from unauthenticated request
-// floods without trusting attacker-provided identity headers.
+// This bounded limiter protects discovery from unauthenticated request floods.
+// requestIp is Express's trusted-proxy-derived address; app.ts defaults to one
+// nginx hop and nginx overwrites X-Forwarded-For before forwarding.
 function allowAdfsStart(req: import("express").Request): boolean {
   const now = Date.now();
   for (const [key, value] of adfsStartAttempts) {
     if (value.resetAt <= now) adfsStartAttempts.delete(key);
   }
-  const key = req.socket.remoteAddress ?? "unknown-peer";
+  const key = requestIp(req);
   const current = adfsStartAttempts.get(key);
   if (!current || current.resetAt <= now) {
     if (adfsStartAttempts.size >= ADFS_START_MAX_KEYS) {
@@ -65,6 +74,18 @@ function allowAdfsStart(req: import("express").Request): boolean {
 
 function clearLoginMethodCookie(res: import("express").Response): void {
   res.clearCookie("cm_login_method", { path: "/" });
+}
+
+async function rejectIfLoginThrottled(
+  req: import("express").Request,
+  res: import("express").Response,
+  identity: string,
+): Promise<boolean> {
+  const status = await reserveLoginAttempt(requestIp(req), identity);
+  if (!status.blocked) return false;
+  res.setHeader("Retry-After", String(status.retryAfterSeconds));
+  res.status(429).json({ error: "Too many login attempts. Try again later." });
+  return true;
 }
 
 function adfsCookieOptions(req: import("express").Request) {
@@ -145,8 +166,12 @@ router.get("/auth/adfs/callback", async (req, res): Promise<void> => {
   }
   try {
     const user = await completeAdfsLogin(code, savedState, config);
-    const token = signSession({ uid: user.id, username: user.username, isAdmin: user.isAdmin });
-    setSessionCookie(req, res, token);
+    await createAuthenticatedSession(req, res, {
+      uid: user.id,
+      username: user.username,
+      isAdmin: user.isAdmin,
+      generation: user.sessionGeneration ?? 0,
+    });
     setCsrfCookie(req, res, generateCsrfToken());
     res.cookie("cm_login_method", "adfs", {
       httpOnly: false,
@@ -172,10 +197,21 @@ router.get("/auth/adfs/callback", async (req, res): Promise<void> => {
 
 router.post("/auth/login", async (req, res): Promise<void> => {
   const { username, password } = req.body ?? {};
-  if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
+  if (
+    typeof username !== "string" ||
+    typeof password !== "string" ||
+    !username ||
+    !password ||
+    username.length > MAX_USERNAME_LENGTH ||
+    password.length > MAX_PASSWORD_LENGTH
+  ) {
     res.status(400).json({ error: "Username and password are required" });
     return;
   }
+  // Reserve one attempt for both the source-IP aggregate and normalized
+  // identity bucket before any user lookup, password hash work, or LDAP call.
+  if (await rejectIfLoginThrottled(req, res, username)) return;
+
   // Find local user
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.username, username));
 
@@ -211,9 +247,14 @@ router.post("/auth/login", async (req, res): Promise<void> => {
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
+    await clearLoginFailures(requestIp(req), username);
     const roles = await loadUserRoles(existing.id);
-    const token = signSession({ uid: existing.id, username: existing.username, isAdmin: existing.isAdmin });
-    setSessionCookie(req, res, token);
+    await createAuthenticatedSession(req, res, {
+      uid: existing.id,
+      username: existing.username,
+      isAdmin: existing.isAdmin,
+      generation: existing.sessionGeneration ?? 0,
+    });
     setCsrfCookie(req, res, generateCsrfToken());
     clearLoginMethodCookie(res);
     await audit(
@@ -279,9 +320,14 @@ router.post("/auth/login", async (req, res): Promise<void> => {
           if (refreshed) userRow = refreshed;
         }
       }
+      await clearLoginFailures(requestIp(req), username);
       const roles = await loadUserRoles(userRow.id);
-      const token = signSession({ uid: userRow.id, username: userRow.username, isAdmin: userRow.isAdmin });
-      setSessionCookie(req, res, token);
+      await createAuthenticatedSession(req, res, {
+        uid: userRow.id,
+        username: userRow.username,
+        isAdmin: userRow.isAdmin,
+        generation: userRow.sessionGeneration ?? 0,
+      });
       setCsrfCookie(req, res, generateCsrfToken());
       clearLoginMethodCookie(res);
       await audit(
@@ -333,6 +379,13 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
   clearSessionCookie(res);
   clearCsrfCookie(res);
   clearLoginMethodCookie(res);
+  try {
+    await destroySession(req);
+  } catch (err) {
+    req.log?.error({ err }, "Session revocation failed during logout");
+    res.status(503).json({ error: "Unable to revoke session" });
+    return;
+  }
   if (session) {
     await audit(req, {
       action: "auth.logout",
@@ -345,12 +398,12 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
 });
 
 router.get("/auth/me", async (req, res): Promise<void> => {
-  const session = readSessionCookie(req);
-  if (!session) {
+  const current = await loadFreshSession(req);
+  if (!current) {
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
-  const [u] = await db.select().from(usersTable).where(eq(usersTable.id, session.uid));
+  const [u] = await db.select().from(usersTable).where(eq(usersTable.id, current.session.uid));
   if (!u) {
     res.status(401).json({ error: "Not authenticated" });
     return;
@@ -398,7 +451,11 @@ router.get("/auth/setup-status", async (_req, res): Promise<void> => {
 
 router.post("/auth/setup", async (req, res): Promise<void> => {
   const { password } = req.body ?? {};
-  if (typeof password !== "string" || password.length < 8) {
+  if (
+    typeof password !== "string" ||
+    password.length < 8 ||
+    password.length > MAX_PASSWORD_LENGTH
+  ) {
     res.status(400).json({ error: "Password must be at least 8 characters" });
     return;
   }
@@ -410,7 +467,11 @@ router.post("/auth/setup", async (req, res): Promise<void> => {
   const passwordHash = await hashPassword(password);
   const claimed = await db
     .update(usersTable)
-    .set({ passwordHash, mustChangePassword: false })
+    .set({
+      passwordHash,
+      mustChangePassword: false,
+      sessionGeneration: sql`${usersTable.sessionGeneration} + 1`,
+    })
     .where(and(eq(usersTable.username, "admin"), isNull(usersTable.passwordHash)))
     .returning();
   if (claimed.length === 0) {
@@ -422,8 +483,12 @@ router.post("/auth/setup", async (req, res): Promise<void> => {
   }
   const admin = claimed[0]!;
   // Auto-login: mint a session so the operator goes straight into the app.
-  const token = signSession({ uid: admin.id, username: admin.username, isAdmin: admin.isAdmin });
-  setSessionCookie(req, res, token);
+  await createAuthenticatedSession(req, res, {
+    uid: admin.id,
+    username: admin.username,
+    isAdmin: admin.isAdmin,
+    generation: admin.sessionGeneration ?? 0,
+  });
   setCsrfCookie(req, res, generateCsrfToken());
   await audit(
     req,
@@ -450,13 +515,20 @@ router.post("/auth/setup", async (req, res): Promise<void> => {
 });
 
 router.post("/auth/change-password", async (req, res): Promise<void> => {
-  const session = readSessionCookie(req);
-  if (!session) {
+  const current = await loadFreshSession(req);
+  if (!current) {
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
+  const session = current.session;
   const { currentPassword, newPassword } = req.body ?? {};
-  if (typeof currentPassword !== "string" || typeof newPassword !== "string" || newPassword.length < 8) {
+  if (
+    typeof currentPassword !== "string" ||
+    typeof newPassword !== "string" ||
+    currentPassword.length > MAX_PASSWORD_LENGTH ||
+    newPassword.length < 8 ||
+    newPassword.length > MAX_PASSWORD_LENGTH
+  ) {
     res.status(400).json({ error: "newPassword must be at least 8 characters" });
     return;
   }
@@ -474,10 +546,22 @@ router.post("/auth/change-password", async (req, res): Promise<void> => {
     return;
   }
   const newHash = await hashPassword(newPassword);
-  await db
+  const [updated] = await db
     .update(usersTable)
-    .set({ passwordHash: newHash, mustChangePassword: false })
-    .where(eq(usersTable.id, u.id));
+    .set({
+      passwordHash: newHash,
+      mustChangePassword: false,
+      sessionGeneration: sql`${usersTable.sessionGeneration} + 1`,
+    })
+    .where(eq(usersTable.id, u.id))
+    .returning();
+  if (req.session && req.session.uid === u.id && updated?.sessionGeneration !== undefined) {
+    req.session.generation = updated.sessionGeneration;
+    await new Promise<void>((resolve, reject) => {
+      req.session!.save((err) => (err ? reject(err) : resolve()));
+    });
+  }
+  await revokeUserSessions(u.id, req.sessionID);
   await audit(req, {
     action: "auth.password_changed",
     entityType: "user",

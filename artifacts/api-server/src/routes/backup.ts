@@ -1,8 +1,9 @@
 import { Router, type IRouter, json as expressJson, type Request, type Response, type NextFunction } from "express";
 import { requireAdmin } from "../lib/auth";
-import { exportAll, importAll } from "../lib/backup";
+import { BackupValidationError, exportAll, importAll } from "../lib/backup";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
+import { clearSessionCookie } from "../lib/session";
 
 const router: IRouter = Router();
 
@@ -58,10 +59,8 @@ router.get("/backup", requireSameOrigin, requireAdmin, async (req, res, next) =>
 // other error happens mid-transaction (already rolled back inside importAll)
 // and is forwarded to the centralized error handler so it gets logged with
 // a stack trace and returns 500.
-const VALIDATION_PREFIXES = ["Backup payload", "Unsupported backup version"];
 function isValidationError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  return VALIDATION_PREFIXES.some((p) => err.message.startsWith(p));
+  return err instanceof BackupValidationError;
 }
 
 router.post(
@@ -81,6 +80,10 @@ router.post(
         summary: `Restored full backup (${Object.values(result.restored).reduce((a, b) => a + b, 0)} rows across ${Object.keys(result.restored).length} tables)`,
         after: result.restored,
       });
+      // The restore transaction has invalidated every persisted session. Tell
+      // this browser to discard its now-stale cookie as well; the frontend
+      // then clears in-memory auth state and sends the operator to login.
+      clearSessionCookie(res);
       res.json({ ok: true, restored: result.restored });
     } catch (err) {
       if (isValidationError(err)) {

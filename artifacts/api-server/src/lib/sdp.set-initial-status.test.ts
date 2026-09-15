@@ -124,8 +124,11 @@ describe("sdpSetInitialStatus", () => {
     await expect(sdpSetInitialStatus("88")).resolves.toBeUndefined();
 
     expect(loggerWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: "88", err: expect.stringContaining("fetch failed") }),
+      expect.objectContaining({ requestId: "88", err: expect.any(TypeError) }),
       expect.stringMatching(/failed/i),
     );
+    const [details] = loggerWarn.mock.calls[0] as [{ err: unknown }];
+    expect(details.err).toBeInstanceOf(TypeError);
+    expect(details.err).toMatchObject({ message: "fetch failed" });
   });
 });

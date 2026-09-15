@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { db, ldapSettingsTable } from "@workspace/db";
-import { logger } from "./logger";
+import { logger, redactError } from "./logger";
 import { decryptSecret } from "./secret-crypto";
 
 export async function getLdap() {
@@ -52,7 +52,16 @@ function extractLdapError(err: unknown): { code?: string; details?: string } {
     typeof e.name === "string" && e.name.endsWith("Error") ? e.name : undefined;
   const codeNum = typeof e.code === "number" || typeof e.code === "string" ? String(e.code) : undefined;
   const code = codeName ?? codeNum;
-  const details = (e.lde_message && String(e.lde_message)) || (e.message && String(e.message)) || undefined;
+  const rawDetails = (e.lde_message && String(e.lde_message)) || (e.message && String(e.message)) || undefined;
+  // Keep a bounded, redacted diagnostic for server-side correlation. Routes
+  // deliberately do not return this field to callers because LDAP providers
+  // may include directory names, filters, or credential-related text.
+  const details = rawDetails
+    ?.replace(
+      /((?:password|passwd|passphrase|secret|token|authorization)\s*[=:]\s*)([^,\s;]+)/gi,
+      "$1[REDACTED]",
+    )
+    .slice(0, 512);
   return { code, details };
 }
 
@@ -208,9 +217,14 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
       if (resolved) return;
       resolved = true;
       try { client.unbind(); } catch { /* ignore */ }
-      const ctx = { url: cfg.url, baseDn: cfg.baseDn, usernameMasked: maskName(username), ok: r.ok };
+      const ctx = { usernameMasked: maskName(username), ok: r.ok };
       if (r.ok) logger.info(ctx, "LDAP lookup ok");
-      else logger.warn({ ...ctx, stage: r.stage, reason: r.reason, code: r.code }, "LDAP lookup failed");
+      else {
+        logger.warn(
+          { ...ctx, stage: r.stage, reason: r.reason, code: r.code, detailAvailable: !!r.details },
+          "LDAP lookup failed",
+        );
+      }
       resolve(r);
     };
     client.on("error", (err) => {
@@ -253,16 +267,14 @@ export async function lookupLdapUser(username: string): Promise<LdapLookupResult
             });
           }
           const e = entry as Record<string, string>;
-          // Diagnostic: log every attribute we got back AND a redacted preview
-          // of each value so admins can see what their directory actually
-          // returned vs. what we mapped onto fullName / email.
-          const preview: Record<string, string> = {};
-          for (const [k, v] of Object.entries(e)) {
-            preview[k] = typeof v === "string" && v.length > 40 ? v.slice(0, 37) + "…" : String(v);
-          }
           logger.info(
-            { usernameMasked: maskName(username), entryDn, attrs: preview, nameAttr: cfg.nameAttr, emailAttr: cfg.emailAttr },
-            "LDAP lookup entry attributes"
+            {
+              usernameMasked: maskName(username),
+              attributeNames: Object.keys(e),
+              nameAttr: cfg.nameAttr,
+              emailAttr: cfg.emailAttr,
+            },
+            "LDAP lookup entry attributes",
           );
           // Case-insensitive lookup with sensible AD fallbacks. Some servers
           // lowercase keys (`displayname`), some keep them as advertised
@@ -343,9 +355,12 @@ export async function searchLdapUsers(query: string, limit = 20): Promise<LdapSe
       resolved = true;
       try { client.unbind(); } catch { /* ignore */ }
       if (!r.ok) {
-        logger.warn({ url: cfg.url, baseDn: cfg.baseDn, stage: r.stage, reason: r.reason, code: r.code }, "LDAP search failed");
+        logger.warn(
+          { stage: r.stage, reason: r.reason, code: r.code, detailAvailable: !!r.details },
+          "LDAP search failed",
+        );
       } else {
-        logger.info({ url: cfg.url, baseDn: cfg.baseDn, count: r.users.length }, "LDAP user search ok");
+        logger.info({ count: r.users.length }, "LDAP user search ok");
       }
       resolve(r);
     };
@@ -429,7 +444,7 @@ export async function authenticateLdap(username: string, password: string): Prom
   try {
     ldap = await import("ldapjs");
   } catch (err) {
-    logger.error({ err }, "ldapjs not available");
+    logger.error({ err: redactError(err) }, "ldapjs not available");
     return { ok: false, stage: "config", reason: "LDAP library missing" };
   }
 
@@ -456,7 +471,7 @@ export async function authenticateLdap(username: string, password: string): Prom
       });
     } catch (err) {
       const { code, details } = extractLdapError(err);
-      logger.warn({ err, url: cfg.url, code }, "LDAP createClient failed");
+      logger.warn({ err: redactError(err), code }, "LDAP createClient failed");
       resolve({ ok: false, stage: "connect", reason: "Could not initialise LDAP client", code, details });
       return;
     }
@@ -472,21 +487,24 @@ export async function authenticateLdap(username: string, password: string): Prom
         // ignore
       }
       const logCtx = {
-        url: cfg.url,
-        baseDn: cfg.baseDn,
         usernameMasked: maskName(username),
         stage: r.stage,
         ok: r.ok,
         code: r.ok ? undefined : r.code,
       };
       if (r.ok) logger.info(logCtx, "LDAP auth ok");
-      else logger.warn({ ...logCtx, details: r.details, reason: r.reason }, "LDAP auth failed");
+      else {
+        logger.warn(
+          { ...logCtx, detailAvailable: !!r.details, reason: r.reason },
+          "LDAP auth failed",
+        );
+      }
       resolve(r);
     };
 
     client.on("error", (err) => {
       const { code, details } = extractLdapError(err);
-      logger.warn({ err, url: cfg.url, stage, code }, "LDAP connection error");
+      logger.warn({ err: redactError(err), stage, code }, "LDAP connection error");
       finish({
         ok: false,
         stage: "connect",
@@ -535,7 +553,7 @@ export async function authenticateLdap(username: string, password: string): Prom
         "mail", "userPrincipalName", "sAMAccountName", "uid",
       ]));
       const opts = { filter, scope: "sub" as const, attributes: wanted };
-      logger.debug({ baseDn: cfg.baseDn, filter, attrs: opts.attributes }, "LDAP search");
+      logger.debug({ baseDnConfigured: !!cfg.baseDn, attributeNames: opts.attributes }, "LDAP search");
       client.search(cfg.baseDn, opts, (searchErr, searchRes) => {
         if (searchErr) {
           const { code, details } = extractLdapError(searchErr);
@@ -659,6 +677,8 @@ export async function testLdapConnection(username: string, password: string): Pr
     stage: r.stage,
     message: r.reason,
     code: r.code,
-    details: r.details,
+    // Provider diagnostics stay in the redacted server log. Returning them
+    // here would expose LDAP responses and directory metadata to the browser
+    // and make it easy to persist them in audit history.
   };
 }

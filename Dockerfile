@@ -44,10 +44,11 @@ ENV NODE_ENV=production
 ENV PORT=8080
 COPY --from=builder /repo/artifacts/api-server/dist ./dist
 COPY docker/entrypoint-api.sh /entrypoint-api.sh
-# /var/secrets is backed by the `api_secrets` named volume in compose; the
-# entrypoint persists an auto-generated JWT_SECRET there when one is not
-# supplied via the environment. Pre-create it owned by the node user so the
-# unprivileged process can write to it.
+# /var/secrets is backed by the `api_secrets` named volume in local/test
+# Compose. Production supplies a validated SESSION_SECRET (or explicitly
+# retained JWT_SECRET) and APP_ENCRYPTION_KEY; no deployment may silently
+# replace existing encryption material.
+# Pre-create the directory owned by node for the approved local bootstrap path.
 RUN chmod +x /entrypoint-api.sh \
  && mkdir -p /var/secrets \
  && chown -R node:node /var/secrets

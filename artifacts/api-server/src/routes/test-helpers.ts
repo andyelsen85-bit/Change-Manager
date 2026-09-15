@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
+import expressSession from "express-session";
 import type { SessionPayload, ChangeAccessReason } from "../lib/auth";
 
 // A queue-based mock for drizzle's chainable query API. Each test enqueues the
@@ -90,7 +91,7 @@ export function buildTestApp(
   app.use(express.json());
   app.use((req: Request, _res: Response, next: NextFunction) => {
     if (session) {
-      req.session = session;
+      req.session = { ...session, generation: session.generation ?? 0 } as typeof req.session;
     }
     next();
   });
@@ -98,30 +99,53 @@ export function buildTestApp(
   return app;
 }
 
+/**
+ * Auth-route tests mount routers directly rather than app.ts. Use a real
+ * in-memory express-session middleware there so login/setup/ADFS tests still
+ * exercise regeneration and cookie issuance without touching PostgreSQL.
+ */
+export function installTestSession(app: Express): void {
+  app.use(
+    expressSession({
+      secret: "test-only-session-secret",
+      name: "cm_session",
+      resave: false,
+      saveUninitialized: false,
+      rolling: false,
+      cookie: { maxAge: 12 * 60 * 60 * 1000, httpOnly: true, sameSite: "lax", path: "/" },
+    }),
+  );
+}
+
 export const ADMIN_SESSION: SessionPayload = {
   uid: 1,
   username: "admin",
   isAdmin: true,
+  generation: 0,
 };
 export const OWNER_SESSION: SessionPayload = {
   uid: 10,
   username: "owner",
   isAdmin: false,
+  generation: 0,
 };
 export const ASSIGNEE_SESSION: SessionPayload = {
   uid: 20,
   username: "assignee",
   isAdmin: false,
+  generation: 0,
 };
 export const STRANGER_SESSION: SessionPayload = {
   uid: 99,
   username: "stranger",
   isAdmin: false,
+  generation: 0,
 };
 export const CHANGE_MANAGER_SESSION: SessionPayload = {
   uid: 30,
   username: "cm",
   isAdmin: false,
+  generation: 0,
 };
 
 export type SessionLike = SessionPayload;

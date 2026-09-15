@@ -3,8 +3,10 @@ import cors, { type CorsOptions, type CorsRequest } from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
-import { logger } from "./lib/logger";
+import { logger, redactError } from "./lib/logger";
 import { requireCsrf } from "./lib/auth";
+import { createSessionMiddleware } from "./lib/session";
+import { getProxyTrustSetting } from "./lib/proxy-trust";
 
 const app: Express = express();
 
@@ -134,11 +136,11 @@ function corsOptionsDelegate(
   }
 }
 
-// We sit behind the Replit edge / preview proxy, which terminates TLS and
-// forwards over HTTP with `X-Forwarded-Proto: https`. Trusting that header
-// lets `req.secure` reflect the original scheme so we can correctly emit
-// `Secure; SameSite=None` cookies for the iframe context.
-app.set("trust proxy", true);
+// The public deployment has one proxy hop: nginx. A numeric trust setting
+// avoids trusting an arbitrary X-Forwarded-For chain supplied by a direct
+// client. Operators with a known private proxy network may configure a
+// validated CIDR list instead.
+app.set("trust proxy", getProxyTrustSetting());
 
 app.use(
   pinoHttp({
@@ -163,6 +165,7 @@ app.use(cors(corsOptionsDelegate));
 app.use(cookieParser());
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.use(createSessionMiddleware());
 
 // CSRF protection (double-submit cookie). Login and first-time setup are
 // exempt because the user has no session yet — those endpoints are what
@@ -193,11 +196,58 @@ app.use("/api", csrfGate);
 app.use("/api", router);
 
 const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
-  req.log?.error({ err }, "Unhandled request error");
+  // Error messages from database drivers, SMTP/LDAP providers, and body
+  // parsers can contain SQL, hostnames, certificate details, or credentials.
+  // Keep the diagnostic in the structured server log, but never echo it to an
+  // API caller. The small status/message allowlist below is deliberately
+  // application-independent so newly-added routes inherit the same boundary.
+  (req.log ?? logger).error(
+    {
+      err: redactError(err),
+      requestId: req.id,
+      method: req.method,
+      path: req.path,
+    },
+    "Unhandled request error",
+  );
   if (res.headersSent) {
     return;
   }
-  res.status(500).json({ error: err instanceof Error ? err.message : "Internal server error" });
+
+  const candidateStatus =
+    err && typeof err === "object" && "status" in err && typeof err.status === "number"
+      ? err.status
+      : err && typeof err === "object" && "statusCode" in err && typeof err.statusCode === "number"
+        ? err.statusCode
+        : 500;
+  const status = Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus < 500
+    ? candidateStatus
+    : 500;
+  const isBodyParserError =
+    err instanceof SyntaxError &&
+    err && typeof err === "object" &&
+    "body" in err;
+  const safeMessage =
+    status === 413
+      ? "Request body too large"
+      : isBodyParserError
+        ? "Invalid JSON request body"
+        : status === 401
+          ? "Not authenticated"
+          : status === 403
+            ? "Forbidden"
+            : status === 404
+              ? "Not found"
+              : status === 405
+                ? "Method not allowed"
+                : status === 409
+                  ? "Conflict"
+                  : status === 422
+                    ? "Validation failed"
+                    : status >= 400 && status < 500
+                      ? "Invalid request"
+                      : "Internal server error";
+  res.status(status).json({ error: safeMessage });
 };
 app.use(errorHandler);
 

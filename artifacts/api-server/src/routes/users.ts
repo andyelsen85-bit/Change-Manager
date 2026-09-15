@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, eq, ilike, or } from "drizzle-orm";
+import { and, eq, ilike, or, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -7,11 +7,14 @@ import {
   notificationPreferencesTable,
 } from "@workspace/db";
 import { hashPassword, requireAuth, requireAdmin } from "../lib/auth";
+import { revokeUserSessions } from "../lib/session";
 import { audit } from "../lib/audit";
 import { NOTIFICATION_EVENTS } from "../lib/events";
 import { lookupLdapUser, searchLdapUsers } from "../lib/ldap";
 
 const router: IRouter = Router();
+const MAX_USERNAME_LENGTH = 254;
+const MAX_PASSWORD_LENGTH = 1_024;
 
 async function userToDto(u: typeof usersTable.$inferSelect) {
   const roleRows = await db
@@ -96,7 +99,7 @@ router.get("/users", requireAuth, async (req, res): Promise<void> => {
 // what AD already knows. Service-bind only — never asks for the user password.
 router.post("/users/ldap-lookup", requireAdmin, async (req, res): Promise<void> => {
   const { username } = req.body ?? {};
-  if (typeof username !== "string" || !username.trim()) {
+  if (typeof username !== "string" || !username.trim() || username.length > MAX_USERNAME_LENGTH) {
     res.status(400).json({ error: "username required" });
     return;
   }
@@ -105,8 +108,6 @@ router.post("/users/ldap-lookup", requireAdmin, async (req, res): Promise<void> 
     res.status(r.stage === "search" ? 404 : 400).json({
       error: r.reason,
       stage: r.stage,
-      code: r.code,
-      details: r.details,
     });
     return;
   }
@@ -143,8 +144,12 @@ router.get("/users/ldap-search", requireAuth, async (req, res): Promise<void> =>
 
 router.post("/users", requireAdmin, async (req, res): Promise<void> => {
   const { username, email, fullName, password, source, isAdmin, deputyUserId, roles } = req.body ?? {};
-  if (typeof username !== "string" || !username.trim()) {
+  if (typeof username !== "string" || !username.trim() || username.length > MAX_USERNAME_LENGTH) {
     res.status(400).json({ error: "username required" });
+    return;
+  }
+  if (typeof password === "string" && password.length > MAX_PASSWORD_LENGTH) {
+    res.status(400).json({ error: "Password is too long" });
     return;
   }
   const src = source === "ldap" ? "ldap" : "local";
@@ -160,8 +165,6 @@ router.post("/users", requireAdmin, async (req, res): Promise<void> => {
       res.status(r.stage === "search" ? 404 : 400).json({
         error: r.reason,
         stage: r.stage,
-        code: r.code,
-        details: r.details,
       });
       return;
     }
@@ -269,10 +272,28 @@ router.patch("/users/:id", requireAdmin, async (req, res): Promise<void> => {
   if (typeof notificationsEnabled === "boolean") updates.notificationsEnabled = notificationsEnabled;
   if (deputyUserId === null) updates.deputyUserId = null;
   else if (typeof deputyUserId === "number") updates.deputyUserId = deputyUserId;
+  if (typeof password === "string" && password.length > MAX_PASSWORD_LENGTH) {
+    res.status(400).json({ error: "Password is too long" });
+    return;
+  }
   if (typeof password === "string" && password.length >= 8) {
     updates.passwordHash = await hashPassword(password);
   }
-  const [updated] = await db.update(usersTable).set(updates).where(eq(usersTable.id, id)).returning();
+  const passwordChanged = typeof updates.passwordHash === "string";
+  const generationChanged = passwordChanged || updates.isActive === false;
+  const updateSet = generationChanged
+    ? { ...updates, sessionGeneration: sql`${usersTable.sessionGeneration} + 1` }
+    : updates;
+  const [updated] = await db.update(usersTable).set(updateSet).where(eq(usersTable.id, id)).returning();
+  if (generationChanged && req.session?.uid === id && updated?.sessionGeneration !== undefined) {
+    req.session.generation = updated.sessionGeneration;
+    await new Promise<void>((resolve, reject) => {
+      req.session!.save((err) => (err ? reject(err) : resolve()));
+    });
+  }
+  if (generationChanged) {
+    await revokeUserSessions(id);
+  }
   if (Array.isArray(roles)) {
     await db.delete(roleAssignmentsTable).where(eq(roleAssignmentsTable.userId, id));
     for (const r of roles) {
@@ -307,6 +328,7 @@ router.delete("/users/:id", requireAdmin, async (req, res): Promise<void> => {
     res.status(404).json({ error: "User not found" });
     return;
   }
+  await revokeUserSessions(id);
   await db.delete(usersTable).where(eq(usersTable.id, id));
   await audit(req, {
     action: "user.deleted",

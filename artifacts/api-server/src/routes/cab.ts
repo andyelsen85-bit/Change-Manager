@@ -18,6 +18,7 @@ import { audit } from "../lib/audit";
 import { buildCabIcs } from "../lib/ics";
 import { buildCabAgendaPdf, buildCabResultsPdf } from "../lib/agenda-pdf";
 import { notify, getSmtp, getUserEmails } from "../lib/email";
+import { logger } from "../lib/logger";
 
 // Format a date for emails as dd/MM/yyyy HH:mm in 24-hour time. We do
 // the formatting manually rather than via toLocaleString("en-GB") because
@@ -764,7 +765,7 @@ router.post("/cab-meetings/:id/send-agenda", requireCabManager, async (req, res)
   try {
     pdf = await buildCabAgendaPdf(id);
   } catch (err) {
-    console.error(`Failed to build agenda PDF for meeting ${id}; sending agenda without attachment`, err);
+    logger.warn({ err, meetingId: id }, "Failed to build agenda PDF; sending agenda without attachment");
   }
 
   const result = await notify({
@@ -1085,7 +1086,7 @@ router.post("/cab-meetings/:id/complete", requireCabManager, async (req, res): P
       });
     }
   } catch (err) {
-    console.error(`Failed to send CAB results for meeting ${id}`, err);
+    logger.warn({ err, meetingId: id }, "Failed to send CAB results");
   }
   res.json({ ...(await expandMeeting(updated)), resultsMail: mailResult });
 });

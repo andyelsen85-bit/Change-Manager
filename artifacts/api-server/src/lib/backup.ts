@@ -61,11 +61,32 @@ const TABLES_OPTIONAL = new Set<string>([
   "pentest_attachments",
 ]);
 
+// These tables are deliberately operational and are never part of a backup
+// payload. A restore must invalidate every persisted application session
+// before replacing users, and must not carry login-throttle state between
+// environments.
+const RESTORE_INVALIDATION_TABLES = ["user_sessions", "auth_login_throttle"] as const;
+const MAX_SESSION_GENERATION = 2_147_483_647;
+
 export type BackupPayload = {
   version: number;
   exportedAt: string;
   tables: Record<string, Array<Record<string, unknown>>>;
 };
+
+/**
+ * Validation failures are safe to show to an administrator. Keeping a
+ * distinct type prevents the restore route from deciding whether arbitrary
+ * exception text is suitable for an API response.
+ */
+export class BackupValidationError extends Error {
+  readonly isBackupValidationError = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "BackupValidationError";
+  }
+}
 
 export async function exportAll(): Promise<BackupPayload> {
   const tables: Record<string, Array<Record<string, unknown>>> = {};
@@ -87,19 +108,30 @@ export async function exportAll(): Promise<BackupPayload> {
 }
 
 function validate(payload: unknown): asserts payload is BackupPayload {
-  if (!payload || typeof payload !== "object") throw new Error("Backup payload must be an object");
+  if (!payload || typeof payload !== "object") throw new BackupValidationError("Backup payload must be an object");
   const p = payload as Record<string, unknown>;
-  const version = typeof p.version === "number" ? p.version : Number(p.version);
+  const version =
+    typeof p.version === "number"
+      ? p.version
+      : typeof p.version === "string"
+        ? Number(p.version)
+        : Number.NaN;
   if (!Number.isFinite(version) || version < BACKUP_MIN_SUPPORTED_VERSION || version > BACKUP_VERSION) {
-    throw new Error(
-      `Unsupported backup version ${String(p.version)} (supported: ${BACKUP_MIN_SUPPORTED_VERSION}–${BACKUP_VERSION})`,
+    throw new BackupValidationError(
+      `Unsupported backup version ${
+        Number.isFinite(version) ? version : "unknown"
+      } (supported: ${BACKUP_MIN_SUPPORTED_VERSION}–${BACKUP_VERSION})`,
     );
   }
-  if (!p.tables || typeof p.tables !== "object") throw new Error("Backup payload missing 'tables' object");
+  if (!p.tables || typeof p.tables !== "object") {
+    throw new BackupValidationError("Backup payload missing 'tables' object");
+  }
   const tables = p.tables as Record<string, unknown>;
   for (const t of TABLES) {
     if (TABLES_OPTIONAL.has(t)) continue;
-    if (!Array.isArray(tables[t])) throw new Error(`Backup payload missing rows array for table '${t}'`);
+    if (!Array.isArray(tables[t])) {
+      throw new BackupValidationError(`Backup payload missing rows array for table '${t}'`);
+    }
   }
 }
 
@@ -151,12 +183,50 @@ async function loadLiveColumns(
   return out;
 }
 
+async function deriveRestoreSessionGeneration(client: {
+  query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
+}): Promise<number> {
+  // Lock existing users while deriving the barrier. Password/session
+  // generation updates use the same rows, so they serialize with restore and
+  // cannot race the max-generation calculation.
+  const { rows } = await client.query(
+    `SELECT id, session_generation
+       FROM users
+      FOR UPDATE`,
+  );
+  let maxGeneration = -1;
+  for (const row of rows) {
+    const generation = row.session_generation;
+    if (
+      typeof generation !== "number" ||
+      !Number.isSafeInteger(generation) ||
+      generation < 0 ||
+      generation > MAX_SESSION_GENERATION
+    ) {
+      throw new Error("Cannot restore backup: users.session_generation contains an invalid value");
+    }
+    maxGeneration = Math.max(maxGeneration, generation);
+  }
+  if (maxGeneration >= MAX_SESSION_GENERATION) {
+    throw new Error("Cannot restore backup: users.session_generation would overflow");
+  }
+  return maxGeneration + 1;
+}
+
 export async function importAll(payload: unknown): Promise<{ restored: Record<string, number> }> {
   validate(payload);
   const restored: Record<string, number> = {};
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const restoreSessionGeneration = await deriveRestoreSessionGeneration(client);
+    // Session rows contain numeric user IDs. If they survived a restore, a
+    // cookie from before the restore could authenticate as the user now
+    // occupying the same ID in the imported dataset. Clear both operational
+    // stores in this transaction, before any user rows are replaced.
+    for (const table of RESTORE_INVALIDATION_TABLES) {
+      await client.query(`DELETE FROM ${table}`);
+    }
     await client.query("ALTER TABLE audit_log DISABLE TRIGGER USER");
 
     // Wipe in reverse FK order.
@@ -165,6 +235,10 @@ export async function importAll(payload: unknown): Promise<{ restored: Record<st
     }
 
     const liveCols = await loadLiveColumns(client);
+    const userRows = (payload.tables.users ?? []) as Array<Record<string, unknown>>;
+    if (userRows.length > 0 && !liveCols.users?.has("session_generation")) {
+      throw new Error("Cannot restore backup: users.session_generation column is unavailable");
+    }
 
     for (const t of TABLES) {
       const rows = (payload.tables[t] ?? []) as Array<Record<string, unknown>>;
@@ -174,11 +248,19 @@ export async function importAll(payload: unknown): Promise<{ restored: Record<st
         // Drop any column from the backup that the live schema no longer
         // recognises (e.g. legacy `in_app_enabled`). This keeps older
         // backups importable across schema migrations.
-        const cols = Object.keys(row).filter((c) => allowed.has(c));
+        // Never trust a generation supplied by a backup. Every restored user
+        // receives one barrier generation that is greater than every
+        // pre-restore user generation.
+        const cols = Object.keys(row).filter(
+          (c) => allowed.has(c) && !(t === "users" && c === "session_generation"),
+        );
+        if (t === "users" && allowed.has("session_generation")) cols.push("session_generation");
         if (cols.length === 0) continue;
         const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
         const colList = cols.map((c) => `"${c}"`).join(", ");
-        const values = cols.map((c) => row[c]);
+        const values = cols.map((c) =>
+          t === "users" && c === "session_generation" ? restoreSessionGeneration : row[c],
+        );
         await client.query(`INSERT INTO ${t} (${colList}) VALUES (${placeholders})`, values);
       }
     }

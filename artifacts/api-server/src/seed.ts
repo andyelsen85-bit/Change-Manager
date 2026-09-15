@@ -269,7 +269,11 @@ export async function runSeed(): Promise<void> {
     // never touches an existing admin row.
     await db
       .update(usersTable)
-      .set({ passwordHash: null, mustChangePassword: false })
+      .set({
+        passwordHash: null,
+        mustChangePassword: false,
+        sessionGeneration: sql`${usersTable.sessionGeneration} + 1`,
+      })
       .where(eq(usersTable.id, adminExisting.id));
     logger.warn(
       { adminId: adminExisting.id },

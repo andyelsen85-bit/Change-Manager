@@ -33,6 +33,48 @@ const router: IRouter = Router();
 
 const KEY = "global";
 
+const SAFE_CSR_VALIDATION_ERRORS = new Set([
+  "commonName is required",
+  "country must be a 2-letter ISO code (e.g. 'US', 'DE')",
+  "keyBits must be 2048, 3072, or 4096",
+]);
+
+const SAFE_LDAP_FAILURE_MESSAGES = new Set([
+  "LDAP disabled",
+  "LDAP not configured (URL and Base DN required)",
+  "LDAP library missing",
+  "Could not initialise LDAP client",
+  "Could not reach LDAP server",
+  "LDAP search failed",
+  "LDAP search failed — check Base DN and User filter",
+  "LDAP search returned an error",
+  "Service bind failed",
+  "Service bind failed — check Bind DN and Bind password",
+  "Anonymous bind rejected — your directory likely requires a service account",
+  "User not found — your User filter matched zero entries under the Base DN",
+  "Invalid credentials — username found, but password rejected",
+  "Lost connection while binding as the user",
+]);
+
+function publicLdapTestResult(result: Awaited<ReturnType<typeof testLdapConnection>>) {
+  const code =
+    typeof result.code === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(result.code)
+      ? result.code
+      : undefined;
+  const message = result.success
+    ? result.message
+    : SAFE_LDAP_FAILURE_MESSAGES.has(result.message)
+      ? result.message
+      : "LDAP connection test failed";
+  return {
+    success: result.success,
+    stage: result.stage,
+    message,
+    ...(code ? { code } : {}),
+    ...(result.success && result.userDn ? { userDn: result.userDn } : {}),
+  };
+}
+
 function maskSmtp(row: typeof smtpSettingsTable.$inferSelect | undefined) {
   if (!row) {
     return {
@@ -108,8 +150,8 @@ router.put("/settings/smtp", requireAdmin, async (req, res): Promise<void> => {
 });
 
 router.post("/settings/smtp/test", requireAdmin, async (req, res): Promise<void> => {
-  const to = (req.body ?? {}).to;
-  if (typeof to !== "string" || !to.includes("@")) {
+  const to = typeof (req.body ?? {}).to === "string" ? (req.body as { to: string }).to.trim() : "";
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
     res.status(400).json({ error: "Valid recipient email required" });
     return;
   }
@@ -118,8 +160,8 @@ router.post("/settings/smtp/test", requireAdmin, async (req, res): Promise<void>
     action: "settings.smtp_tested",
     entityType: "settings",
     entityId: null,
-    summary: `SMTP test → ${to}: ${r.success ? "success" : "failed"}`,
-    after: r,
+    summary: `SMTP test: ${r.success ? "success" : "failed"}`,
+    after: { success: r.success },
   });
   res.json(r);
 });
@@ -221,23 +263,20 @@ router.post("/settings/ldap/test", requireAdmin, async (req, res): Promise<void>
     return;
   }
   const r = await testLdapConnection(username, password);
+  const publicResult = publicLdapTestResult(r);
   await audit(req, {
     action: "settings.ldap_tested",
     entityType: "settings",
     entityId: null,
-    summary: `LDAP test for ${username}: ${r.success ? "success" : `failed at ${r.stage}`}`,
-    // Persist the full diagnostic so admins can review historical test
-    // attempts from the audit log without re-running the bind.
+    summary: `LDAP test: ${publicResult.success ? "success" : `failed at ${publicResult.stage}`}`,
+    // Keep provider responses, filters, DNs, and other diagnostics out of
+    // durable audit history. The server log records only redacted details.
     after: {
-      success: r.success,
-      stage: r.stage,
-      message: r.message,
-      code: r.code,
-      details: r.details,
-      userDn: r.userDn,
+      success: publicResult.success,
+      stage: publicResult.stage,
     },
   });
-  res.json(r);
+  res.json(publicResult);
 });
 
 function maskAdfs(row: typeof adfsSettingsTable.$inferSelect | undefined) {
@@ -405,7 +444,11 @@ router.post("/settings/ssl/csr", requireAdmin, async (req, res): Promise<void> =
       keyBits: b.keyBits === 3072 || b.keyBits === 4096 ? b.keyBits : 2048,
     });
   } catch (err) {
-    res.status(400).json({ error: err instanceof Error ? err.message : "Invalid CSR input" });
+    const message =
+      err instanceof Error && SAFE_CSR_VALIDATION_ERRORS.has(err.message)
+        ? err.message
+        : "Invalid CSR input";
+    res.status(400).json({ error: message });
     return;
   }
   // Persist the freshly-generated private key on the SSL settings row so that

@@ -7,3 +7,4 @@
 - [pnpm lockfile drizzle split](pnpm-lockfile-drizzle-split.md) — temp add/remove of a dep in one package can split drizzle-orm peer instances; fix by reverting pnpm-lock.yaml + pnpm install.
 - [Potential standard promotion](potential-standard-promotion.md) — promotion counts = normal+completed+not-deleted only; links only to disabled templates; track switch clears the link.
 - [ServiceDesk Plus integration](sdp-integration.md) — on-prem SD+ webhook + resolve/reject write-back: header-only secret, CSRF exemption, partial unique index for idempotency, sync hooks in 2 places.
+- [Security state testing](security-state-testing.md) — mocked SQL cannot verify lockout recovery, window rollover, or revocation races; use scoped real-PostgreSQL transition tests.

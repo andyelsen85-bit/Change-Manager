@@ -90,8 +90,12 @@ export async function testSdpConnection(): Promise<{ success: boolean; message: 
     if (r.ok) return { success: true, message: "Connected to ServiceDesk Plus successfully." };
     if (r.status === 401 || r.status === 403)
       return { success: false, message: `Authentication failed (HTTP ${r.status}). Check the technician API key.` };
-    return { success: false, message: `SD+ responded with HTTP ${r.status}: ${r.body.slice(0, 300)}` };
+    // The provider body may contain internal hostnames, ticket data, or
+    // authentication diagnostics. Return only the stable status; the body is
+    // never part of the settings API response.
+    return { success: false, message: `SD+ responded with HTTP ${r.status}` };
   } catch (err) {
+    logger.warn({ err }, "SD+ connection test failed");
     return { success: false, message: `Connection failed: ${describeFetchError(err)}` };
   }
 }
@@ -99,21 +103,29 @@ export async function testSdpConnection(): Promise<{ success: boolean; message: 
 // undici wraps network errors in a generic "fetch failed" TypeError; the
 // actionable detail (DNS, timeout, TLS, refused) lives in err.cause.
 function describeFetchError(err: unknown): string {
-  if (!(err instanceof Error)) return String(err);
+  if (!(err instanceof Error)) return "Unable to connect to ServiceDesk Plus.";
   const cause = (err as Error & { cause?: unknown }).cause;
-  const causeMsg =
+  const causeMessage =
     cause instanceof Error
-      ? `${(cause as NodeJS.ErrnoException).code ? `[${(cause as NodeJS.ErrnoException).code}] ` : ""}${cause.message}`
+      ? `${(cause as NodeJS.ErrnoException).code ?? ""} ${cause.message}`
       : cause
-        ? String(cause)
+        ? "network error"
         : "";
+  const classificationSource = `${err.name} ${err.message} ${causeMessage}`;
   if (err.name === "AbortError") return "Timed out after 15s. The server did not respond — check that it is reachable from the internet.";
-  let msg = causeMsg ? `${err.message} — ${causeMsg}` : err.message;
-  if (/ENOTFOUND/.test(msg)) msg += ". The hostname could not be resolved from Change-it's network — internal-only DNS names are not reachable from here.";
-  else if (/ECONNREFUSED/.test(msg)) msg += ". The server refused the connection — check the port and that the SD+ API is exposed externally.";
-  else if (/ETIMEDOUT|ECONNRESET|UND_ERR_CONNECT_TIMEOUT/.test(msg)) msg += ". No response from the server — likely blocked by a firewall or not reachable from the internet.";
-  else if (/certificate|CERT|self[- ]signed|unable to verify/i.test(msg)) msg += ". TLS certificate problem — if SD+ uses an internal/self-signed certificate, enable the self-signed certificate toggle.";
-  return msg;
+  if (/ENOTFOUND/.test(classificationSource)) {
+    return "The hostname could not be resolved from Change-it's network — internal-only DNS names are not reachable from here.";
+  }
+  if (/ECONNREFUSED/.test(classificationSource)) {
+    return "The server refused the connection — check the port and that the SD+ API is exposed externally.";
+  }
+  if (/ETIMEDOUT|ECONNRESET|UND_ERR_CONNECT_TIMEOUT/.test(classificationSource)) {
+    return "No response from the server — likely blocked by a firewall or not reachable from the internet.";
+  }
+  if (/certificate|CERT|self[- ]signed|unable to verify/i.test(classificationSource)) {
+    return "TLS certificate problem — if SD+ uses an internal/self-signed certificate, enable the self-signed certificate toggle.";
+  }
+  return "Unable to connect to ServiceDesk Plus. Check the URL, network path, and TLS settings.";
 }
 
 // Timeline of the change's lifecycle taken from the audit log — pushed into
@@ -153,9 +165,9 @@ export async function sdpAddBackLinkNote(requestId: string, change: ChangeRow): 
       method: "POST",
       inputData: { note: { description, show_to_requester: false } },
     });
-    if (!r.ok) logger.warn({ requestId, status: r.status, body: r.body.slice(0, 300) }, "SD+ back-link note failed");
+    if (!r.ok) logger.warn({ requestId, status: r.status, responseBodyPresent: !!r.body }, "SD+ back-link note failed");
   } catch (err) {
-    logger.warn({ requestId, err: String(err) }, "SD+ back-link note failed");
+    logger.warn({ requestId, err }, "SD+ back-link note failed");
   }
 }
 
@@ -178,12 +190,12 @@ export async function sdpSetInitialStatus(requestId: string): Promise<void> {
       logger.info({ requestId, statusName }, "SD+ request status set on change creation");
     } else {
       logger.warn(
-        { requestId, statusName, status: r.status, body: r.body.slice(0, 300) },
+        { requestId, statusName, status: r.status, responseBodyPresent: !!r.body },
         "SD+ on-create status update failed — check that the status exists in SD+ (exact name match)",
       );
     }
   } catch (err) {
-    logger.warn({ requestId, statusName, err: String(err) }, "SD+ on-create status update failed");
+    logger.warn({ requestId, statusName, err }, "SD+ on-create status update failed");
   }
 }
 
@@ -233,12 +245,17 @@ export async function sdpSyncTerminalState(
       return { success: true, message: `SD+ request ${change.sdpRequestId} set to ${outcome}.` };
     }
     logger.warn(
-      { changeId: change.id, sdpRequestId: change.sdpRequestId, status: r.status, body: r.body.slice(0, 500) },
+      {
+        changeId: change.id,
+        sdpRequestId: change.sdpRequestId,
+        status: r.status,
+        responseBodyPresent: !!r.body,
+      },
       "SD+ terminal-state sync failed",
     );
     return { success: false, message: `SD+ responded with HTTP ${r.status}` };
   } catch (err) {
-    logger.warn({ changeId: change.id, err: String(err) }, "SD+ terminal-state sync failed");
-    return { success: false, message: err instanceof Error ? err.message : String(err) };
+    logger.warn({ changeId: change.id, err }, "SD+ terminal-state sync failed");
+    return { success: false, message: "Unable to sync the ServiceDesk Plus request." };
   }
 }

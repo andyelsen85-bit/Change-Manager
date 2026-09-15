@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Copy, Download, FileSignature, Loader2, Sa
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { fmtDate, fmtDateTime } from "@/lib/format";
+import { useAuth } from "@/lib/auth-context";
 import type { CategoryItem, LdapSettings, LdapTestResult, PentestTestType, SdpSettings, SmtpSettings, SslSettings } from "@/lib/types";
 import { AdfsSettingsPanel } from "@/components/AdfsSettingsPanel";
 import { Button } from "@/components/ui/button";
@@ -1553,6 +1554,7 @@ function NotificationRoutingEditor() {
 }
 
 function BackupPanel() {
+  const { logout } = useAuth();
   const [downloading, setDownloading] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -1592,12 +1594,13 @@ function BackupPanel() {
     setRestoring(true);
     try {
       await api.post<{ ok: boolean; restored: Record<string, number> }>("/backup/restore", pendingFile.payload);
-      toast.success("Database restored. Reloading…");
       setConfirmOpen(false);
       setPendingFile(null);
-      // Cached queries reflect the OLD data; force a full reload to pick up
-      // the new dataset and (likely) re-authenticate against restored users.
-      setTimeout(() => window.location.reload(), 800);
+      // Restore invalidates every persisted session and the API clears this
+      // browser's cookie. Clear the React auth state too, then force the
+      // operator through login rather than briefly rendering stale data.
+      await logout();
+      window.location.replace("/login");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Restore failed");
     } finally {
@@ -1616,7 +1619,15 @@ function BackupPanel() {
             restore your environment.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          <Alert variant="destructive" data-testid="alert-backup-encryption">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              This export is sensitive and downloads as plaintext JSON. Immediately encrypt it with an approved external
+              tool such as <span className="font-mono">age</span> or GPG, store the encrypted file only, and securely
+              delete the plaintext. Change-it does not encrypt or manage a backup key; see <span className="font-medium">docs/backup-security.md</span> for safe commands.
+            </AlertDescription>
+          </Alert>
           <Button onClick={handleDownload} disabled={downloading} data-testid="button-backup-download">
             {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
             Download backup

@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS template_settings (
 INSERT INTO template_settings (key) VALUES ('global')
   ON CONFLICT (key) DO NOTHING;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS session_generation integer NOT NULL DEFAULT 0;
 
 -- Notification batching: queue + per-install configuration. Created here so a
 -- fresh boot after pulling the new schema does not require running drizzle-kit
@@ -152,6 +153,38 @@ CREATE TABLE IF NOT EXISTS adfs_auth_transactions (
 );
 CREATE INDEX IF NOT EXISTS adfs_auth_transactions_expiry_idx
   ON adfs_auth_transactions (expires_at);
+
+-- PostgreSQL-backed express-session store. connect-pg-simple does not create
+-- this table at runtime; keeping it in the startup bootstrap makes a fresh
+-- deployment self-healing while retaining a single central revocation store.
+CREATE TABLE IF NOT EXISTS user_sessions (
+  sid    varchar NOT NULL PRIMARY KEY,
+  sess   json NOT NULL,
+  expire timestamp(6) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS user_sessions_expire_idx ON user_sessions (expire);
+CREATE INDEX IF NOT EXISTS user_sessions_uid_idx ON user_sessions ((sess->>'uid'));
+
+-- Bounded, shared login-attempt counters keyed by SHA-256 source-IP and
+-- identity bucket hashes. The application updates both the per-identity and
+-- per-IP aggregate rows atomically with one UPSERT, so arbitrary credentials
+-- are never retained in this table.
+CREATE TABLE IF NOT EXISTS auth_login_throttle (
+  ip_address    text NOT NULL,
+  identity      text NOT NULL,
+  failure_count integer NOT NULL DEFAULT 0,
+  locked_until  timestamptz,
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  window_started_at timestamptz NOT NULL DEFAULT now(),
+  lock_level    integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (ip_address, identity)
+);
+ALTER TABLE auth_login_throttle
+  ADD COLUMN IF NOT EXISTS window_started_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE auth_login_throttle
+  ADD COLUMN IF NOT EXISTS lock_level integer NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS auth_login_throttle_updated_idx
+  ON auth_login_throttle (updated_at);
 
 -- External changes: third-party maintenance windows shown on the Change
 -- Plannings calendar for visibility only (no workflow/approvals).

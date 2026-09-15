@@ -1,9 +1,10 @@
-import app from "./app";
 import { logger } from "./lib/logger";
-import { runSeed } from "./seed";
-import { applyDbConstraints } from "./lib/db-bootstrap";
-import { startNotificationWorker } from "./lib/notification-worker";
-import { startPirReminderWorker } from "./lib/pir-reminder";
+import { validateProductionSecrets } from "./lib/secret-validation";
+
+// Fail closed before opening the listener or starting background workers. The
+// validator is intentionally kept in the API entrypoint so importing app.ts in
+// tests and local tooling remains side-effect free.
+validateProductionSecrets();
 
 const rawPort = process.env["PORT"];
 
@@ -16,6 +17,18 @@ const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
+
+// Load the application and workers only after production secrets have passed
+// validation. This prevents a transitive module import from using a weak
+// signing or encryption key before the startup guard can fail closed.
+const [{ default: app }, { runSeed }, { applyDbConstraints }, { startNotificationWorker }, { startPirReminderWorker }] =
+  await Promise.all([
+    import("./app"),
+    import("./seed"),
+    import("./lib/db-bootstrap"),
+    import("./lib/notification-worker"),
+    import("./lib/pir-reminder"),
+  ]);
 
 // The API server always speaks plain HTTP. TLS termination is handled by
 // the nginx sidecar in front of it (see entrypoint-web). The cert/key

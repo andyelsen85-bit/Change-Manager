@@ -1,7 +1,8 @@
 # Change-it
 
 A production-ready, **ITIL v4-aligned IT Change Management** web application
-("Change-it"). Self-hostable in a single `docker compose up`, with PostgreSQL,
+("Change-it"). Self-hostable for local/test use with a single
+`docker compose up`, with PostgreSQL,
 an Express 5 API, a React + Vite SPA, and an Nginx reverse proxy that
 auto-provisions a self-signed TLS certificate on first boot.
 
@@ -11,6 +12,11 @@ auto-provisions a self-signed TLS certificate on first boot.
 > their own status workflow · **Failure-probability risk matrix** · Immutable
 > audit log · Local + LDAP auth · SMTP, LDAP, SSL settings managed in-app ·
 > Full-database backup & restore.
+
+Production deployment and security-remediation procedures are documented in
+the [operations runbook](docs/operations.md), the
+[security remediation assessment](docs/security-remediation.md), and the
+[threat model](threat_model.md).
 
 ---
 
@@ -38,6 +44,8 @@ auto-provisions a self-signed TLS certificate on first boot.
 - [OpenAPI &amp; codegen](#openapi--codegen)
 - [Database management](#database-management)
 - [Build, test &amp; release](#build-test--release)
+- [Production operations](docs/operations.md)
+- [Security remediation assessment](docs/security-remediation.md)
 - [Project scripts](#project-scripts)
 - [Security model &amp; hardening](#security-model--hardening)
 - [Troubleshooting](#troubleshooting)
@@ -95,8 +103,10 @@ but not required to reach the Post-Implementation Review phase.
   status.
 - **Notifications** — per-user, per-event email preferences with an admin master-switch on each user account; in-app notifications were removed in v2 of the backup format.
 - **Auth** — local users (bcrypt) + LDAP, with optional AD FS OIDC sign-in.
-  JWT cookie session with CSRF double-submit token. One-time `/setup` wizard
-  for the first admin password. See the [AD FS setup guide](docs/adfs.md).
+  PostgreSQL-backed `express-session` cookies with a 12-hour lifetime,
+  session-ID regeneration on authentication, central logout/revocation, and
+  CSRF double-submit protection. One-time `/setup` wizard for the first admin
+  password. See the [AD FS setup guide](docs/adfs.md).
 - **Admin Settings** — SMTP, LDAP (with diagnostics + presets for OpenLDAP /
   AD sAMAccountName / AD UPN), SSL/TLS upload + in-app CSR generation, session
   & lockout timeouts, Backup & Restore.
@@ -147,7 +157,7 @@ but not required to reach the Post-Implementation Review phase.
 | ---------------- | ----------------------------------------------------------------------- |
 | Monorepo         | **pnpm workspaces** (`pnpm-workspace.yaml`)                             |
 | Language         | **TypeScript 5.9**                                                       |
-| Runtime          | **Node.js 24** (Alpine in Docker)                                        |
+| Runtime          | **Node.js 24** (Debian bookworm-slim API image)                          |
 | API              | **Express 5**, pino logger, jsonwebtoken, bcryptjs, ldapjs, nodemailer, ics |
 | Database         | **PostgreSQL 16** + **Drizzle ORM** + drizzle-zod                        |
 | Validation       | **Zod** (`zod/v4`)                                                       |
@@ -169,7 +179,7 @@ artifacts/
       index.ts           # boot: applyDbConstraints → seed → listen
       seed.ts            # initial roles, templates, admin user
       lib/
-        auth.ts          # JWT cookies + requireAuth / requireAdmin
+        auth.ts          # session cookies + requireAuth / requireAdmin
         ldap.ts          # connect, service-bind, search, user-bind, parse
         smtp.ts          # nodemailer transport + templated emails
         state-machine.ts # ChangeTrack / ChangeStatus + transition graphs
@@ -193,14 +203,14 @@ lib/
   api-zod/           # generated Zod schemas + React Query hooks
 docker/
   nginx.conf         # SPA + /api proxy + TLS config
-  entrypoint-api.sh  # auto-generates JWT_SECRET, runs migrations, starts node
+  entrypoint-api.sh  # validates secrets, runs migrations, starts node
   entrypoint-web.sh  # auto-generates self-signed TLS cert if none supplied
 scripts/
-  init-env.sh        # generates .env with strong random POSTGRES_PASSWORD + JWT_SECRET
-  up.sh              # init-env + docker compose up + tail logs
+  init-env.sh        # explicit --fresh-install local bootstrap only
+  up.sh              # local/test compose wrapper; does not rotate keys
   post-merge.sh      # post-merge dependency / migration sync
 Dockerfile           # multi-stage: builder → api / web
-docker-compose.yml   # db + migrate + api + web services
+docker-compose.yml   # local/test db + migrate + api + web services
 ```
 
 ---
@@ -210,31 +220,31 @@ docker-compose.yml   # db + migrate + api + web services
 ```bash
 git clone <this repo>
 cd <repo>
+./scripts/init-env.sh --fresh-install
 docker compose up -d --build
 ```
 
-This works with no pre-bootstrap: `POSTGRES_PASSWORD` defaults to an
-internal-only value (the `db` service has no exposed port — it is only
-reachable from inside the docker network) and the API entrypoint
-auto-generates a strong `JWT_SECRET` on first boot and persists it to the
-`api_secrets` named volume so existing sessions survive restarts.
+This quick start is for a new local/test checkout with no `.env`. The
+`--fresh-install` flag explicitly authorizes generation of independent strong
+local secrets; do not copy its `.env` into a production deployment. Without
+that flag, initialization is fail-safe: it does not generate or replace a
+missing key. Restore the exact existing keys first, especially
+`APP_ENCRYPTION_KEY`, before starting an existing deployment.
 
-For production, override secrets explicitly in a `.env` at the repo root:
-
-```bash
-./scripts/init-env.sh           # generates .env with strong random secrets
-# ... or copy .env.example to .env and edit by hand:
-#   POSTGRES_PASSWORD=$(openssl rand -hex 24)
-#   JWT_SECRET=$(openssl rand -hex 64)
-docker compose up -d --build
-```
-
-The lazy wrapper `./scripts/up.sh` runs `init-env.sh` (if no `.env` exists)
-then `docker compose up -d --build` and tails the logs.
+For production, do not use the Compose `db` service or its development
+defaults. Set `DATABASE_URL` to CHdN's externally managed, centrally backed-up
+and monitored PostgreSQL service, provide the preferred `SESSION_SECRET` (or
+the explicitly retained compatibility `JWT_SECRET`) and independent
+`APP_ENCRYPTION_KEY` through the approved secret manager, and follow the
+[operations runbook](docs/operations.md). The lazy wrapper
+`./scripts/up.sh` is intended for local/test use and tails the logs after
+starting Compose.
 
 The compose stack:
 
-1. Starts **Postgres 16** (`db`) — internal-only, no host port mapping.
+1. Starts **Postgres 16** (`db`) for local/test use — internal-only, no host
+   port mapping. Production uses the externally managed PostgreSQL service,
+   not this container.
 2. Runs the **migrate** container once → `pnpm --filter @workspace/db run push`.
 3. Starts the **api** container on port `8080` (internal only).
 4. Starts the **web** container (Nginx) on host ports `80` / `443`.
@@ -301,8 +311,10 @@ The Vite dev server proxies `/api/*` to the API automatically, so visiting
 | ----------------------- | -------------------------------- | ---------------------------------------- |
 | `POSTGRES_DB`           | `change_mgmt`                    | Database name                            |
 | `POSTGRES_USER`         | `change_mgmt`                    | DB user                                  |
-| `POSTGRES_PASSWORD`     | `change_mgmt_internal_only`      | Override in production                   |
-| `JWT_SECRET`            | (auto-generated, persisted)      | 64-byte hex recommended                  |
+| `POSTGRES_PASSWORD`     | generated by `init-env.sh --fresh-install` | At least 32 random bytes; local/test only |
+| `DATABASE_URL`          | (empty for local Compose)        | Production CHdN-managed PostgreSQL URL   |
+| `JWT_SECRET`            | generated by `init-env.sh --fresh-install` | Compatibility secret; at least 32 random bytes when used |
+| `SESSION_SECRET`        | generated by `init-env.sh --fresh-install` | Preferred session secret; at least 32 random bytes |
 | `LOG_LEVEL`             | `info`                           | pino: `trace`/`debug`/`info`/`warn`/`error`/`fatal` |
 | `HTTP_PORT`             | `80`                             | Host port for HTTP                       |
 | `HTTPS_PORT`            | `443`                            | Host port for HTTPS                      |
@@ -316,12 +328,13 @@ The Vite dev server proxies `/api/*` to the API automatically, so visiting
 | ------------------------- | :------: | ------------------------------------------------- |
 | `PORT`                    |   yes    | Listen port (compose sets to `8080`)              |
 | `DATABASE_URL`            |   yes    | `postgresql://user:pass@host:5432/db`             |
-| `JWT_SECRET`              |   yes    | Auto-generated if empty (entrypoint)              |
+| `SESSION_SECRET`          |   yes    | Preferred session secret; at least 32 random bytes |
+| `JWT_SECRET`              |          | Explicit compatibility name when `SESSION_SECRET` is not used; at least 32 random bytes |
 | `NODE_ENV`                |          | `development` / `production`                      |
 | `LOG_LEVEL`               |          | pino level                                        |
 | `INITIAL_ADMIN_PASSWORD`  |          | If set on first boot, skips the setup wizard      |
 | `RESET_ADMIN_PASSWORD`    |          | `1` clears admin password & re-enables `/setup`   |
-| `APP_ENCRYPTION_KEY`      |          | Optional dedicated key for SMTP/LDAP secret encryption (falls back to `JWT_SECRET`) |
+| `APP_ENCRYPTION_KEY`      |   yes    | Independent key for SMTP/LDAP secret encryption; at least 32 random bytes; never falls back to `JWT_SECRET` |
 
 Optional AD FS/OIDC variables are documented in the
 [AD FS setup guide](docs/adfs.md#environment-fallbacks). They are deployment
@@ -343,6 +356,7 @@ single source of truth for tables and types. The core tables are:
 | Table                       | Purpose                                                         |
 | --------------------------- | --------------------------------------------------------------- |
 | `users`                     | Local + LDAP users; `is_admin`, `must_change_password`, deputy  |
+| `user_sessions`             | PostgreSQL-backed `express-session` rows; 12-hour expiry and revocation |
 | `roles`                     | Governance role catalogue (`change_manager`, `cab_member`, …)   |
 | `role_assignments`          | Many-to-many user ↔ role with deputy linkage                    |
 | `change_requests`           | Core change record (track, status, risk, impact, owner, …)     |
@@ -454,7 +468,10 @@ Endpoints requiring `requireAdmin` middleware: all of `/api/settings/*`,
 
 - **Local accounts**: bcrypt-hashed password, `users.password_hash`.
 - **LDAP accounts**: `users.source = 'ldap'`, no local password.
-- **Sessions**: HMAC-signed JWT in an HttpOnly cookie (`cm_session`).
+- **Sessions**: `express-session` uses an HttpOnly session cookie and a
+  PostgreSQL-backed store. Sessions expire after 12 hours, authentication
+  regenerates the session ID, and logout destroys the server-side row so
+  revocation is shared by all API replicas.
 - **CSRF**: double-submit cookie. The login endpoint sets a non-HttpOnly
   cookie `cm_csrf` plus a matching value the client must echo as
   `X-CSRF-Token` on every state-changing request. Required on every
@@ -465,8 +482,10 @@ Endpoints requiring `requireAdmin` middleware: all of `/api/settings/*`,
     "CSRF" in the body it transparently calls `/auth/me` to mint a fresh
     cookie and retries once.
 - **Secrets at rest**: SMTP and LDAP bind passwords are encrypted with
-  AES-256-GCM in `lib/secret-crypto.ts` using an HKDF-derived key from
-  `APP_ENCRYPTION_KEY` (or `JWT_SECRET` as fallback).
+  AES-256-GCM in `lib/secret-crypto.ts` using an HKDF-derived key from the
+  independent `APP_ENCRYPTION_KEY`. Production does not fall back to
+  `JWT_SECRET`; preserve the exact existing encryption material before any
+  deployment or rotation.
 
 ### Auth endpoints
 
@@ -617,6 +636,12 @@ SMTP/LDAP secrets). The export reads inside one
 snapshot is logically consistent across tables even under heavy concurrent
 writes.
 
+The JSON export is sensitive even though SMTP/LDAP values are ciphertext.
+Before it leaves the controlled host, follow the mandatory external
+age-encryption, key-handling, retention, and restore procedure in
+[Backup security](docs/backup-security.md). Do not treat an unencrypted
+download, workstation copy, CI artifact, or object-store upload as a backup.
+
 The download is gated by:
 
 1. `requireAdmin` middleware (admin-only).
@@ -646,6 +671,12 @@ audit log of the freshly-restored dataset.
 UI requires the admin to type **`RESTORE`** before the destructive action
 runs and reloads the page on success so cached queries / auth pick up the
 restored data.
+
+Keep encrypted backups only for the approved retention period, restrict
+access to the recovery group, and verify a restore periodically. Preserve the
+application encryption key alongside the approved recovery record (never in
+the backup itself); without the exact key, encrypted settings in a restored
+database may be unrecoverable.
 
 ---
 
@@ -825,8 +856,22 @@ pnpm --filter @workspace/change-mgmt run build  # vite build → dist/
 The multi-stage `Dockerfile` produces:
 
 - `builder` — pnpm install + typecheck + build for both API and frontend.
-- `api` — Node 24 Alpine + the API bundle + entrypoint.
+- `api` — Node 24 Debian bookworm-slim + the API bundle + entrypoint.
 - `web` — Nginx Alpine + the static frontend + entrypoint.
+
+On pushes to `main` and semantic version tags, the pinned
+[image workflow](.github/workflows/build-images.yml) publishes all three
+targets to the verified Nexus registry. It validates that API and web package
+versions match the release tag and emits `main`, the normalized version, and
+`sha-<full commit SHA>` tags. The SHA tag is the immutable content identifier;
+release tags use canonical SemVer (`vX.Y.Z` or `X.Y.Z`, optionally with a
+valid prerelease such as `-rc.1`). SemVer build metadata (`+build`) is
+rejected with a clear validation error because `+` is not compatible with the
+Docker image tag emitted by this workflow.
+configure Nexus to reject overwrites for release and SHA tags. See the
+[operations runbook](docs/operations.md) for private-runner CA and registry
+setup. The repository does not assert that an unconfirmed sibling workflow or
+mirror exists.
 
 ---
 
@@ -834,8 +879,8 @@ The multi-stage `Dockerfile` produces:
 
 | Script                       | Purpose                                                        |
 | ---------------------------- | -------------------------------------------------------------- |
-| `scripts/init-env.sh`        | Generate `.env` with strong random `POSTGRES_PASSWORD` + `JWT_SECRET` |
-| `scripts/up.sh`              | `init-env` (if needed) + `docker compose up -d --build` + tail |
+| `scripts/init-env.sh`        | `--fresh-install` only for a new local `.env`; existing keys are never silently replaced |
+| `scripts/up.sh`              | Local/test Compose wrapper; does not generate or rotate missing production keys |
 | `scripts/post-merge.sh`      | Post-merge dependency / migration sync helper                  |
 
 Top-level pnpm scripts:
@@ -853,31 +898,41 @@ Top-level pnpm scripts:
 - **No default admin password** — first-run wizard forces the operator to
   set one.
 - **Secrets at rest** — SMTP and LDAP bind passwords are encrypted with
-  AES-256-GCM (`secret-crypto.ts`) using a key derived from
-  `APP_ENCRYPTION_KEY` (or `JWT_SECRET`).
+  AES-256-GCM (`secret-crypto.ts`) using a key derived from the independent
+  `APP_ENCRYPTION_KEY`; production never silently falls back to
+  `JWT_SECRET`.
 - **Session cookie** — HttpOnly, Secure (in production), SameSite=Lax,
-  HMAC-signed JWT.
+  backed by a PostgreSQL `express-session` store with a 12-hour lifetime,
+  session-ID regeneration on authentication, and central logout revocation.
 - **CSRF** — double-submit cookie required on every mutating `/api`
   request except `POST /api/auth/login`.
 - **Backup endpoints** — admin-only **and** Origin must equal Host
   (defence-in-depth against credentialed cross-origin reads given the
   global permissive CORS policy used by the SPA).
 - **Audit log** — DB-level triggers prevent UPDATE / DELETE / TRUNCATE.
-- **Postgres** — internal-only by default in compose (no `ports:` mapping).
+- **Postgres** — the Compose `db` service is internal-only and local/test-only
+  (no `ports:` mapping); production uses CHdN's externally managed, centrally
+  backed-up and monitored PostgreSQL service.
 - **TLS by default** — Nginx auto-generates a self-signed cert on first
   boot; drop in your real cert at `./certs/server.{crt,key}` or upload via
   the UI.
 
 Recommended for production:
 
-1. Set strong `POSTGRES_PASSWORD` and `JWT_SECRET` (or let `init-env.sh`
-   generate them).
-2. Set `APP_ENCRYPTION_KEY` to a dedicated key independent of `JWT_SECRET`
-   so rotating session secrets doesn't invalidate stored SMTP/LDAP secrets.
+1. Set `POSTGRES_PASSWORD` (when Compose is used), the preferred
+   `SESSION_SECRET` (or an explicitly retained compatibility `JWT_SECRET`),
+   and `APP_ENCRYPTION_KEY` to independent values of at least 32 random bytes.
+   Never silently generate a replacement for an existing encryption key.
+2. Use the externally managed production PostgreSQL service and complete its
+   approved schema/session bootstrap before starting all API replicas.
 3. Replace the self-signed cert with a real one (file drop or in-app
    upload).
 4. Take regular backups via `GET /api/backup` (cron + a service-account
-   admin) and store them off-host.
+   admin), apply the mandatory external age procedure in
+   [Backup security](docs/backup-security.md), and store them off-host under
+   the approved retention policy.
+5. Follow the [operations runbook](docs/operations.md) for session migration,
+   one-time logout, key preservation, CI image provenance, and rollback.
 
 ---
 

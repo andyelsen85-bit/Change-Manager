@@ -31,6 +31,7 @@ vi.mock("drizzle-orm", () => ({
 import {
   getChangeAccess,
   isPrivilegedAccess,
+  loadFreshSession,
   GOVERNANCE_ROLES,
   type SessionPayload,
 } from "./auth";
@@ -134,5 +135,59 @@ describe("isPrivilegedAccess", () => {
     expect(isPrivilegedAccess("owner")).toBe(false);
     expect(isPrivilegedAccess("assignee")).toBe(false);
     expect(isPrivilegedAccess(null)).toBe(false);
+  });
+});
+
+describe("session generation invalidation", () => {
+  it("rejects and destroys a session minted before a password generation increment", async () => {
+    whereMock.mockResolvedValueOnce([
+      {
+        id: 42,
+        username: "alice",
+        isAdmin: false,
+        isActive: true,
+        mustChangePassword: false,
+        sessionGeneration: 1,
+      },
+    ]);
+    const destroy = vi.fn((callback: (error?: unknown) => void) => callback());
+    const req = {
+      session: {
+        uid: 42,
+        username: "alice",
+        isAdmin: false,
+        generation: 0,
+        destroy,
+      },
+    } as never;
+
+    await expect(loadFreshSession(req)).resolves.toBeNull();
+    expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a restored uid whose account now has a different username", async () => {
+    whereMock.mockResolvedValueOnce([
+      {
+        id: 42,
+        username: "different-account",
+        isAdmin: false,
+        isActive: true,
+        mustChangePassword: false,
+        sessionGeneration: 0,
+      },
+    ]);
+    const destroy = vi.fn((callback: (error?: unknown) => void) => callback());
+    const req = {
+      session: {
+        uid: 42,
+        username: "alice",
+        isAdmin: false,
+        generation: 0,
+        destroy,
+      },
+    } as never;
+
+    await expect(loadFreshSession(req)).resolves.toBeNull();
+    expect(destroy).toHaveBeenCalledOnce();
   });
 });

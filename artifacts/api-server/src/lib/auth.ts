@@ -1,38 +1,21 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, usersTable, roleAssignmentsTable, changeAssigneesTable } from "@workspace/db";
+import {
+  clearSessionCookie as clearPersistedSessionCookie,
+  destroyAuthenticatedSession,
+  readRequestSession,
+  regenerateAuthenticatedSession,
+  type SessionPayload,
+} from "./session";
 
 const NODE_ENV = process.env["NODE_ENV"] ?? "development";
-const RAW_SECRET = process.env["JWT_SECRET"];
-if (NODE_ENV === "production" && (!RAW_SECRET || RAW_SECRET.length < 16)) {
-  throw new Error(
-    "JWT_SECRET environment variable is required in production (min 16 chars). " +
-      "Refusing to start with a default secret.",
-  );
-}
-const JWT_SECRET = RAW_SECRET ?? "dev-only-change-mgmt-secret-do-not-use-in-prod";
-const COOKIE_NAME = "cm_session";
 const CSRF_COOKIE_NAME = "cm_csrf";
 const CSRF_HEADER_NAME = "x-csrf-token";
 const TOKEN_TTL_SECONDS = 60 * 60 * 12;
-
-export type SessionPayload = {
-  uid: number;
-  username: string;
-  isAdmin: boolean;
-};
-
-declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace Express {
-    interface Request {
-      session?: SessionPayload;
-    }
-  }
-}
+export type { SessionPayload } from "./session";
 
 export async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 10);
@@ -42,17 +25,17 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
-export function signSession(payload: SessionPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_TTL_SECONDS });
+/**
+ * Source-compatible names retained for callers that imported the old JWT
+ * helpers. They deliberately do not create or verify JWTs; authenticated
+ * state is exclusively managed by express-session and PostgreSQL.
+ */
+export function signSession(_payload: SessionPayload): string {
+  return randomBytes(32).toString("hex");
 }
 
-export function verifySession(token: string): SessionPayload | null {
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as SessionPayload;
-    return { uid: decoded.uid, username: decoded.username, isAdmin: !!decoded.isAdmin };
-  } catch {
-    return null;
-  }
+export function verifySession(_token: string): SessionPayload | null {
+  return null;
 }
 
 // When the app is being viewed inside the Replit preview iframe (or any
@@ -73,10 +56,10 @@ function cookieChannelOptions(req: Request): {
 }
 
 export function setSessionCookie(req: Request, res: Response, token: string): void {
-  const { sameSite, secure } = cookieChannelOptions(req);
-  res.cookie(COOKIE_NAME, token, {
+  const { secure } = cookieChannelOptions(req);
+  res.cookie("cm_session", token, {
     httpOnly: true,
-    sameSite,
+    sameSite: "lax",
     secure,
     maxAge: TOKEN_TTL_SECONDS * 1000,
     path: "/",
@@ -84,7 +67,19 @@ export function setSessionCookie(req: Request, res: Response, token: string): vo
 }
 
 export function clearSessionCookie(res: Response): void {
-  res.clearCookie(COOKIE_NAME, { path: "/" });
+  clearPersistedSessionCookie(res);
+}
+
+export async function createAuthenticatedSession(
+  req: Request,
+  res: Response,
+  payload: SessionPayload,
+): Promise<void> {
+  await regenerateAuthenticatedSession(req, res, payload);
+}
+
+export async function destroySession(req: Request): Promise<void> {
+  await destroyAuthenticatedSession(req);
 }
 
 export function generateCsrfToken(): string {
@@ -141,57 +136,57 @@ export function requireCsrf(req: Request, res: Response, next: NextFunction): vo
 }
 
 export function readSessionCookie(req: Request): SessionPayload | null {
-  const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[COOKIE_NAME];
-  if (!token) return null;
-  return verifySession(token);
+  return readRequestSession(req);
 }
 
-// Returns true when the request carried a session cookie that failed verification —
-// i.e. an expired or tampered JWT. Used by middleware to emit `auth.session_expired`
-// audit events distinct from anonymous (no-cookie) traffic.
-export function hasInvalidSessionCookie(req: Request): boolean {
-  const token = (req as Request & { cookies?: Record<string, string> }).cookies?.[COOKIE_NAME];
-  if (!token) return false;
-  return verifySession(token) === null;
-}
-
-async function maybeAuditExpired(req: Request): Promise<void> {
-  if (!hasInvalidSessionCookie(req)) return;
-  // Best-effort; never fail the request because of audit IO.
-  try {
-    const { audit } = await import("./audit");
-    await audit(
-      req,
-      {
-        action: "auth.session_expired",
-        entityType: "user",
-        entityId: null,
-        summary: "Rejected request: expired or invalid session token",
-        after: { reason: "invalid_or_expired_token" },
-      },
-      { id: null, name: "anonymous" },
-    );
-  } catch {
-    // swallow — audit failures shouldn't change request semantics
+// Resolve every request against the current user row instead of trusting
+// mutable claims from the session. This makes disablement effective
+// immediately, ensures admin elevation/revocation is reflected without a
+// new login, and invalidates every session minted before a password change.
+export async function loadFreshSession(req: Request): Promise<{
+  session: SessionPayload;
+  mustChangePassword: boolean;
+} | null> {
+  const session = readSessionCookie(req);
+  if (!session) return null;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, session.uid));
+  const currentGeneration =
+    typeof user?.sessionGeneration === "number" && Number.isSafeInteger(user.sessionGeneration)
+      ? user.sessionGeneration
+      : 0;
+  if (
+    !user ||
+    ("isActive" in user && user.isActive === false) ||
+    session.username !== user.username ||
+    session.generation !== currentGeneration
+  ) {
+    await destroyAuthenticatedSession(req).catch(() => undefined);
+    return null;
   }
+  const fresh: SessionPayload = {
+    uid: user.id,
+    username: user.username,
+    isAdmin: typeof user.isAdmin === "boolean" ? user.isAdmin : session.isAdmin,
+    generation: currentGeneration,
+  };
+  if (req.session && typeof req.session.save === "function") {
+    const changed =
+      req.session.username !== fresh.username ||
+      req.session.isAdmin !== fresh.isAdmin ||
+      req.session.uid !== fresh.uid;
+    req.session.uid = fresh.uid;
+    req.session.username = fresh.username;
+    req.session.isAdmin = fresh.isAdmin;
+    if (changed) await new Promise<void>((resolve) => req.session!.save(() => resolve()));
+  }
+  return { session: fresh, mustChangePassword: !!user.mustChangePassword };
 }
 
-// Returns true when the user identified by `uid` is currently flagged as
-// needing to rotate their password (e.g. seeded admin on first login). Used
-// by the auth middlewares to gate all protected API routes — see
-// `enforcePasswordRotated`. The auth/login, auth/me, auth/logout and
-// auth/change-password endpoints intentionally do NOT use `requireAuth`, so
-// they bypass this gate and remain reachable while the flag is set.
-async function userMustChangePassword(uid: number): Promise<boolean> {
-  const [u] = await db
-    .select({ mustChangePassword: usersTable.mustChangePassword })
-    .from(usersTable)
-    .where(eq(usersTable.id, uid));
-  return !!u?.mustChangePassword;
-}
-
-async function enforcePasswordRotated(uid: number, res: Response): Promise<boolean> {
-  if (await userMustChangePassword(uid)) {
+async function enforcePasswordRotated(
+  current: Awaited<ReturnType<typeof loadFreshSession>>,
+  res: Response,
+): Promise<boolean> {
+  if (current?.mustChangePassword) {
     res.status(403).json({
       error: "Password rotation required",
       code: "must_change_password",
@@ -202,30 +197,26 @@ async function enforcePasswordRotated(uid: number, res: Response): Promise<boole
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const session = readSessionCookie(req);
-  if (!session) {
-    await maybeAuditExpired(req);
+  const current = await loadFreshSession(req);
+  if (!current) {
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
-  if (!(await enforcePasswordRotated(session.uid, res))) return;
-  req.session = session;
+  if (!(await enforcePasswordRotated(current, res))) return;
   next();
 }
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const session = readSessionCookie(req);
-  if (!session) {
-    await maybeAuditExpired(req);
+  const current = await loadFreshSession(req);
+  if (!current) {
     res.status(401).json({ error: "Not authenticated" });
     return;
   }
-  if (!session.isAdmin) {
+  if (!current.session.isAdmin) {
     res.status(403).json({ error: "Admin only" });
     return;
   }
-  if (!(await enforcePasswordRotated(session.uid, res))) return;
-  req.session = session;
+  if (!(await enforcePasswordRotated(current, res))) return;
   next();
 }
 
@@ -244,24 +235,22 @@ export async function loadUserById(id: number) {
 
 export function requireRole(roles: string[]) {
   return async function (req: Request, res: Response, next: NextFunction): Promise<void> {
-    const session = readSessionCookie(req);
-    if (!session) {
+    const current = await loadFreshSession(req);
+    if (!current) {
       res.status(401).json({ error: "Not authenticated" });
       return;
     }
-    if (!(await enforcePasswordRotated(session.uid, res))) return;
-    if (session.isAdmin) {
-      req.session = session;
+    if (!(await enforcePasswordRotated(current, res))) return;
+    if (current.session.isAdmin) {
       next();
       return;
     }
-    const userRoles = await loadUserRoles(session.uid);
+    const userRoles = await loadUserRoles(current.session.uid);
     const ok = userRoles.some((r) => roles.includes(r));
     if (!ok) {
       res.status(403).json({ error: `Requires role: ${roles.join(" or ")}` });
       return;
     }
-    req.session = session;
     next();
   };
 }

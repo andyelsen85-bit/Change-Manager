@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import express, { type Express } from "express";
 import cookieParser from "cookie-parser";
-import { DbMock } from "./test-helpers";
+import { DbMock, installTestSession } from "./test-helpers";
 
 const dbMock = new DbMock();
 const adfs = vi.hoisted(() => {
@@ -63,6 +63,7 @@ function buildApp(): Express {
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
+  installTestSession(app);
   app.use("/api", authRouter);
   return app;
 }

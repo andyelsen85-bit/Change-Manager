@@ -11,6 +11,14 @@ import {
 import { logger } from "./logger";
 import { decryptSecret } from "./secret-crypto";
 
+function maskEmail(value: string): string {
+  const at = value.indexOf("@");
+  if (at <= 0) return "[invalid-email]";
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  return `${local.slice(0, 1)}${local.length > 1 ? "***" : ""}@${domain}`;
+}
+
 export async function getSmtp() {
   const [row] = await db.select().from(smtpSettingsTable).where(eq(smtpSettingsTable.key, "global"));
   return row ?? null;
@@ -177,7 +185,7 @@ async function sendImmediate(opts: {
       });
       sent++;
     } catch (err) {
-      logger.error({ err, to: t.email }, "Email send failed");
+      logger.error({ err, to: maskEmail(t.email) }, "Email send failed");
       errors++;
     }
   }
@@ -185,10 +193,10 @@ async function sendImmediate(opts: {
 }
 
 export async function sendTestEmail(to: string): Promise<{ success: boolean; message: string }> {
-  const transporter = await buildTransporter();
-  const cfg = await getSmtp();
-  if (!transporter || !cfg) return { success: false, message: "SMTP is not configured or not enabled" };
   try {
+    const transporter = await buildTransporter();
+    const cfg = await getSmtp();
+    if (!transporter || !cfg) return { success: false, message: "SMTP is not configured or not enabled" };
     await transporter.sendMail({
       from: `"${cfg.fromName}" <${cfg.fromAddress}>`,
       to,
@@ -197,7 +205,11 @@ export async function sendTestEmail(to: string): Promise<{ success: boolean; mes
     });
     return { success: true, message: `Test email sent to ${to}` };
   } catch (err) {
-    return { success: false, message: err instanceof Error ? err.message : String(err) };
+    // Provider/transport errors can contain connection strings, server
+    // responses, and authentication details. Keep them in the redacted
+    // structured log only; the settings API gets a stable safe message.
+    logger.error({ err, to: maskEmail(to) }, "SMTP test failed");
+    return { success: false, message: "SMTP test failed" };
   }
 }
 

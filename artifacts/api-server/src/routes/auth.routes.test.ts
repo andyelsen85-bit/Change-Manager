@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
 import express, { type Express } from "express";
 import cookieParser from "cookie-parser";
-import { DbMock } from "./test-helpers";
+import { DbMock, installTestSession } from "./test-helpers";
 
 const dbMock = new DbMock();
 const auditMock = vi.fn().mockResolvedValue(undefined);
@@ -22,6 +22,9 @@ vi.mock("../lib/ldap", () => ({
   authenticateLdap: vi.fn().mockResolvedValue({ ok: false }),
   getLdap: vi.fn().mockResolvedValue(null),
 }));
+vi.mock("./pentest", () => ({
+  userCanAccessPentest: vi.fn().mockResolvedValue(false),
+}));
 
 const bcrypt = await import("bcryptjs");
 const { default: authRouter } = await import("./auth");
@@ -30,6 +33,7 @@ function buildApp(): Express {
   const app = express();
   app.use(cookieParser());
   app.use(express.json());
+  installTestSession(app);
   app.use("/api", authRouter);
   return app;
 }
@@ -45,6 +49,15 @@ describe("auth routes — login", () => {
     const res = await request(app).post("/api/auth/login").send({});
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/required/i);
+  });
+
+  it("rejects oversized credentials before any database lookup", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/api/auth/login")
+      .send({ username: "u".repeat(255), password: "p".repeat(1_024) });
+    expect(res.status).toBe(400);
+    expect(dbMock.queue).toHaveLength(0);
   });
 
   it("returns 401 for unknown user (no audit-on-success)", async () => {

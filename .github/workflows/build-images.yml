@@ -1,0 +1,182 @@
+name: Build and publish container images
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+      - "*.*.*"
+  workflow_dispatch:
+
+# A self-hosted runner is intentional: the Nexus registry is private and its
+# CA must be installed on the runner host and Docker daemon.  Set the
+# RUNNER_LABEL repository variable when the confirmed runner uses another
+# label; do not silently fall back to a public runner.
+env:
+  REGISTRY: ${{ vars.CONTAINER_REGISTRY || 'srvnexusint.hopital.chdn.lan:6443/infra' }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release metadata
+    runs-on: ${{ vars.RUNNER_LABEL || 'self-hosted' }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_release: ${{ steps.version.outputs.is_release }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate package versions and release tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api_version="$(node -p "require('./artifacts/api-server/package.json').version")"
+          web_version="$(node -p "require('./artifacts/change-mgmt/package.json').version")"
+          if [[ -z "${api_version}" || -z "${web_version}" ]]; then
+            echo "::error::Could not read both package versions." >&2
+            exit 1
+          fi
+          if [[ "${api_version}" != "${web_version}" ]]; then
+            echo "::error::API (${api_version}) and web (${web_version}) package versions differ." >&2
+            exit 1
+          fi
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+            # Accept canonical SemVer core and prerelease identifiers, but
+            # reject build metadata: '+' cannot be represented by the Docker
+            # image tag emitted below. Numeric identifiers may not have
+            # leading zeroes, and empty/doubled prerelease components fail.
+            semver_regex='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.((0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
+            if [[ "${version}" == *"+"* ]]; then
+              echo "::error::Release tag '${tag}' uses SemVer build metadata; '+' is rejected because it is not compatible with the Docker image tag. Use vX.Y.Z[-prerelease] without '+build'." >&2
+              exit 1
+            fi
+            if [[ ! "${version}" =~ ${semver_regex} ]]; then
+              echo "::error::Release tag '${tag}' is not canonical SemVer (use vX.Y.Z or X.Y.Z with an optional valid prerelease; no build metadata)." >&2
+              exit 1
+            fi
+            if (( ${#version} > 128 )); then
+              echo "::error::Release tag '${tag}' is too long for a Docker image tag (maximum 128 characters)." >&2
+              exit 1
+            fi
+            if [[ "${version}" != "${api_version}" || "${version}" != "${web_version}" ]]; then
+              echo "::error::Release tag '${tag}' does not match both package.json versions (${api_version})." >&2
+              exit 1
+            fi
+            echo "version=${version}" >> "${GITHUB_OUTPUT}"
+            echo "is_release=true" >> "${GITHUB_OUTPUT}"
+            echo "Validated release ${version} against both package manifests."
+          else
+            echo "version=" >> "${GITHUB_OUTPUT}"
+            echo "is_release=false" >> "${GITHUB_OUTPUT}"
+            echo "Validated main build at package version ${api_version}."
+          fi
+
+  publish:
+    name: Publish ${{ matrix.target }} image
+    needs: validate
+    runs-on: ${{ vars.RUNNER_LABEL || 'self-hosted' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - builder
+          - api
+          - web
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate registry configuration and runner trust
+        id: registry
+        shell: bash
+        env:
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${REGISTRY:-}" || "${REGISTRY}" == *"://"* || "${REGISTRY}" != */* ]]; then
+            echo "::error::CONTAINER_REGISTRY must be a host[:port]/repository value; set the repository variable or use the documented default." >&2
+            exit 1
+          fi
+          registry_host="${REGISTRY%%/*}"
+          registry_path="${REGISTRY#*/}"
+          if [[ -z "${registry_host}" || -z "${registry_path}" || "${registry_path}" == */* ]]; then
+            echo "::error::CONTAINER_REGISTRY must contain one Nexus repository path (for example host:6443/infra)." >&2
+            exit 1
+          fi
+
+          if [[ -z "${NEXUS_USERNAME:-}" || -z "${NEXUS_PASSWORD:-}" ]]; then
+            echo "::error::NEXUS_USERNAME and NEXUS_PASSWORD GitHub Actions secrets are required." >&2
+            exit 1
+          fi
+
+          # A 200/401/403 response proves the URL was reached over TLS.  Do
+          # not use --insecure: an unknown private CA must fail this job.
+          if ! status="$(
+            curl --silent --show-error --location \
+              --output /dev/null --write-out '%{http_code}' \
+              "https://${registry_host}/v2/"
+          )"; then
+            echo "::error::Cannot reach ${registry_host}/v2/ with the runner's trusted CA store." >&2
+            exit 1
+          fi
+          case "${status}" in
+            200|401|403) ;;
+            *)
+              echo "::error::Nexus registry health endpoint returned unexpected HTTP ${status}." >&2
+              exit 1
+              ;;
+          esac
+
+          echo "host=${registry_host}" >> "${GITHUB_OUTPUT}"
+          echo "repository=${registry_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to Nexus
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ${{ steps.registry.outputs.host }}
+          username: ${{ secrets.NEXUS_USERNAME }}
+          password: ${{ secrets.NEXUS_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+        with:
+          images: ${{ env.REGISTRY }}/change-manager-${{ matrix.target }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ needs.validate.outputs.version }},enable=${{ needs.validate.outputs.is_release == 'true' }}
+            type=sha,prefix=sha-,format=long
+
+      - name: Build and push ${{ matrix.target }}
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: ./Dockerfile
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
