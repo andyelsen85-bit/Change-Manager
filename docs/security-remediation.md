@@ -45,8 +45,8 @@ The implementation now includes:
 - backup protection follows the mandatory external age-encryption procedure
   in [Backup security](backup-security.md); and
 - broad authenticated visibility of standard change/CAB data remains the
-  current product policy, but it requires explicit business-owner
-  re-confirmation. No confirmation date or owner identity is fabricated.
+  current product policy, explicitly reconfirmed by the project owner on
+  2026-09-15. Edit permissions and pentest restrictions remain unchanged.
 
 MFA and Kerberos are outside this remediation scope. AD FS/OIDC is documented
 separately and is not evidence that MFA is provided by this application.
@@ -68,11 +68,11 @@ separately and is not evidence that MFA is provided by this application.
 6. Run authentication rate-limit, error-hygiene, backup age-encryption,
    restore, and rollback tests. Keep backup keys and application encryption
    keys separate and recoverable.
-7. Ask the business owner to confirm that any authenticated user may continue
-   to view organization-wide standard change-management and CAB data. Record
-   the owner's name/role, decision, scope, and date in this document and the
-   threat model. Until then, status is pending; do not broaden access or
-   claim confirmation.
+7. **Owner confirmation completed on 2026-09-15.** The project owner answered
+   “Yes, confirm the existing visibility policy” to the explicit question
+   about all authenticated users continuing to view organization-wide
+   change-management and CAB data. This confirms existing read visibility
+   only; edit permissions and pentest restrictions remain unchanged.
 
 ## Verification performed
 
@@ -118,12 +118,12 @@ assert that the changes have been deployed.
 | Rate limiting / brute-force protection | Passed | Pre-auth shared PostgreSQL admission controls cover local/LDAP; bounded inputs and proxy trust prevent trivial bypass. No live LDAP bind test performed. |
 | Error message hygiene | Passed | Generic client errors and production allowlisted error logging; provider/backup and credential-redaction regression tests. |
 | Backup encryption in transit/at rest | Partially Passed | Mandatory external encryption alternative implemented in UI/docs. Actual operator encryption, HTTPS configuration, retention and recovery drills remain operational controls. |
-| Ready acceptance of broad authenticated visibility | Partially Passed | Existing scope unchanged; business-owner re-confirmation still pending. Pentest restrictions remain separate. |
+| Ready acceptance of broad authenticated visibility | Passed | Project owner explicitly reconfirmed existing organization-wide authenticated change/CAB read visibility on 2026-09-15. Edit permissions and pentest restrictions remain unchanged. |
 | Local password hashing (bcrypt) | Passed | Preserved; local browser login and unit tests passed. |
 | AD FS/OpenID Connect security controls | Partially Passed | Protocol code preserved and automated tests pass; real IdP authentication after migration not verified here. |
 | CSRF protection | Passed | Existing scheme preserved; browser rejected logout without CSRF and accepted normal UI logout. |
 | Immutable audit log | Passed | Existing database trigger enforcement preserved; development schema bootstrap completed. Production migration must retain it. |
-| Written threat model | Passed | Updated for new session, secret, backup and CI boundaries; owner confirmation explicitly pending. |
+| Written threat model | Passed | Updated for new session, secret, backup and CI boundaries; owner visibility confirmation recorded on 2026-09-15. |
 | No default admin password | Passed | Existing setup requirement preserved and setup tests pass. |
 | Production external PostgreSQL | Passed | Documented per supplied deployment baseline; bundled Compose database explicitly local/test only. No production connection was inspected or changed. |
 | MFA | Not Applicable | Explicitly out of scope; not inferred from AD FS/OIDC. |

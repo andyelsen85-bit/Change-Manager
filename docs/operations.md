@@ -201,7 +201,9 @@ encrypted settings decryption, audit-trigger enforcement, and all replicas.
 For each production change, retain the workflow run URL and image digests,
 runner/CA readiness evidence, schema migration result, backup verification,
 key-preservation record, and post-deploy checks. The security remediation
-matrix remains pending until those artifacts, CI execution, and the business
-owner's access-model confirmation are available. See
+matrix retains partial statuses until those artifacts and CI execution are
+available. The project owner reconfirmed the existing authenticated change/CAB
+read-visibility policy on 2026-09-15; edit permissions and pentest restrictions
+remain unchanged. See
 [Security remediation assessment](security-remediation.md) and the
 [threat model](../threat_model.md).

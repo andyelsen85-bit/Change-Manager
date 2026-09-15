@@ -59,12 +59,11 @@ The app supports self-hosted/public deployments in addition to Replit developmen
 
 - The operator has explicitly accepted the risk of the public first-run bootstrap flow. Future scans should not repropose the initial `/api/auth/setup` admin-claim behavior unless deployment assumptions change, the setup window becomes persistent rather than first-run/recovery-only, or new evidence shows the instance is exposed before trusted setup completes.
 - The current product policy allows authenticated users to view
-  organization-wide change-management and CAB data. **Owner re-confirmation is
-  pending**: ask the business owner to confirm that this remains appropriate
-  as the user base grows, then record the owner's name/role, scope, decision,
-  and date here. Do not fabricate a confirmation or broaden access while this
-  is pending. Until the decision is recorded, scans should distinguish this
-  documented current behavior from pentest, administrative, and other
+  organization-wide change-management and CAB data. **Reconfirmed by the
+  project owner on 2026-09-15** in response to the explicit visibility-policy
+  confirmation: “Yes, confirm the existing visibility policy.” This accepts
+  the existing broad authenticated read visibility only; it does not broaden
+  edit permissions or access to pentest, administrative, and other
   need-to-know records, which remain restricted.
 - MFA and Kerberos are outside the scope of this remediation and must not be
   inferred from local authentication or AD FS/OIDC documentation.
@@ -90,8 +89,8 @@ Authenticated users can mutate change records, approvals, attachments, settings,
 
 This application stores detailed operational and security data. Standard
 change-management and CAB records are currently treated by the product as
-visible to any authenticated user, but the required business-owner
-re-confirmation is pending as recorded above. Pentest and admin datasets
+visible to any authenticated user, with owner re-confirmation recorded on
+2026-09-15 above. Pentest and admin datasets
 remain need-to-know. Cross-origin browser protections still matter because the
 app uses cookie auth; authenticated GET responses, downloads, audit logs,
 backups, settings metadata, and any protected records must not be readable
