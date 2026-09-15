@@ -8,19 +8,17 @@ actually been exercised.
 
 ## Assessment
 
-The repository now contains a pinned GitHub Actions workflow for publishing
-the three Dockerfile targets (`builder`, `api`, and `web`) to the verified
-Nexus destination used by `update.sh`. It validates canonical SemVer release
-tags (including Docker-compatible prereleases, while rejecting `+` build
-metadata) against the API and web package versions, requires Nexus
-credentials, and refuses to continue when the runner cannot validate the
-registry TLS certificate.
-The runner label and registry path are configurable repository settings with
-an explicit `self-hosted` and verified-registry default.
+The repository contains a pinned GitHub Actions workflow exporting the three
+Dockerfile targets (`builder`, `api`, and `web`) as gzip Docker archives,
+checksums, and commit metadata. On 2026-09-15 the owner selected downloadable
+artifacts instead of direct Nexus pushes because no internal runner exists.
+Jobs use GitHub-hosted Ubuntu runners and require no registry credentials.
+Canonical release tags are still validated against both package versions.
+Artifacts are retained for seven days; controlled long-term storage and
+optional internal Nexus promotion are operator responsibilities.
 
-The workflow has not been reported as executed here. A private runner, Nexus
-reachability, CA installation, credentials, repository tag policy, and pushed
-digests therefore remain deployment evidence to collect. No sibling Nemesys
+Successful build/download/load and any manual Nexus promotion still require
+observed evidence. No sibling Nemesys
 workflow was available for comparison, and no claim is made that this
 workflow matches unknown CI behavior.
 
@@ -53,10 +51,10 @@ separately and is not evidence that MFA is provided by this application.
 
 ## Required actions before marking green
 
-1. Run the workflow on the approved private runner and retain successful run
-   URLs and image digests for all three targets.
-2. Confirm the runner trusts the authentic Nexus CA and that Nexus enforces
-   immutable version/SHA tags while allowing the intentional `main` pointer.
+1. Retain successful hosted-run URLs, download and checksum all three target
+   archives, and verify image loading on the approved Docker host.
+2. For optional internal Nexus promotion, confirm the transfer host trusts
+   the authentic CA and Nexus enforces immutable version/SHA tags.
 3. Apply and verify the PostgreSQL session schema against the externally
    managed production database; test expiration, ID regeneration, logout
    deletion, and revocation from every replica.
@@ -108,8 +106,8 @@ assert that the changes have been deployed.
 
 | Baseline control | Status | Evidence / remaining action |
 | --- | --- | --- |
-| Container images built by GitHub Actions | Partially Passed | Pinned workflow and static checks complete. Execute on approved private runner; retain image digests. Sibling workflow unavailable for comparison. |
-| Nexus runner reachability and trusted private CA | Partially Passed | TLS preflight and configuration documented; verify on the real runner. |
+| Container images built by GitHub Actions | Partially Passed | Hosted-runner archive workflow implemented; retain successful build and load evidence. Sibling workflow unavailable for comparison. |
+| Nexus runner reachability and trusted private CA | Not Applicable | CI exports archives without connecting to Nexus. CA/reachability checks remain required on any internal manual-promotion host. |
 | Version tag matches API and web package versions | Passed | Strict canonical SemVer and package match validation implemented; actual release execution still part of CI verification. |
 | Immutable release and full-SHA image tags | Partially Passed | Tags emitted by workflow; Nexus overwrite policy and resulting digests need operational verification. |
 | Session architecture | Passed | PostgreSQL sessions, fixed 12h TTL, regeneration, logout deletion, fresh identity/generation checks. Browser persistence/replay/revocation checks passed. Production rollout still required. |

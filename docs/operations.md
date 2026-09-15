@@ -21,10 +21,10 @@ installation in the change ticket; do not put secrets in this repository.
 - TLS termination and the private Nexus CA are infrastructure responsibilities.
   Do not copy private CA material into the image or frontend.
 
-## CI image publishing (FIX1)
+## CI downloadable images (FIX1)
 
-`.github/workflows/build-images.yml` publishes the `builder`, `api`, and `web`
-Dockerfile targets to the configured Nexus repository on pushes to `main` and
+`.github/workflows/build-images.yml` exports the `builder`, `api`, and `web`
+Dockerfile targets as downloadable GitHub Actions artifacts on pushes to `main` and
 on canonical semantic version tags (`vX.Y.Z` or `X.Y.Z`, with an optional
 valid prerelease such as `-rc.1`). SemVer build metadata (`+build`) is
 rejected with a clear validation error because `+` is not compatible with the
@@ -35,43 +35,43 @@ Docker image tag emitted by the workflow. It creates:
   tag; and
 - `sha-<full Git commit SHA>` for every build.
 
-The workflow's default registry is
-`srvnexusint.hopital.chdn.lan:6443/infra`, matching the verified destination
-used by `update.sh`. A confirmed alternative may be selected with the
-`CONTAINER_REGISTRY` repository variable, but it must be a
-`host[:port]/repository` value. Set `RUNNER_LABEL` if the approved private
-self-hosted runner uses a label other than the explicit `self-hosted`
-default. The default is not evidence that a runner with that label exists.
+The owner selected downloadable archives on 2026-09-15 because no internal
+runner is available. Jobs run on GitHub-hosted `ubuntu-24.04`, targeting
+`linux/amd64`. No registry credentials or private-network access are used.
+`RUNNER_LABEL`, `CONTAINER_REGISTRY`, and Nexus Actions secrets are no longer
+used by this workflow. New runs supersede obsolete runs on the same ref.
 
-Before enabling a run, an administrator must:
+In GitHub, open **Actions → Build downloadable container images → successful
+run → Artifacts**. Download the required target ZIPs and extract each into its
+own directory. Each contains a `.tar.gz`, `SHA256SUMS`, and `BUILD-INFO.txt`.
+Artifacts expire after **7 days**; archive approved releases in your controlled
+storage before expiry. The builder image contains source/dependencies, not
+just runtime code, so restrict repository/artifact access appropriately.
 
-1. Register the approved self-hosted runner with the repository and confirm
-   that it has Docker Engine, Buildx, Node.js, and `curl`.
-2. Give the runner DNS and firewall reachability to the Nexus host.
-3. Install the authentic Nexus CA in the runner's OS trust store (for example,
-   through the platform's approved CA package process) and in Docker's
-   `/etc/docker/certs.d/<host:port>/ca.crt` trust directory, then restart the
-   Docker service as required. The workflow intentionally does not use
-   `--insecure`; its TLS preflight must fail if the CA is not trusted.
-4. Configure the `NEXUS_USERNAME` and `NEXUS_PASSWORD` GitHub Actions secrets
-   with the least-privileged push account. Do not echo, commit, or place these
-   values in image layers.
-5. Configure Nexus tag policy before the first production push. Version tags
-   and `sha-<full SHA>` tags must reject overwrites. The full SHA tag is the
-   immutable content identifier used for promotion and rollback. The `main`
-   tag is intentionally a moving branch pointer; if the Nexus policy cannot
-   express immutable release/SHA tags alongside a moving pointer, use the
-   approved separate channel/repository rather than weakening release
-   immutability.
-6. Treat only an observed completed workflow run and its recorded pushed digest
-   as evidence for an image promotion. This document does not report a run
-   that has not actually been observed.
+For each target, verify and load (API example):
 
-If an additional image source or mirror is later confirmed by infrastructure
-owners, perform an equivalent mirror step: copy the exact target image by
-digest from the verified Nexus source, verify the destination digest, and
-preserve the immutable `sha-<full SHA>` tag and policy. No such source,
-workflow, or sibling CI behavior is asserted here.
+```bash
+sha256sum -c SHA256SUMS
+docker load -i change-manager-api.tar.gz
+```
+
+Use the full commit in `BUILD-INFO.txt` to select the loaded image. On an
+internal machine with Nexus access and the authentic CA installed in Docker's
+trust store, optionally copy it to the existing destination:
+
+```bash
+SHA=REPLACE_WITH_FULL_COMMIT_FROM_BUILD_INFO
+REGISTRY=srvnexusint.hopital.chdn.lan:6443
+docker login "$REGISTRY"  # interactive; do not put a password in arguments
+docker tag "change-manager-api:sha-$SHA" "$REGISTRY/infra/change-manager-api:sha-$SHA"
+docker push "$REGISTRY/infra/change-manager-api:sha-$SHA"
+```
+
+Repeat for web (and builder if required). This is a manual promotion, not a
+CI push or deployment. Verify the pushed digest and preserve immutable release
+and SHA tags; only `main` may move under the approved Nexus policy. Checksums
+detect transfer corruption, not a compromised source/run: also verify the
+trusted workflow run and commit. No runtime secrets are passed into the build.
 
 ## Pre-deploy checklist
 

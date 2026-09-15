@@ -1,0 +1,16 @@
+.git
+**/node_modules
+**/dist
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+.agents
+.local
+attached_assets
+artifacts/attached_assets
+artifacts/mockup-sandbox
+screenshots

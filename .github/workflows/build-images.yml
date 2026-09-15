@@ -1,4 +1,4 @@
-name: Build and publish container images
+name: Build downloadable container images
 
 on:
   push:
@@ -9,24 +9,20 @@ on:
       - "*.*.*"
   workflow_dispatch:
 
-# A self-hosted runner is intentional: the Nexus registry is private and its
-# CA must be installed on the runner host and Docker daemon.  Set the
-# RUNNER_LABEL repository variable when the confirmed runner uses another
-# label; do not silently fall back to a public runner.
-env:
-  REGISTRY: ${{ vars.CONTAINER_REGISTRY || 'srvnexusint.hopital.chdn.lan:6443/infra' }}
+# Hosted runners export archives only; Nexus remains private.
 
 permissions:
   contents: read
 
 concurrency:
   group: container-publish-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   validate:
     name: Validate release metadata
-    runs-on: ${{ vars.RUNNER_LABEL || 'self-hosted' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
       is_release: ${{ steps.version.outputs.is_release }}
@@ -86,10 +82,11 @@ jobs:
             echo "Validated main build at package version ${api_version}."
           fi
 
-  publish:
-    name: Publish ${{ matrix.target }} image
+  archive:
+    name: Archive ${{ matrix.target }} image
     needs: validate
-    runs-on: ${{ vars.RUNNER_LABEL || 'self-hosted' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -103,59 +100,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate registry configuration and runner trust
-        id: registry
-        shell: bash
-        env:
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "${REGISTRY:-}" || "${REGISTRY}" == *"://"* || "${REGISTRY}" != */* ]]; then
-            echo "::error::CONTAINER_REGISTRY must be a host[:port]/repository value; set the repository variable or use the documented default." >&2
-            exit 1
-          fi
-          registry_host="${REGISTRY%%/*}"
-          registry_path="${REGISTRY#*/}"
-          if [[ -z "${registry_host}" || -z "${registry_path}" || "${registry_path}" == */* ]]; then
-            echo "::error::CONTAINER_REGISTRY must contain one Nexus repository path (for example host:6443/infra)." >&2
-            exit 1
-          fi
-
-          if [[ -z "${NEXUS_USERNAME:-}" || -z "${NEXUS_PASSWORD:-}" ]]; then
-            echo "::error::NEXUS_USERNAME and NEXUS_PASSWORD GitHub Actions secrets are required." >&2
-            exit 1
-          fi
-
-          # A 200/401/403 response proves the URL was reached over TLS.  Do
-          # not use --insecure: an unknown private CA must fail this job.
-          if ! status="$(
-            curl --silent --show-error --location \
-              --output /dev/null --write-out '%{http_code}' \
-              "https://${registry_host}/v2/"
-          )"; then
-            echo "::error::Cannot reach ${registry_host}/v2/ with the runner's trusted CA store." >&2
-            exit 1
-          fi
-          case "${status}" in
-            200|401|403) ;;
-            *)
-              echo "::error::Nexus registry health endpoint returned unexpected HTTP ${status}." >&2
-              exit 1
-              ;;
-          esac
-
-          echo "host=${registry_host}" >> "${GITHUB_OUTPUT}"
-          echo "repository=${registry_path}" >> "${GITHUB_OUTPUT}"
-
-      - name: Log in to Nexus
-        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
-        with:
-          registry: ${{ steps.registry.outputs.host }}
-          username: ${{ secrets.NEXUS_USERNAME }}
-          password: ${{ secrets.NEXUS_PASSWORD }}
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
@@ -163,7 +107,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
         with:
-          images: ${{ env.REGISTRY }}/change-manager-${{ matrix.target }}
+          images: change-manager-${{ matrix.target }}
           flavor: |
             latest=false
           tags: |
@@ -171,12 +115,38 @@ jobs:
             type=raw,value=${{ needs.validate.outputs.version }},enable=${{ needs.validate.outputs.is_release == 'true' }}
             type=sha,prefix=sha-,format=long
 
-      - name: Build and push ${{ matrix.target }}
+      - name: Prepare archive directory
+        run: mkdir -p "${RUNNER_TEMP}/images"
+
+      - name: Build and export ${{ matrix.target }}
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
           file: ./Dockerfile
           target: ${{ matrix.target }}
-          push: true
+          platforms: linux/amd64
+          push: false
+          outputs: type=docker,dest=${{ runner.temp }}/images/change-manager-${{ matrix.target }}.tar
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Compress and checksum archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/images"
+          gzip -1 "change-manager-${TARGET}.tar"
+          sha256sum "change-manager-${TARGET}.tar.gz" > SHA256SUMS
+          printf 'Commit: %s\nTarget: %s\nPlatform: linux/amd64\n' \
+            "${GITHUB_SHA}" "${TARGET}" > BUILD-INFO.txt
+          echo "Download this job's artifact, unzip it, verify with \`sha256sum -c SHA256SUMS\`, then load with \`docker load -i change-manager-${TARGET}.tar.gz\`." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload image archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: change-manager-${{ matrix.target }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/images/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

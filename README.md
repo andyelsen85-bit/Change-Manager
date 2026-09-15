@@ -860,18 +860,21 @@ The multi-stage `Dockerfile` produces:
 - `web` — Nginx Alpine + the static frontend + entrypoint.
 
 On pushes to `main` and semantic version tags, the pinned
-[image workflow](.github/workflows/build-images.yml) publishes all three
-targets to the verified Nexus registry. It validates that API and web package
+[image workflow](.github/workflows/build-images.yml) builds all three
+targets on GitHub-hosted runners and exports downloadable Docker archives.
+It validates that API and web package
 versions match the release tag and emits `main`, the normalized version, and
 `sha-<full commit SHA>` tags. The SHA tag is the immutable content identifier;
 release tags use canonical SemVer (`vX.Y.Z` or `X.Y.Z`, optionally with a
 valid prerelease such as `-rc.1`). SemVer build metadata (`+build`) is
 rejected with a clear validation error because `+` is not compatible with the
 Docker image tag emitted by this workflow.
-configure Nexus to reject overwrites for release and SHA tags. See the
-[operations runbook](docs/operations.md) for private-runner CA and registry
-setup. The repository does not assert that an unconfirmed sibling workflow or
-mirror exists.
+Download the artifacts from the successful Actions run within seven days,
+verify their checksums, and load them with `docker load`. CI does not push
+to a registry or require Nexus credentials. See the
+[operations runbook](docs/operations.md) for loading and optional internal
+Nexus promotion instructions. Configure Nexus to reject overwrites for
+release and SHA tags when manually promoting images.
 
 ---
 
