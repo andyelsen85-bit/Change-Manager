@@ -145,6 +145,12 @@ same access controls.
 
 ## Secret and encryption-key rotation
 
+Database password length and strength are governed by the database
+administrator, not application startup validation. `DATABASE_URL` must still
+be a valid PostgreSQL URL. The application-enforced 32-byte minimum applies
+to `APP_ENCRYPTION_KEY`, `SESSION_SECRET`, and the compatibility `JWT_SECRET`,
+not the database password.
+
 `APP_ENCRYPTION_KEY` is independent of `JWT_SECRET` and must be at least
 32 random bytes in production. It protects values such as encrypted SMTP and
 LDAP credentials. A deployment must fail rather than fall back to a different

@@ -31,7 +31,8 @@ The implementation now includes:
   authentication, logout row deletion, fresh account checks and generation-based
   central revocation across replicas;
 - encryption no longer has a silent `APP_ENCRYPTION_KEY` to `JWT_SECRET`
-  fallback and production secret handling requires at least 32 random bytes;
+  fallback and production application signing/encryption keys require at least
+  32 random bytes; database password policy is delegated to the database administrator;
 - bounded authentication throttling/lockout and generic external error
   responses, with production error logs limited to safe diagnostic fields.
   Every pre-authentication attempt atomically reserves both a normalized,
@@ -63,7 +64,7 @@ separately and is not evidence that MFA is provided by this application.
 4. Before deploy, preserve the exact existing encryption material. Never
    silently replace it. Test decrypting existing SMTP/LDAP values after
    setting the explicit key.
-5. Verify all generated/provided production secrets are at least 32 random
+5. Verify production application signing/encryption keys are at least 32 random
    bytes and that startup rejects missing or short values.
 6. Run authentication rate-limit, error-hygiene, backup age-encryption,
    restore, and rollback tests. Keep backup keys and application encryption
@@ -114,7 +115,7 @@ assert that the changes have been deployed.
 | Immutable release and full-SHA image tags | Partially Passed | Tags emitted by workflow; Nexus overwrite policy and resulting digests need operational verification. |
 | Session architecture | Passed | PostgreSQL sessions, fixed 12h TTL, regeneration, logout deletion, fresh identity/generation checks. Browser persistence/replay/revocation checks passed. Production rollout still required. |
 | Encryption-key fallback | Passed | Removed, with independence and failure tests. Preserve and verify existing production ciphertext key before rollout. |
-| Secret minimum length | Passed | Startup validation and explicit fresh-install generation tests passed; operators must supply genuinely random production material. |
+| Secret minimum length | Passed | Startup enforces application signing/encryption key strength. Database passwords have no application-enforced minimum, per owner request; database policy remains the administrator's responsibility. |
 | Rate limiting / brute-force protection | Passed | Pre-auth shared PostgreSQL admission controls cover local/LDAP; bounded inputs and proxy trust prevent trivial bypass. No live LDAP bind test performed. |
 | Error message hygiene | Passed | Generic client errors and production allowlisted error logging; provider/backup and credential-redaction regression tests. |
 | Backup encryption in transit/at rest | Partially Passed | Mandatory external encryption alternative implemented in UI/docs. Actual operator encryption, HTTPS configuration, retention and recovery drills remain operational controls. |

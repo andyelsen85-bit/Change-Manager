@@ -143,7 +143,7 @@ export function resolveSessionSecret(env: NodeJS.ProcessEnv = process.env): stri
   return env["SESSION_SECRET"] || env["JWT_SECRET"] || undefined;
 }
 
-function databasePassword(databaseUrl: string): string | null {
+function validateDatabaseUrl(databaseUrl: string): void {
   let parsed: URL;
   try {
     parsed = new URL(databaseUrl);
@@ -155,18 +155,10 @@ function databasePassword(databaseUrl: string): string | null {
     throw new Error("DATABASE_URL must use the postgres:// or postgresql:// scheme.");
   }
 
-  // URL.password is empty both when credentials omit a password and when the
-  // URL explicitly contains `user:@host`. Distinguish those cases so an
-  // explicitly empty password is rejected as a configured weak secret while
-  // passwordless externally managed authentication remains supported.
-  const authority = databaseUrl.slice(databaseUrl.indexOf("//") + 2).split(/[/?#]/, 1)[0] ?? "";
-  const at = authority.lastIndexOf("@");
-  const credentials = at >= 0 ? authority.slice(0, at) : "";
-  const hasExplicitPassword = credentials.includes(":");
-  if (!hasExplicitPassword) return null;
-
+  // Database credential policy belongs to the database administrator.
+  // Check URL encoding only, never password length or strength.
   try {
-    return decodeURIComponent(parsed.password);
+    decodeURIComponent(parsed.password);
   } catch {
     throw new Error("DATABASE_URL contains an invalid encoded password.");
   }
@@ -208,8 +200,7 @@ export function validateProductionSecrets(env: NodeJS.ProcessEnv = process.env):
     errors.push("DATABASE_URL is required.");
   } else {
     try {
-      const password = databasePassword(databaseUrl);
-      if (password !== null) check("DATABASE_URL password", password);
+      validateDatabaseUrl(databaseUrl);
     } catch (error) {
       errors.push(error instanceof Error ? error.message : "DATABASE_URL is invalid.");
     }

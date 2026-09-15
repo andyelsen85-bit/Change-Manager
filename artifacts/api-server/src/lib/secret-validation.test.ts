@@ -62,7 +62,7 @@ describe("production secret validation", () => {
     expect(() => validateProductionSecrets({ ...env, JWT_SECRET: "too-short" })).toThrow(/JWT_SECRET/);
   });
 
-  it("checks a DATABASE_URL password but does not require POSTGRES_PASSWORD", () => {
+  it("leaves database password policy to PostgreSQL and does not require POSTGRES_PASSWORD", () => {
     const env = {
       NODE_ENV: "production",
       APP_ENCRYPTION_KEY: hexSecret(),
@@ -71,17 +71,18 @@ describe("production secret validation", () => {
       POSTGRES_PASSWORD: "",
     };
     expect(() => validateProductionSecrets(env)).not.toThrow();
-    expect(() =>
-      validateProductionSecrets({
-        ...env,
-        DATABASE_URL: "postgresql://db-user:please-change-me@managed.example/change_mgmt",
-      }),
-    ).toThrow(/DATABASE_URL password/);
-    expect(() =>
-      validateProductionSecrets({
-        ...env,
-        DATABASE_URL: "postgresql://db-user:@managed.example/change_mgmt",
-      }),
-    ).toThrow(/DATABASE_URL password/);
+    for (const password of ["x", "short-password", "please-change-me", "", "a%40b"]) {
+      expect(() =>
+        validateProductionSecrets({
+          ...env,
+          DATABASE_URL: `postgresql://db-user:${password}@managed.example/change_mgmt`,
+        }),
+      ).not.toThrow();
+    }
+    for (const url of ["", "not-a-url", "https://managed.example/db", "postgresql://user:%ZZ@managed.example/db"]) {
+      expect(() => validateProductionSecrets({ ...env, DATABASE_URL: url })).toThrow(/DATABASE_URL/);
+    }
+    expect(() => validateProductionSecrets({ ...env, SESSION_SECRET: "short" })).toThrow(/SESSION_SECRET/);
+    expect(() => validateProductionSecrets({ ...env, APP_ENCRYPTION_KEY: "short" })).toThrow(/APP_ENCRYPTION_KEY/);
   });
 });
