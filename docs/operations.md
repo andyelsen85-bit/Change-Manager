@@ -35,6 +35,12 @@ Docker image tag emitted by the workflow. It creates:
   tag; and
 - `sha-<full Git commit SHA>` for every build.
 
+The `builder` Dockerfile target produces the compatibility image name
+`change-manager-migrate` and its matching archive/artifact name. API and web
+remain `change-manager-api` and `change-manager-web`. When promoting the
+migration image to Nexus, preserve `change-manager-migrate` so existing
+Kubernetes image references do not need renaming.
+
 The owner selected downloadable archives on 2026-09-15 because no internal
 runner is available. Jobs run on GitHub-hosted `ubuntu-24.04`, targeting
 `linux/amd64`. No registry credentials or private-network access are used.
@@ -67,7 +73,7 @@ docker tag "change-manager-api:sha-$SHA" "$REGISTRY/infra/change-manager-api:sha
 docker push "$REGISTRY/infra/change-manager-api:sha-$SHA"
 ```
 
-Repeat for web (and builder if required). This is a manual promotion, not a
+Repeat for web (and migrate if required). This is a manual promotion, not a
 CI push or deployment. Verify the pushed digest and preserve immutable release
 and SHA tags; only `main` may move under the approved Nexus policy. Checksums
 detect transfer corruption, not a compromised source/run: also verify the

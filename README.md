@@ -855,7 +855,8 @@ pnpm --filter @workspace/change-mgmt run build  # vite build → dist/
 
 The multi-stage `Dockerfile` produces:
 
-- `builder` — pnpm install + typecheck + build for both API and frontend.
+- `builder` — pnpm install + typecheck + build for both API and frontend;
+  distributed as `change-manager-migrate` for existing deployment compatibility.
 - `api` — Node 24 Debian bookworm-slim + the API bundle + entrypoint.
 - `web` — Nginx Alpine + the static frontend + entrypoint.
 

@@ -42,7 +42,7 @@ docker compose -p "${PROJECT}" build --no-cache
 
 # local image name -> remote image name
 declare -A IMAGES=(
-  ["${PROJECT}-migrate"]="change-manager-builder"
+  ["${PROJECT}-migrate"]="change-manager-migrate"
   ["${PROJECT}-api"]="change-manager-api"
   ["${PROJECT}-web"]="change-manager-web"
 )
