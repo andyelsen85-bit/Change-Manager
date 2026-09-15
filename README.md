@@ -862,17 +862,19 @@ The multi-stage `Dockerfile` produces:
 
 On pushes to `main` and semantic version tags, the pinned
 [image workflow](.github/workflows/build-images.yml) builds all three
-targets on GitHub-hosted runners and exports downloadable Docker archives.
+targets on GitHub-hosted runners, publishes to GHCR, and exports downloadable Docker archives.
 It validates that API and web package
-versions match the release tag and emits `main`, the normalized version, and
+versions match the release tag and emits `latest`/`main` on main builds, the normalized release version, and
 `sha-<full commit SHA>` tags. The SHA tag is the immutable content identifier;
 release tags use canonical SemVer (`vX.Y.Z` or `X.Y.Z`, optionally with a
 valid prerelease such as `-rc.1`). SemVer build metadata (`+build`) is
 rejected with a clear validation error because `+` is not compatible with the
 Docker image tag emitted by this workflow.
 Download the artifacts from the successful Actions run within seven days,
-verify their checksums, and load them with `docker load`. CI does not push
-to a registry or require Nexus credentials. See the
+verify their checksums, and load them with `docker load`. CI publishes
+`ghcr.io/andyelsen85-bit/change-manager-{migrate,api,web}` with its built-in
+GitHub token; private packages require authenticated pulls. No Nexus
+credentials are needed in CI. See the
 [operations runbook](docs/operations.md) for loading and optional internal
 Nexus promotion instructions. Configure Nexus to reject overwrites for
 release and SHA tags when manually promoting images.

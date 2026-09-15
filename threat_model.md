@@ -38,7 +38,10 @@ The app supports self-hosted/public deployments in addition to Replit developmen
 - **Authenticated to admin** — settings, backups, full user directory management, and audit endpoints must remain admin-only.
 - **Authenticated to governance / need-to-know roles** — change visibility is narrower than generic login for some records, and pentest data is more sensitive still, requiring explicit collaborator or `pentest_mgmt` access.
 - **Production to dev-only tooling** — mockup sandbox and development workflows are out of production scope unless separately exposed.
-- **CI to downloadable artifacts** — GitHub-hosted runners export Docker
+- **CI to GHCR and downloadable artifacts** — GitHub-hosted runners publish
+  images using job-scoped package-write tokens, without changing package
+  visibility. `latest` is mutable; immutable deployments should pin digests.
+  Private package pulls need read-only credentials. Runners also export Docker
   archives with checksums and commit metadata, retained for seven days.
   Repository/artifact access must protect builder source and dependencies.
   CI has no Nexus credentials or private-network route. Optional manual

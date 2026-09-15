@@ -12,13 +12,15 @@ The repository contains a pinned GitHub Actions workflow exporting the three
 Dockerfile targets (`builder`, `api`, and `web`) as gzip Docker archives,
 checksums, and commit metadata. On 2026-09-15 the owner selected downloadable
 artifacts instead of direct Nexus pushes because no internal runner exists.
-Jobs use GitHub-hosted Ubuntu runners and require no registry credentials.
+The owner subsequently requested GHCR `latest` publishing to preserve existing
+deployment references. Jobs use GitHub-hosted Ubuntu runners and their
+job-scoped `GITHUB_TOKEN` with package-write permission, not Nexus credentials.
 Canonical release tags are still validated against both package versions.
 Artifacts are retained for seven days; controlled long-term storage and
 optional internal Nexus promotion are operator responsibilities.
 
-Successful build/download/load and any manual Nexus promotion still require
-observed evidence. No sibling Nemesys
+Archive builds have succeeded; GHCR publishing, deployment-host pulls, image
+loading and any manual Nexus promotion need their own observed evidence. No sibling Nemesys
 workflow was available for comparison, and no claim is made that this
 workflow matches unknown CI behavior.
 

@@ -21,16 +21,16 @@ installation in the change ticket; do not put secrets in this repository.
 - TLS termination and the private Nexus CA are infrastructure responsibilities.
   Do not copy private CA material into the image or frontend.
 
-## CI downloadable images (FIX1)
+## CI GHCR publishing and downloadable images (FIX1)
 
 `.github/workflows/build-images.yml` exports the `builder`, `api`, and `web`
-Dockerfile targets as downloadable GitHub Actions artifacts on pushes to `main` and
+Dockerfile targets to GHCR and as downloadable GitHub Actions artifacts on pushes to `main` and
 on canonical semantic version tags (`vX.Y.Z` or `X.Y.Z`, with an optional
 valid prerelease such as `-rc.1`). SemVer build metadata (`+build`) is
 rejected with a clear validation error because `+` is not compatible with the
 Docker image tag emitted by the workflow. It creates:
 
-- `main` for the moving main-branch channel;
+- `latest` and `main` for the moving main-branch channel;
 - the normalized release version (for example `2.3.4`) for a validated version
   tag; and
 - `sha-<full Git commit SHA>` for every build.
@@ -41,13 +41,31 @@ remain `change-manager-api` and `change-manager-web`. When promoting the
 migration image to Nexus, preserve `change-manager-migrate` so existing
 Kubernetes image references do not need renaming.
 
-The owner selected downloadable archives on 2026-09-15 because no internal
-runner is available. Jobs run on GitHub-hosted `ubuntu-24.04`, targeting
-`linux/amd64`. No registry credentials or private-network access are used.
+The owner subsequently requested GHCR `latest` publishing on 2026-09-15 to
+preserve existing deployment image references. Downloadable archives remain
+available. Jobs run on GitHub-hosted `ubuntu-24.04`, targeting `linux/amd64`.
+GHCR login uses the job-scoped `GITHUB_TOKEN` with `packages: write`; no PAT
+or private-network access is needed by CI.
 `RUNNER_LABEL`, `CONTAINER_REGISTRY`, and Nexus Actions secrets are no longer
 used by this workflow. New runs supersede obsolete runs on the same ref.
 
-In GitHub, open **Actions → Build downloadable container images → successful
+After a successful main build, the exact pull commands are:
+
+```bash
+docker pull ghcr.io/andyelsen85-bit/change-manager-migrate:latest
+docker pull ghcr.io/andyelsen85-bit/change-manager-api:latest
+docker pull ghcr.io/andyelsen85-bit/change-manager-web:latest
+```
+
+The workflow does not change package visibility. For private packages, log in
+with `docker login ghcr.io -u YOUR_GITHUB_USERNAME` and enter a classic PAT
+with `read:packages` at its password prompt. Kubernetes also needs an
+appropriate image pull secret. Existing GHCR packages must grant this
+repository Actions write access if automatic inheritance is not enabled.
+`latest` is a moving tag, not a rollout trigger; follow the existing deployment
+process to pull/restart workloads. Use full SHA tags for reproducible rollbacks.
+
+In GitHub, open **Actions → Build and publish container images → successful
 run → Artifacts**. Download the required target ZIPs and extract each into its
 own directory. Each contains a `.tar.gz`, `SHA256SUMS`, and `BUILD-INFO.txt`.
 Artifacts expire after **7 days**; archive approved releases in your controlled
@@ -69,7 +87,7 @@ trust store, optionally copy it to the existing destination:
 SHA=REPLACE_WITH_FULL_COMMIT_FROM_BUILD_INFO
 REGISTRY=srvnexusint.hopital.chdn.lan:6443
 docker login "$REGISTRY"  # interactive; do not put a password in arguments
-docker tag "change-manager-api:sha-$SHA" "$REGISTRY/infra/change-manager-api:sha-$SHA"
+docker tag "ghcr.io/andyelsen85-bit/change-manager-api:sha-$SHA" "$REGISTRY/infra/change-manager-api:sha-$SHA"
 docker push "$REGISTRY/infra/change-manager-api:sha-$SHA"
 ```
 
