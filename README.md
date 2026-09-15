@@ -856,7 +856,7 @@ pnpm --filter @workspace/change-mgmt run build  # vite build → dist/
 The multi-stage `Dockerfile` produces:
 
 - `builder` — pnpm install + typecheck + build for both API and frontend;
-  distributed as `change-manager-migrate` for existing deployment compatibility.
+  distributed as `change-manager-builder`.
 - `api` — Node 24 Debian bookworm-slim + the API bundle + entrypoint.
 - `web` — Nginx Alpine + the static frontend + entrypoint.
 
@@ -872,7 +872,7 @@ rejected with a clear validation error because `+` is not compatible with the
 Docker image tag emitted by this workflow.
 Download the artifacts from the successful Actions run within seven days,
 verify their checksums, and load them with `docker load`. CI publishes
-`ghcr.io/andyelsen85-bit/change-manager-{migrate,api,web}` with its built-in
+`ghcr.io/andyelsen85-bit/change-manager-{builder,api,web}` with its built-in
 GitHub token; private packages require authenticated pulls. No Nexus
 credentials are needed in CI. See the
 [operations runbook](docs/operations.md) for loading and optional internal

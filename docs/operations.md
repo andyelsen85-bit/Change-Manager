@@ -31,15 +31,14 @@ rejected with a clear validation error because `+` is not compatible with the
 Docker image tag emitted by the workflow. It creates:
 
 - `latest` and `main` for the moving main-branch channel;
-- the normalized release version (for example `2.3.4`) for a validated version
+- the normalized release version (for example `2.4.0`) for a validated version
   tag; and
 - `sha-<full Git commit SHA>` for every build.
 
-The `builder` Dockerfile target produces the compatibility image name
-`change-manager-migrate` and its matching archive/artifact name. API and web
-remain `change-manager-api` and `change-manager-web`. When promoting the
-migration image to Nexus, preserve `change-manager-migrate` so existing
-Kubernetes image references do not need renaming.
+The `builder` Dockerfile target produces `change-manager-builder` and its
+matching archive/artifact name. API and web remain `change-manager-api` and
+`change-manager-web`. The local Compose migration service still uses the
+builder target; its service name is not the registry image name.
 
 The owner subsequently requested GHCR `latest` publishing on 2026-09-15 to
 preserve existing deployment image references. Downloadable archives remain
@@ -52,7 +51,7 @@ used by this workflow. New runs supersede obsolete runs on the same ref.
 After a successful main build, the exact pull commands are:
 
 ```bash
-docker pull ghcr.io/andyelsen85-bit/change-manager-migrate:latest
+docker pull ghcr.io/andyelsen85-bit/change-manager-builder:latest
 docker pull ghcr.io/andyelsen85-bit/change-manager-api:latest
 docker pull ghcr.io/andyelsen85-bit/change-manager-web:latest
 ```
@@ -91,7 +90,7 @@ docker tag "ghcr.io/andyelsen85-bit/change-manager-api:sha-$SHA" "$REGISTRY/infr
 docker push "$REGISTRY/infra/change-manager-api:sha-$SHA"
 ```
 
-Repeat for web (and migrate if required). This is a manual promotion, not a
+Repeat for web (and builder if required). This is a manual promotion, not a
 CI push or deployment. Verify the pushed digest and preserve immutable release
 and SHA tags; only `main` may move under the approved Nexus policy. Checksums
 detect transfer corruption, not a compromised source/run: also verify the

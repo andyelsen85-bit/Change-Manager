@@ -95,7 +95,7 @@ jobs:
       matrix:
         include:
           - target: builder
-            image: migrate
+            image: builder
           - target: api
             image: api
           - target: web
