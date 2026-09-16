@@ -77,6 +77,23 @@ describe("error hygiene", () => {
     }
   });
 
+  it.each(["22P02", "42P01", "23503", "42501"])("preserves SQLSTATE %s without logging database values", (code) => {
+    const priorNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const error = Object.assign(new Error("invalid JSON: confidential backup content"), {
+        code,
+        detail: "confidential row values",
+        query: "INSERT containing confidential values",
+      });
+      expect(errorSerializer(error)).toEqual({ name: "Error", code });
+      expect(errorSerializer({ code: "22P02 confidential" })).toEqual({ name: "Error" });
+    } finally {
+      if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = priorNodeEnv;
+    }
+  });
+
   it("does not echo arbitrary backup version input in validation errors", async () => {
     const attackerValue = "not-a-version; password=backup-secret";
     let thrown: unknown;

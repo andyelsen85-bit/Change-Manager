@@ -113,11 +113,43 @@ describeIsolated("backup restore PostgreSQL round trip", () => {
         );
       }
 
+      // LIKE INCLUDING ALL does not copy triggers. Recreate all three
+      // production audit immutability triggers in the isolated schema so a
+      // successful restore is checked for append-only behavior and a failed
+      // restore cannot leave the trigger disabled.
+      await client.query(
+        `CREATE FUNCTION ${quoteIdentifier(schema)}.${quoteIdentifier("audit_log_block_modifications")}()
+         RETURNS trigger AS $$
+         BEGIN
+           RAISE EXCEPTION 'audit_log is append-only: % operations are not permitted', TG_OP
+             USING ERRCODE = '0A000';
+         END;
+         $$ LANGUAGE plpgsql`,
+      );
+      await client.query(
+        `CREATE TRIGGER ${quoteIdentifier("audit_log_no_update")}
+           BEFORE UPDATE ON ${quoteIdentifier(schema)}.${quoteIdentifier("audit_log")}
+           FOR EACH ROW EXECUTE FUNCTION ${quoteIdentifier(schema)}.${quoteIdentifier("audit_log_block_modifications")}()`,
+      );
+      await client.query(
+        `CREATE TRIGGER ${quoteIdentifier("audit_log_no_delete")}
+           BEFORE DELETE ON ${quoteIdentifier(schema)}.${quoteIdentifier("audit_log")}
+           FOR EACH ROW EXECUTE FUNCTION ${quoteIdentifier(schema)}.${quoteIdentifier("audit_log_block_modifications")}()`,
+      );
+      await client.query(
+        `CREATE TRIGGER ${quoteIdentifier("audit_log_no_truncate")}
+           BEFORE TRUNCATE ON ${quoteIdentifier(schema)}.${quoteIdentifier("audit_log")}
+           FOR EACH STATEMENT EXECUTE FUNCTION ${quoteIdentifier(schema)}.${quoteIdentifier("audit_log_block_modifications")}()`,
+      );
+
       await client.query(
         "INSERT INTO users (id, username, email, full_name, password_hash) VALUES (1, 'backup-user', 'backup@example.test', 'Backup User', 'not-used')",
       );
       await client.query(
         "INSERT INTO change_requests (id, ref, title, track, owner_id) VALUES (1, 'CHG-ROUNDTRIP', 'Round-trip change', 'normal', 1)",
+      );
+      await client.query(
+        "INSERT INTO change_requests (id, ref, title, track, owner_id, parent_change_id) VALUES (2, 'CHG-CHILD', 'Child change', 'normal', 1, 1)",
       );
       await client.query(
         "INSERT INTO cab_meetings (id, title, scheduled_start, scheduled_end) VALUES (1, 'CAB', now(), now() + interval '1 hour')",
@@ -137,6 +169,34 @@ describeIsolated("backup restore PostgreSQL round trip", () => {
       );
       await client.query("INSERT INTO template_settings (key, promotion_threshold) VALUES ('global', 7)");
       await client.query("INSERT INTO discussion_reads (user_id, change_id) VALUES (1, 1)");
+      await client.query(
+        `INSERT INTO test_records
+           (change_id, kind, test_plan, environment, overall_result, notes, cases)
+         VALUES
+           (1, 'production', 'Nested JSON test', 'isolated', 'pending', '', $1::jsonb),
+           (2, 'production', 'Empty JSON test', 'isolated', 'pending', '', $2::jsonb)`,
+        [
+          JSON.stringify([
+            {
+              name: "nested",
+              steps: "run nested fixture",
+              expectedResult: "pass",
+              actualResult: "",
+              status: "pending",
+              details: { owner: "test", values: [1, { enabled: true }] },
+            },
+          ]),
+          JSON.stringify([]),
+        ],
+      );
+      await client.query(
+        `INSERT INTO audit_log
+           (actor_id, actor_name, action, entity_type, entity_id, summary, before, after)
+         VALUES
+           (1, 'Backup User', 'backup.json-regression', 'change', 1, 'JSON primitives', $1::jsonb, $2::jsonb),
+           (1, 'Backup User', 'backup.sql-null', 'change', 1, 'SQL NULL', NULL, NULL)`,
+        [JSON.stringify("before primitive"), JSON.stringify("after primitive")],
+      );
       client.release();
       clientReleased = true;
 
@@ -155,6 +215,46 @@ describeIsolated("backup restore PostgreSQL round trip", () => {
       ]) {
         expect(exported.tables[table]).toHaveLength(1);
       }
+      expect(exported.tables.test_records).toHaveLength(2);
+      expect(exported.tables.test_records.map((row: Record<string, unknown>) => row.cases)).toEqual(
+        expect.arrayContaining([
+          [
+            {
+              name: "nested",
+              steps: "run nested fixture",
+              expectedResult: "pass",
+              actualResult: "",
+              status: "pending",
+              details: { owner: "test", values: [1, { enabled: true }] },
+            },
+          ],
+          [],
+        ]),
+      );
+      const exportedAuditRows = exported.tables.audit_log.filter(
+        (row: Record<string, unknown>) =>
+          row.action === "backup.json-regression" || row.action === "backup.sql-null",
+      );
+      expect(exportedAuditRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            before: "before primitive",
+            after: "after primitive",
+          }),
+          expect.objectContaining({ before: null, after: null }),
+        ]),
+      );
+
+      // Keep a child-before-parent payload ordering as a regression fixture;
+      // the checked-in schema has no self-FK, so this ordering is harmless.
+      const parentAndChild = exported.tables.change_requests.filter(
+        (row: Record<string, unknown>) => row.id === 1 || row.id === 2,
+      );
+      expect(parentAndChild).toHaveLength(2);
+      exported.tables.change_requests = [
+        parentAndChild.find((row: Record<string, unknown>) => row.id === 2)!,
+        parentAndChild.find((row: Record<string, unknown>) => row.id === 1)!,
+      ];
 
       const mutationClient = await pool.connect();
       try {
@@ -163,8 +263,35 @@ describeIsolated("backup restore PostgreSQL round trip", () => {
         await mutationClient.query(
           "INSERT INTO adfs_auth_transactions (state_hash, config_fingerprint, expires_at) VALUES ('stale', 'stale', now() + interval '1 hour')",
         );
+        await mutationClient.query(
+          "INSERT INTO audit_log (action, entity_type, summary) VALUES ('backup.restore-sentinel', 'system', 'must survive failed restore')",
+        );
       } finally {
         mutationClient.release();
+      }
+
+      const invalidRestore = JSON.parse(JSON.stringify(exported));
+      const invalidAttachment = invalidRestore.tables.attachments.find(
+        (row: Record<string, unknown>) => row.id === 1,
+      )!;
+      invalidAttachment.data = {
+        __change_it_backup_encoding: "bytea",
+        base64: "!!!",
+      };
+      await expect(importAll(invalidRestore)).rejects.toThrow(/invalid bytea value/);
+
+      const failedRestoreVerification = await pool.connect();
+      try {
+        const preservedIssuer = await failedRestoreVerification.query(
+          "SELECT issuer FROM adfs_settings WHERE key = 'global'",
+        );
+        expect(preservedIssuer.rows[0]?.issuer).toBe("https://mutated.example.test");
+        const preservedAudit = await failedRestoreVerification.query(
+          "SELECT action FROM audit_log WHERE action = 'backup.restore-sentinel'",
+        );
+        expect(preservedAudit.rows).toHaveLength(1);
+      } finally {
+        failedRestoreVerification.release();
       }
 
       await importAll(exported);
@@ -176,6 +303,29 @@ describeIsolated("backup restore PostgreSQL round trip", () => {
       ]) {
         expect(restored.tables[table]).toEqual(exported.tables[table]);
       }
+      expect(restored.tables.test_records).toEqual(exported.tables.test_records);
+      expect(
+        restored.tables.change_requests.map((row: Record<string, unknown>) => ({
+          id: row.id,
+          parent_change_id: row.parent_change_id,
+        })),
+      ).toEqual(
+        expect.arrayContaining([
+          { id: 1, parent_change_id: null },
+          { id: 2, parent_change_id: 1 },
+        ]),
+      );
+      expect(
+        restored.tables.audit_log.filter(
+          (row: Record<string, unknown>) =>
+            row.action === "backup.json-regression" || row.action === "backup.sql-null",
+        ),
+      ).toEqual(
+        exported.tables.audit_log.filter(
+          (row: Record<string, unknown>) =>
+            row.action === "backup.json-regression" || row.action === "backup.sql-null",
+        ),
+      );
 
       const verificationClient = await pool.connect();
       try {
@@ -187,6 +337,31 @@ describeIsolated("backup restore PostgreSQL round trip", () => {
           "SELECT count(*)::integer AS count FROM adfs_auth_transactions",
         );
         expect(staleTransactions.rows[0]?.count).toBe(0);
+
+        const auditJson = await verificationClient.query(
+          "SELECT before, after FROM audit_log WHERE action = 'backup.json-regression'",
+        );
+        expect(auditJson.rows[0]?.before).toBe("before primitive");
+        expect(auditJson.rows[0]?.after).toBe("after primitive");
+        const auditNull = await verificationClient.query(
+          "SELECT before, after FROM audit_log WHERE action = 'backup.sql-null'",
+        );
+        expect(auditNull.rows[0]?.before).toBeNull();
+        expect(auditNull.rows[0]?.after).toBeNull();
+
+        await verificationClient.query("BEGIN");
+        await expect(
+          verificationClient.query(
+            "UPDATE audit_log SET summary = 'tampered' WHERE action = 'backup.json-regression'",
+          ),
+        ).rejects.toThrow(/append-only/);
+        await verificationClient.query("ROLLBACK");
+
+        await verificationClient.query("BEGIN");
+        await expect(
+          verificationClient.query("DELETE FROM audit_log WHERE action = 'backup.json-regression'"),
+        ).rejects.toThrow(/append-only/);
+        await verificationClient.query("ROLLBACK");
       } finally {
         verificationClient.release();
       }

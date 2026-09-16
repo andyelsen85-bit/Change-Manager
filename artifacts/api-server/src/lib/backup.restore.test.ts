@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const query = vi.fn();
 const release = vi.fn();
 const connect = vi.fn();
+const loggerError = vi.hoisted(() => vi.fn());
 const client = { query, release };
 
 vi.mock("@workspace/db", () => ({
   pool: { connect },
 }));
 vi.mock("./logger", () => ({
-  logger: { error: vi.fn() },
+  logger: { error: loggerError },
 }));
 
 const { BACKUP_VERSION, exportAll, importAll, TABLES } = await import("./backup");
@@ -32,6 +33,7 @@ describe("backup restore session invalidation", () => {
   beforeEach(() => {
     query.mockReset();
     release.mockReset();
+    loggerError.mockReset();
     connect.mockReset().mockResolvedValue(client);
     query.mockImplementation(async (sql: string) => {
       if (sql.startsWith("SELECT table_name") || sql.startsWith("SELECT c.table_name")) {
@@ -188,6 +190,69 @@ describe("backup restore session invalidation", () => {
     }
   });
 
+  it("serializes JSON values for PostgreSQL, preserves SQL NULL and native arrays, and accepts nullable bytea", async () => {
+    const inserts: Array<{ table: string; values: unknown[] }> = [];
+    query.mockImplementation(async (sql: string, values?: unknown[]) => {
+      if (sql.startsWith("SELECT table_name")) {
+        return {
+          rows: [
+            { table_name: "users", column_name: "id", data_type: "integer" },
+            { table_name: "users", column_name: "native_array", data_type: "ARRAY" },
+            { table_name: "users", column_name: "session_generation", data_type: "integer" },
+            { table_name: "attachments", column_name: "id", data_type: "integer" },
+            { table_name: "attachments", column_name: "data", data_type: "bytea" },
+            { table_name: "test_records", column_name: "change_id", data_type: "integer" },
+            { table_name: "test_records", column_name: "kind", data_type: "text" },
+            { table_name: "test_records", column_name: "cases", data_type: "jsonb" },
+            { table_name: "audit_log", column_name: "id", data_type: "integer" },
+            { table_name: "audit_log", column_name: "action", data_type: "text" },
+            { table_name: "audit_log", column_name: "entity_type", data_type: "text" },
+            { table_name: "audit_log", column_name: "before", data_type: "jsonb" },
+            { table_name: "audit_log", column_name: "after", data_type: "jsonb" },
+          ],
+        };
+      }
+      const insert = /^INSERT INTO (\w+)/.exec(sql)?.[1];
+      if (insert) inserts.push({ table: insert, values: values ?? [] });
+      return { rows: [] };
+    });
+
+    await importAll(
+      validPayload({
+        users: [{ id: 7, native_array: ["first", "second"] }],
+        attachments: [{ id: 9, data: null }],
+        test_records: [
+          {
+            change_id: 7,
+            kind: "production",
+            cases: [{ name: "nested", steps: "step", expectedResult: "pass", actualResult: "", status: "pending" }],
+          },
+          { change_id: 7, kind: "preprod", cases: [] },
+        ],
+        audit_log: [
+          { id: 11, action: "json-string", entity_type: "change", before: "before primitive", after: "after primitive" },
+          { id: 12, action: "sql-null", entity_type: "change", before: null, after: null },
+        ],
+      }),
+    );
+
+    expect(inserts.find((insert) => insert.table === "users")?.values).toEqual([
+      7,
+      ["first", "second"],
+      0,
+    ]);
+    expect(inserts.find((insert) => insert.table === "attachments")?.values).toEqual([9, null]);
+    const testRecordInserts = inserts.filter((insert) => insert.table === "test_records");
+    expect(testRecordInserts[0]?.values).toContain(
+      JSON.stringify([{ name: "nested", steps: "step", expectedResult: "pass", actualResult: "", status: "pending" }]),
+    );
+    expect(testRecordInserts[1]?.values).toContain("[]");
+    const auditInserts = inserts.filter((insert) => insert.table === "audit_log");
+    expect(auditInserts[0]?.values).toContain(JSON.stringify("before primitive"));
+    expect(auditInserts[0]?.values).toContain(JSON.stringify("after primitive"));
+    expect(auditInserts[1]?.values).toContain(null);
+  });
+
   it("ignores forged generations and assigns every restored user a barrier above the old maximum", async () => {
     const userInserts: Array<{ sql: string; values: unknown[] }> = [];
     query.mockImplementation(async (sql: string, values?: unknown[]) => {
@@ -265,6 +330,10 @@ describe("backup restore session invalidation", () => {
     expect(statements).toContain("ROLLBACK");
     expect(statements).toContain("ALTER TABLE audit_log ENABLE TRIGGER USER");
     expect(statements).not.toContain("COMMIT");
+    expect(loggerError).toHaveBeenCalledWith(
+      { restorePhase: "wipe", restoreTable: "users", restoreIndex: 1 },
+      "Backup restore failed; transaction rolled back",
+    );
     expect(release).toHaveBeenCalledOnce();
   });
 });

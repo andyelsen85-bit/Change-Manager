@@ -20,7 +20,7 @@ const PEM_BODY_RE =
 const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const SAFE_ERROR_NAME_RE = /^(?:Error|TypeError|SyntaxError|[A-Z][A-Za-z0-9]+Error)$/;
 const SAFE_ERROR_CODE_RE =
-  /^(?:\d{1,5}|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|UND_ERR_[A-Z_]+|[A-Z][A-Za-z0-9]+Error|entity\.(?:too\.large|parse\.failed))$/;
+  /^(?:[0-9A-Z]{5}|\d{1,5}|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|UND_ERR_[A-Z_]+|[A-Z][A-Za-z0-9]+Error|entity\.(?:too\.large|parse\.failed))$/;
 
 function redactAssignedValue(prefix: string, value: string): string {
   const quote = value[0];

@@ -107,7 +107,10 @@ function exportValue(value: unknown): unknown {
   return value;
 }
 
-function importBytea(value: unknown, table: string, column: string): Buffer {
+function importBytea(value: unknown, table: string, column: string): Buffer | null {
+  // A nullable bytea column is represented by SQL NULL, not by one of the
+  // JSON transport encodings below.
+  if (value === null) return null;
   if (Buffer.isBuffer(value)) return value;
   if (value && typeof value === "object") {
     const encoded = value as Record<string, unknown>;
@@ -132,6 +135,18 @@ function importBytea(value: unknown, table: string, column: string): Buffer {
     }
   }
   throw new BackupValidationError(`Backup payload has invalid bytea value for '${table}.${column}'`);
+}
+
+function importJson(value: unknown, table: string, column: string): string | null {
+  // Keep SQL NULL distinct from the JSON string "null". PostgreSQL's json
+  // parameter parser will handle the latter when it receives the serialized
+  // value.
+  if (value === null) return null;
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new BackupValidationError(`Backup payload has invalid JSON value for '${table}.${column}'`);
+  }
+  return serialized;
 }
 
 /**
@@ -279,34 +294,47 @@ export async function importAll(payload: unknown): Promise<{ restored: Record<st
   validate(payload);
   const restored: Record<string, number> = {};
   const client = await pool.connect();
+  let restorePhase = "begin";
+  let restoreTable: string | undefined;
+  let restoreIndex: number | undefined;
   try {
     await client.query("BEGIN");
+    restorePhase = "derive-session-generation";
     const restoreSessionGeneration = await deriveRestoreSessionGeneration(client);
     // Session rows contain numeric user IDs. If they survived a restore, a
     // cookie from before the restore could authenticate as the user now
     // occupying the same ID in the imported dataset. Clear both operational
     // stores in this transaction, before any user rows are replaced.
+    restorePhase = "invalidate-operational-state";
     for (const table of RESTORE_INVALIDATION_TABLES) {
       await client.query(`DELETE FROM ${table}`);
     }
     await client.query("ALTER TABLE audit_log DISABLE TRIGGER USER");
 
     // Wipe in reverse FK order.
+    restorePhase = "wipe";
     for (let i = TABLES.length - 1; i >= 0; i--) {
+      restoreTable = TABLES[i];
+      restoreIndex = i;
       await client.query(`DELETE FROM ${TABLES[i]}`);
     }
 
+    restorePhase = "load-schema";
     const liveCols = await loadLiveColumns(client);
     const userRows = (payload.tables.users ?? []) as Array<Record<string, unknown>>;
     if (userRows.length > 0 && !liveCols.users?.has("session_generation")) {
       throw new Error("Cannot restore backup: users.session_generation column is unavailable");
     }
 
+    restorePhase = "insert";
     for (const t of TABLES) {
+      restoreTable = t;
       const rows = (payload.tables[t] ?? []) as Array<Record<string, unknown>>;
       restored[t] = rows.length;
       const allowed = liveCols[t] ?? new Map<string, string>();
-      for (const row of rows) {
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        restoreIndex = rowIndex;
+        const row = rows[rowIndex];
         // Drop any column from the backup that the live schema no longer
         // recognises (e.g. legacy `in_app_enabled`). This keeps older
         // backups importable across schema migrations.
@@ -325,20 +353,27 @@ export async function importAll(payload: unknown): Promise<{ restored: Record<st
             ? restoreSessionGeneration
             : allowed.get(c) === "bytea"
               ? importBytea(row[c], t, c)
-              : row[c],
+              : allowed.get(c) === "json" || allowed.get(c) === "jsonb"
+                ? importJson(row[c], t, c)
+                : row[c],
         );
         await client.query(`INSERT INTO ${t} (${colList}) VALUES (${placeholders})`, values);
       }
     }
 
+    restorePhase = "reset-sequences";
     await resetAllSequences(client);
 
+    restorePhase = "enable-audit-trigger";
     await client.query("ALTER TABLE audit_log ENABLE TRIGGER USER");
     await client.query("COMMIT");
   } catch (err) {
     await client.query("ROLLBACK").catch(() => undefined);
     await client.query("ALTER TABLE audit_log ENABLE TRIGGER USER").catch(() => undefined);
-    logger.error({ err }, "Backup restore failed; transaction rolled back");
+    logger.error(
+      { restorePhase, restoreTable, restoreIndex },
+      "Backup restore failed; transaction rolled back",
+    );
     throw err;
   } finally {
     client.release();
