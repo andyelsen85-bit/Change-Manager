@@ -43,6 +43,14 @@ webhooks, idempotency, status mapping and write-back.
 Statuses describe this remediation's source and test scope, not a claim that
 an operator has restored a production backup or completed a portfolio audit.
 
+Verification: 18 local focused tests passed (the opt-in database test was
+not run against development data), API typecheck passed, and the API restarted
+cleanly. CI then passed all **16 backup tests**, including the real PostgreSQL
+round-trip with cloned foreign keys, and published all three images:
+[successful workflow](https://github.com/andyelsen85-bit/Change-Manager/actions/runs/35082623242).
+Review's unsupported fractional-version finding was fixed and tested before
+this run; invalid versions fail before acquiring a database connection.
+
 | Item | Status | Evidence / boundary |
 | --- | --- | --- |
 | Six missing persistent tables | Passed | Included in export/restore inventory; row coverage tests. |
@@ -50,7 +58,7 @@ an operator has restored a production backup or completed a portfolio audit.
 | Binary attachment transport | Passed | Explicit encoding/decoding with legacy support; JSON round-trip tests. |
 | New-backup completeness / old-backup compatibility | Passed | Format 3 requires the full inventory; formats 1/2 retain legacy omissions. |
 | Schema drift prevention | Passed | Actual Drizzle export introspection; mandatory CI dependency before image publishing. |
-| Isolated PostgreSQL restore | Partially Passed | Automated disposable-database test added; retain a successful CI execution before claiming verified database round-trip. |
+| Isolated PostgreSQL restore | Passed | Disposable PostgreSQL CI round-trip passed for all six added tables, binary bytes, real foreign keys and stale OIDC invalidation. No production/development dataset restored. |
 | README backup claim | Passed | Inventory count/source and deliberate exclusions documented. |
 | README CORS description | Passed | Both stale references replaced; explicit allowlist bullet added. |
 | ServiceDesk Plus documentation | Passed | Configuration, webhook security and synchronization documented from source. |
