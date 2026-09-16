@@ -1,10 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getTableName } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
 import * as schema from "@workspace/db/schema";
 import { BACKUP_EXCLUDED_TABLES, TABLES, TABLES_OPTIONAL } from "./backup";
 
 describe("backup schema coverage", () => {
+  it("preserves bootstrap-managed security tables during schema pushes", async () => {
+    // Load the separate DB package's tooling config at runtime; it is not
+    // part of the API's TypeScript build.
+    const { default: migrationConfig } = await vi.importActual<{
+      default: { tablesFilter?: string | string[] };
+    }>("../../../../lib/db/drizzle.config");
+    const schemaTables = Object.values(schema)
+      .filter((value) => value instanceof PgTable)
+      .map((table) => getTableName(table as PgTable));
+    const bootstrapTables = BACKUP_EXCLUDED_TABLES.filter((table) => !schemaTables.includes(table));
+    // Keep this exact: no wildcard may hide ordinary schema changes, and
+    // Drizzle-managed adfs_auth_transactions must not be excluded from pushes.
+    expect(migrationConfig.tablesFilter).toEqual(bootstrapTables.map((table) => `!${table}`));
+  });
+
   it("accounts for every exported Drizzle PostgreSQL table", () => {
     // Schema exports, not a hand-maintained table list, are the source of
     // truth. Adding a pgTable export without updating backup policy fails here.

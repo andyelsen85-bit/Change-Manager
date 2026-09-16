@@ -18,3 +18,14 @@ success cleanup, multiple lock cycles, aggregate-window rollover and concurrent
 admission with scoped temporary keys. Treat backup restore and password reset
 as session-revocation events, including logins already in flight. Never run a
 restore against the shared development dataset merely to test these rules.
+
+Ephemeral authentication state must survive routine upgrades even when it is
+deliberately excluded from backups.
+
+**Why:** Backup restoration is an intentional revocation boundary; an ordinary
+schema push is not. Treating bootstrap-owned tables as obsolete can erase
+active sessions and lockout state during deployment.
+
+**How to apply:** Keep migration ownership separate from backup policy. Protect
+bootstrap-managed tables from schema reconciliation, but do not exempt
+schema-managed OIDC tables merely because their rows are excluded from backups.

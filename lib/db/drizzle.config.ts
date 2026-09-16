@@ -8,6 +8,9 @@ if (!process.env.DATABASE_URL) {
 export default defineConfig({
   schema: path.join(__dirname, "./src/schema/index.ts"),
   dialect: "postgresql",
+  // Created/maintained by API bootstrap, not Drizzle. Without these exclusions,
+  // push treats active sessions and login-throttle state as obsolete tables.
+  tablesFilter: ["!user_sessions", "!auth_login_throttle"],
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
