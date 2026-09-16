@@ -36,6 +36,7 @@ the [operations runbook](docs/operations.md), the
 - [Authentication, sessions &amp; CSRF](#authentication-sessions--csrf)
 - [AD FS / OIDC authentication](docs/adfs.md)
 - [LDAP integration](#ldap-integration)
+- [ServiceDesk Plus integration](#servicedesk-plus-integration)
 - [Email &amp; ICS notifications](#email--ics-notifications)
 - [TLS / SSL](#tls--ssl)
 - [Backup &amp; restore](#backup--restore)
@@ -112,8 +113,11 @@ but not required to reach the Post-Implementation Review phase.
   & lockout timeouts, Backup & Restore.
 - **Immutable audit log** — JSONB before/after snapshots, IP + user agent,
   CSV export, DB-level triggers prevent UPDATE / DELETE / TRUNCATE.
-- **Backup & Restore** — single-file JSON dump of every table, restored
-  inside one transaction with FK-safe ordering and automatic sequence reset.
+- **Backup & Restore** — single-file JSON dump of the persistent application-data
+  inventory declared by `TABLES` in [`artifacts/api-server/src/lib/backup.ts`](artifacts/api-server/src/lib/backup.ts),
+  restored inside one transaction with FK-safe ordering and automatic sequence
+  reset. Ephemeral sessions, login-throttle state, and one-time AD FS
+  authentication transactions are intentionally excluded.
 
 ### Penetration-testing engagements
 
@@ -381,6 +385,7 @@ single source of truth for tables and types. The core tables are:
 | `smtp_settings`             | Singleton SMTP configuration (password encrypted at rest)       |
 | `ldap_settings`             | Singleton LDAP configuration (bind password encrypted)          |
 | `ssl_settings`              | Stored cert/key + CSR private key                               |
+| `sdp_settings`              | Singleton ServiceDesk Plus endpoint, credentials and webhook configuration |
 
 ---
 
@@ -551,6 +556,72 @@ mismatches (e.g. connecting by IP).
 
 ---
 
+## ServiceDesk Plus integration
+
+The optional ManageEngine **ServiceDesk Plus (on-premises)** integration links
+RFC tickets to Change-it changes. It is configured by an administrator in
+Settings → ServiceDesk Plus (or through the admin-only `/api/settings/sdp`
+endpoints) and is stored in the singleton `sdp_settings` row:
+
+- Set the SD+ base URL and a technician API key. The key is encrypted at rest;
+  outbound calls use SD+'s static `technician_key` header and its v3
+  form-encoded `input_data` JSON payload. Use **Test connection** before
+  enabling the integration. `APP_BASE_URL` may be set when deployed behind a
+  public alias so links written back to tickets use the correct Change-it URL.
+- Set the optional **status on change creation** (default
+  `Waiting for Change-it`). That status must exist in SD+ under
+  Admin → Helpdesk Customizer → Request Status with the exact same name;
+  leaving it empty disables the on-create status update. The self-signed
+  certificate option is available for internal SD+ servers, but disabling TLS
+  verification is an explicit operational trade-off.
+
+### Inbound webhook and security
+
+A technician uses an SD+ custom trigger to call
+`POST /api/integrations/sdp/create-change` with the request ID, subject,
+description, requester/technician email, `change_type` (`normal`, `standard`,
+or `emergency`; `urgent`/`urgency` are accepted aliases), and an optional
+standard-template name. The endpoint accepts the snake_case names commonly
+sent by SD+ (and their camelCase equivalents), and converts SD+ rich-text
+descriptions to plain text before storing them.
+
+The trigger must send the shared secret in the **`X-Webhook-Secret` header**.
+The server compares it in constant time and never accepts a query-parameter
+secret, which would expose the credential in proxy and access logs. The
+secret is generated on first save and can be rotated from Settings; rotation
+invalidates the old value immediately, so update the SD+ trigger at the same
+time. This server-to-server endpoint is exempt from browser CSRF because the
+header is its authentication boundary; it is not an unauthenticated browser
+endpoint.
+
+Webhook delivery is idempotent per active SD+ request: the database enforces
+one non-deleted change per `sdp_request_id`, and a replay returns the existing
+change rather than creating another draft. Concurrent deliveries resolve to
+the same winning row. A standard request without a matching active template
+stays a draft and must be assigned a template before it can leave draft.
+
+### Status mapping and write-back
+
+After a change is created, Change-it best-effort writes a back-link note and
+the configured on-create status to the originating ticket. When a linked
+change reaches a terminal state, the current mapping is:
+
+| Change-it outcome | ServiceDesk Plus status |
+| ----------------- | ----------------------- |
+| `completed`       | `Resolved`              |
+| `rejected`        | `Rejected`              |
+| `cancelled`       | `Cancelled`              |
+
+No `Closed` status is sent by this integration. The terminal write-back
+updates the SD+ resolution with the change link, outcome, rejection or
+cancellation note when present, and a milestone timeline assembled from the
+Change-it audit log. It is best-effort: a provider failure is logged and
+audited as a sync failure without blocking the Change-it workflow. Both the
+terminal transition path and automatic rejection after an approval vote use
+the same write-back path.
+
+---
+
 ## Email & ICS notifications
 
 - Configured via Settings → SMTP, stored in `smtp_settings`.
@@ -627,14 +698,31 @@ Settings → **Backup & Restore** tab (admin-only).
 
 ### Export
 
-`GET /api/backup` returns a single JSON file containing every table in the
-database (users, roles, change requests, approvals, CAB meetings, comments,
-**penetration-testing engagements** — requests, test types, collaborators and
-attachments — audit log, **and** all system settings including encrypted
-SMTP/LDAP secrets). The export reads inside one
+`GET /api/backup` returns a single JSON file for the persistent application-data
+inventory declared by `TABLES` in
+[`artifacts/api-server/src/lib/backup.ts`](artifacts/api-server/src/lib/backup.ts).
+The current inventory covers **35 persistent tables out of 36 exported schema
+tables**; the additional session and throttle tables are operational bootstrap
+tables. `TABLES` remains authoritative and CI checks it against schema exports.
+It covers the persistent domain records
+(including changes, CAB data, comments, PenTest records and uploaded
+attachments), audit history, and system/integration settings including AD FS
+and ServiceDesk Plus configuration plus encrypted provider secrets where
+applicable. It is not a promise to export every physical database table. The
+explicitly excluded operational tables are
+`user_sessions` (ephemeral PostgreSQL sessions), `auth_login_throttle`
+(transient brute-force state), and `adfs_auth_transactions` (short-lived,
+expiring, single-use OIDC state/nonce transactions). The export reads inside one
 `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` transaction so the
 snapshot is logically consistent across tables even under heavy concurrent
 writes.
+
+New exports use **backup format 3**, which requires all 35 table entries.
+Formats 1 and 2 remain importable, but tables absent from those old exports
+restore empty; this fix cannot recover data that was never backed up. Create
+a fresh backup after upgrading. Binary attachment data is base64-encoded in
+the JSON and decoded back to bytes during restore. Old Node Buffer JSON
+representations remain supported for legacy backups.
 
 The JSON export is sensitive even though SMTP/LDAP values are ciphertext.
 Before it leaves the controlled host, follow the mandatory external
@@ -647,18 +735,21 @@ The download is gated by:
 1. `requireAdmin` middleware (admin-only).
 2. `requireSameOrigin` middleware that rejects any request whose `Origin`
    header doesn't match the `Host` — defence-in-depth against credentialed
-   cross-origin reads given the global permissive CORS policy.
+   cross-origin reads; the API's CORS policy separately permits only
+   same-origin/explicitly allowlisted origins.
 
 ### Restore
 
 `POST /api/backup/restore` (200 MB body limit) accepts the JSON payload from
 a prior export and runs the entire wipe + reimport in **one transaction**:
 
-1. Validate payload shape (version + every expected table present).
+1. Validate payload shape (version + every required table in the current
+   backup inventory; version-compatible optional tables may be absent from
+   older payloads).
 2. Temporarily `ALTER TABLE audit_log DISABLE TRIGGER USER` so the
    immutability triggers don't block the wipe.
-3. `DELETE FROM` every table in **reverse FK order**.
-4. `INSERT INTO` every table in **dependency order**.
+3. `DELETE FROM` every table in the backup inventory in **reverse FK order**.
+4. `INSERT INTO` every table in the backup inventory in **dependency order**.
 5. Discover every serial / identity column via `pg_catalog` and reset each
    sequence with `setval(pg_get_serial_sequence(...), MAX(id) + 1, false)`
    so future inserts can't collide with imported ids.
@@ -912,9 +1003,16 @@ Top-level pnpm scripts:
   session-ID regeneration on authentication, and central logout revocation.
 - **CSRF** — double-submit cookie required on every mutating `/api`
   request except `POST /api/auth/login`.
-- **Backup endpoints** — admin-only **and** Origin must equal Host
-  (defence-in-depth against credentialed cross-origin reads given the
-  global permissive CORS policy used by the SPA).
+- **CORS** — credentialed browser requests are allowed only when the
+  `Origin` host matches the inbound `Host`/`X-Forwarded-Host` (same-origin
+  deployment aliases) or the exact origin is in the `ALLOWED_ORIGINS` /
+  `REPLIT_DOMAINS` allowlist (with localhost origins in development).
+  Arbitrary origin reflection is never enabled; an empty production allowlist
+  denies cross-origin browser requests while same-origin and no-`Origin`
+  non-browser calls remain usable.
+- **Backup endpoints** — admin-only and Origin must equal Host when an Origin
+  is present (defence-in-depth against credentialed cross-origin reads; CORS
+  separately enforces the same-origin/explicit-allowlist policy above).
 - **Audit log** — DB-level triggers prevent UPDATE / DELETE / TRUNCATE.
 - **Postgres** — the Compose `db` service is internal-only and local/test-only
   (no `ports:` mapping); production uses CHdN's externally managed, centrally

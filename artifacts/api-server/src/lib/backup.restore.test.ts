@@ -12,43 +12,14 @@ vi.mock("./logger", () => ({
   logger: { error: vi.fn() },
 }));
 
-const { exportAll, importAll } = await import("./backup");
+const { BACKUP_VERSION, exportAll, importAll, TABLES } = await import("./backup");
 
-const TABLES = [
-  "roles",
-  "users",
-  "role_assignments",
-  "cab_meetings",
-  "cab_members",
-  "standard_templates",
-  "change_categories",
-  "change_requests",
-  "change_assignees",
-  "cab_changes",
-  "planning_records",
-  "test_records",
-  "pir_records",
-  "approvals",
-  "comments",
-  "pentest_test_types",
-  "pentest_requests",
-  "pentest_collaborators",
-  "pentest_attachments",
-  "notification_preferences",
-  "ref_counters",
-  "smtp_settings",
-  "ldap_settings",
-  "ssl_settings",
-  "notification_settings",
-  "sdp_settings",
-  "notification_queue",
-  "notification_routing_rules",
-  "audit_log",
-] as const;
-
-function validPayload(extraTables: Record<string, Array<Record<string, unknown>>> = {}) {
+function validPayload(
+  extraTables: Record<string, Array<Record<string, unknown>>> = {},
+  version = BACKUP_VERSION,
+) {
   return {
-    version: 2,
+    version,
     exportedAt: new Date(0).toISOString(),
     tables: {
       ...Object.fromEntries(TABLES.map((table) => [table, []])),
@@ -92,9 +63,10 @@ describe("backup restore session invalidation", () => {
     expect(statements[0]).toBe("BEGIN");
     expect(statements[1]).toContain("SELECT id, session_generation");
     expect(statements[1]).toContain("FOR UPDATE");
-    expect(statements.slice(2, 6)).toEqual([
+    expect(statements.slice(2, 7)).toEqual([
       "DELETE FROM user_sessions",
       "DELETE FROM auth_login_throttle",
+      "DELETE FROM adfs_auth_transactions",
       "ALTER TABLE audit_log DISABLE TRIGGER USER",
       "DELETE FROM audit_log",
     ]);
@@ -103,10 +75,117 @@ describe("backup restore session invalidation", () => {
     );
     expect(statements.some((sql) => sql.startsWith("INSERT INTO user_sessions"))).toBe(false);
     expect(statements.some((sql) => sql.startsWith("INSERT INTO auth_login_throttle"))).toBe(false);
+    expect(statements.some((sql) => sql.startsWith("INSERT INTO adfs_auth_transactions"))).toBe(false);
     expect(result.restored).not.toHaveProperty("user_sessions");
     expect(result.restored).not.toHaveProperty("auth_login_throttle");
+    expect(result.restored).not.toHaveProperty("adfs_auth_transactions");
     expect(statements).toContain("COMMIT");
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it.each([0, 4, 1.5, 2.5, NaN, Infinity])("rejects unsupported version %s before acquiring a connection", async (version) => {
+    const payload = validPayload({}, version);
+    delete payload.tables.attachments;
+    await expect(importAll(payload)).rejects.toThrow("Unsupported backup version");
+    expect(connect).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2])("requires all Round 2 tables in new backups but accepts legacy version %s", async (version) => {
+    const missingAttachments = validPayload();
+    delete missingAttachments.tables.attachments;
+    await expect(importAll(missingAttachments)).rejects.toThrow("missing rows array for table 'attachments'");
+
+    const legacy = validPayload({}, version);
+    delete legacy.tables.attachments;
+    delete legacy.tables.adfs_settings;
+    delete legacy.tables.cab_attendees;
+    delete legacy.tables.discussion_reads;
+    delete legacy.tables.external_changes;
+    delete legacy.tables.template_settings;
+    await expect(importAll(legacy)).resolves.toMatchObject({
+      restored: {
+        attachments: 0,
+        adfs_settings: 0,
+        cab_attendees: 0,
+        discussion_reads: 0,
+        external_changes: 0,
+        template_settings: 0,
+      },
+    });
+  });
+
+  it("round trips every Round 2 table and encodes bytea for JSON transport", async () => {
+    const binary = Buffer.from([0, 255, 17, 128, 66]);
+    const roundTripRows: Record<string, Record<string, unknown>> = {
+      attachments: {
+        id: 7,
+        change_id: 4,
+        filename: "evidence.bin",
+        mime_type: "application/octet-stream",
+        size: binary.length,
+        data: binary,
+        uploaded_by_id: 2,
+      },
+      adfs_settings: { key: "global", enabled: true, issuer: "https://adfs.example.test" },
+      cab_attendees: { id: 9, meeting_id: 3, user_id: 2, name: "CAB Member", email: "cab@example.test" },
+      external_changes: { id: 8, title: "Provider maintenance", start_at: new Date(0) },
+      template_settings: { key: "global", promotion_threshold: 6 },
+      discussion_reads: { user_id: 2, change_id: 4, last_read_at: new Date(0) },
+    };
+    query.mockImplementation(async (sql: string, values?: unknown[]) => {
+      const exportedTable = /^SELECT \* FROM (\w+)$/.exec(sql)?.[1];
+      if (exportedTable && roundTripRows[exportedTable]) {
+        return { rows: [roundTripRows[exportedTable]] };
+      }
+      if (sql.startsWith("SELECT table_name")) {
+        return {
+          rows: [
+            { table_name: "attachments", column_name: "id", data_type: "integer" },
+            { table_name: "attachments", column_name: "change_id", data_type: "integer" },
+            { table_name: "attachments", column_name: "filename", data_type: "text" },
+            { table_name: "attachments", column_name: "mime_type", data_type: "text" },
+            { table_name: "attachments", column_name: "size", data_type: "integer" },
+            { table_name: "attachments", column_name: "data", data_type: "bytea" },
+            { table_name: "attachments", column_name: "uploaded_by_id", data_type: "integer" },
+            { table_name: "adfs_settings", column_name: "key", data_type: "text" },
+            { table_name: "adfs_settings", column_name: "enabled", data_type: "boolean" },
+            { table_name: "adfs_settings", column_name: "issuer", data_type: "text" },
+            { table_name: "cab_attendees", column_name: "id", data_type: "integer" },
+            { table_name: "cab_attendees", column_name: "meeting_id", data_type: "integer" },
+            { table_name: "cab_attendees", column_name: "user_id", data_type: "integer" },
+            { table_name: "cab_attendees", column_name: "name", data_type: "text" },
+            { table_name: "cab_attendees", column_name: "email", data_type: "text" },
+            { table_name: "external_changes", column_name: "id", data_type: "integer" },
+            { table_name: "external_changes", column_name: "title", data_type: "text" },
+            { table_name: "external_changes", column_name: "start_at", data_type: "timestamp with time zone" },
+            { table_name: "template_settings", column_name: "key", data_type: "text" },
+            { table_name: "template_settings", column_name: "promotion_threshold", data_type: "integer" },
+            { table_name: "discussion_reads", column_name: "user_id", data_type: "integer" },
+            { table_name: "discussion_reads", column_name: "change_id", data_type: "integer" },
+            { table_name: "discussion_reads", column_name: "last_read_at", data_type: "timestamp with time zone" },
+          ],
+        };
+      }
+      if (sql.startsWith("INSERT INTO attachments")) {
+        expect(values).toContainEqual(binary);
+      }
+      return { rows: [] };
+    });
+
+    const exported = await exportAll();
+    expect(exported.tables.attachments).toEqual([
+      expect.objectContaining({
+        data: {
+          __change_it_backup_encoding: "bytea",
+          base64: binary.toString("base64"),
+        },
+      }),
+    ]);
+
+    await importAll(exported);
+    for (const table of Object.keys(roundTripRows)) {
+      expect(query.mock.calls.some(([sql]) => (sql as string).startsWith(`INSERT INTO ${table}`))).toBe(true);
+    }
   });
 
   it("ignores forged generations and assigns every restored user a barrier above the old maximum", async () => {
