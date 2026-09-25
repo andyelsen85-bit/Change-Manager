@@ -38,13 +38,40 @@ vi.mock("drizzle-orm", () => ({
   and: () => ({}),
 }));
 
-const { buildCabAgendaPdf, groupAgendaChanges } = await import("./agenda-pdf");
+const { buildCabAgendaPdf, groupAgendaChanges, normalizeAgendaText } = await import("./agenda-pdf");
+
+describe("CAB agenda text normalization", () => {
+  it.each(["\n", "\r\n", "\r"])("preserves line breaks and nested indentation for %j", (newline) => {
+    expect(normalizeAgendaText(`- parent${newline}\t- child${newline}\t\t- nested`))
+      .toBe("- parent\n    - child\n        - nested");
+  });
+
+  it("removes non-printing controls without changing printable text", () => {
+    expect(normalizeAgendaText("câbles & routeurs → PROD\u0000\u000b"))
+      .toBe("câbles & routeurs → PROD");
+  });
+});
 
 const categories = [
   { key: "platform", name: "Platform", sortOrder: 20 },
   { key: "legacy", name: "Legacy", sortOrder: 30 },
   { key: "applications", name: "Applications", sortOrder: 10 },
 ];
+
+const indentedPlan = [
+  "- assign ports 9-10 to VDOM PROD",
+  "- configure IP on ports",
+  "\t-  172.18.254.2 /30",
+  "\t-  172.18.254.6 /30",
+  "- plug cables between FW & routers",
+  "\t- FW 9 -> router 1",
+  "\t- FW 10 -> router 2",
+  "- configure OSPF",
+  "\t- add network 172.18.254.0/30",
+  "\t- add network 172.18.254.4/30",
+  "\t- add interface 172.18.254.2",
+  "\t- add interface 172.18.254.6",
+].join("\r\n");
 
 const change = (
   overrides: Partial<{
@@ -150,7 +177,7 @@ describe("CAB agenda PDF ordering", () => {
           impact: "low",
           priority: "low",
           requesterName: null,
-          description: "Unknown description",
+          description: indentedPlan,
           plannedEnd: null,
           ticketLink: null,
           sdpRequestId: null,
@@ -242,7 +269,22 @@ describe("CAB agenda PDF ordering", () => {
     const path = join(directory, "agenda.pdf");
     try {
       await writeFile(path, pdf!.content);
+      if (process.env.AGENDA_PDF_TEST_OUTPUT) {
+        await writeFile(process.env.AGENDA_PDF_TEST_OUTPUT, pdf!.content);
+      }
       const { stdout } = await execFile("pdftotext", [path, "-"]);
+      // Verify the real PDF, not only an intermediate text transformation.
+      for (const line of indentedPlan.split("\r\n")) {
+        // Text extractors collapse repeated spaces; line boundaries and
+        // indentation are checked separately from printable content.
+        expect(stdout.split("\n").map((value) => value.trim().replace(/ +/g, " ")))
+          .toContain(line.trim().replace(/ +/g, " "));
+      }
+      const { stdout: layout } = await execFile("pdftotext", ["-layout", path, "-"]);
+      const lines = layout.split("\n");
+      const parent = lines.find((line) => line.includes("- configure IP on ports"))!;
+      const child = lines.find((line) => /-\s+172\.18\.254\.2 \/30/.test(line))!;
+      expect(child.indexOf("-")).toBeGreaterThan(parent.indexOf("-"));
       const overviewOrder = [
         "Platform high change",
         "Platform low change",

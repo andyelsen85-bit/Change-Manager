@@ -198,8 +198,18 @@ function sectionTitle(doc: Doc, label: string): void {
 // Long free-text block: never truncated. pdfkit flows the text onto as many
 // pages as needed (the pageAdded handler repaints the branded header and
 // resets doc.y on every continuation page).
+export function normalizeAgendaText(value: string): string {
+  // PDFKit's standard fonts cannot encode control characters such as tabs
+  // and CR. Normalize pasted Windows text before measuring or rendering it.
+  // Keep indentation and newlines rather than collapsing all whitespace.
+  return (value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t/g, "    ")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+}
+
 function textBlock(doc: Doc, value: string): void {
-  const text = (value || "").trim() || "—";
+  const text = normalizeAgendaText(value).trim() || "—";
   doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.ink);
   doc.text(text, MARGIN, doc.y, { width: CONTENT_W, lineGap: 1.5 });
 }
@@ -207,7 +217,7 @@ function textBlock(doc: Doc, value: string): void {
 // Optional clipped variant, used only on the overview page where the docket
 // page references require page 1 content to stay bounded.
 function clippedTextBlock(doc: Doc, value: string, maxY: number): void {
-  const text = (value || "").trim() || "—";
+  const text = normalizeAgendaText(value).trim() || "—";
   doc.font("Helvetica").fontSize(9.5).fillColor(COLORS.ink);
   const available = maxY - doc.y;
   if (available <= 12) return;
